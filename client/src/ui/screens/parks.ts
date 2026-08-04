@@ -187,20 +187,11 @@ function buildHub(park: ParkDef): HTMLElement {
 
   function openCourt(court: CourtNode): void {
     const player = store.player;
+    // The training rim is the practice gym. It used to run a scored game
+    // against a nerfed bot with no practice flag, which quietly credited a
+    // career win on Rookie for beating a dummy.
     if (court.mode === 'training') {
-      const dummy = generateOpponent(60, hashString(`park-${park.id}`));
-      dummy.name = 'Training Rim';
-      dummy.attrs.perimeterDefense = 25;
-      dummy.attrs.interiorDefense = 25;
-      dummy.attrs.steal = 25;
-      dummy.attrs.block = 25;
-      startMatch({
-        opponent: dummy,
-        difficulty: 'rookie',
-        parkId: park.id,
-        playlist: 'casual',
-        config: { targetScore: 21, maxScore: 21, winBy: 1, shotClock: 60 },
-      });
+      navigate('practice');
       return;
     }
     if (court.mode === 'kotc') {

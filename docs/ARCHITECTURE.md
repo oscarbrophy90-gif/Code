@@ -48,6 +48,7 @@ shared/src/
   ratings.ts      Attribute caps from body, overall calculation, upgrade costs
   badges.ts       40 badge definitions, tier thresholds, progression events
   shooting.ts     Shot profiles, green windows, contest, make percentages
+  scouting.ts     Attributes folded into the skill groups the walkout reads out
   mmr.ts          Tiers, Elo-style updates, matchmaking bands
   economy.ts      Match rewards, level curve, store item types
   seasons.ts      Season calendar, battle pass, deterministic challenge generation
@@ -62,7 +63,9 @@ shared/src/
   data/
     teams.ts      12 original clubs with procedural crest descriptors
     parks.ts      5 parks with palettes
-    cosmetics.ts  Store catalogue
+    cosmetics.ts  Store catalogue, thirteen categories including titles
+    titles.ts     23 titles, what earns each one, the win-streak badge
+    drills.ts     Four training drills plus the shoot-around, medals, payouts
     opponents.ts  Bot generation scaled to a target overall
 ```
 
@@ -85,13 +88,14 @@ client/src/
     players.ts        Articulated player billboards, ball, shot trails
     hud.ts            Score bug, five shot-meter styles, callouts
   ui/
-    match.ts          Wires sim + render + input together
+    match.ts          Wires sim + render + input together, and runs drills
     session.ts        Applies rewards, badges, ladder and challenges after a game
+    walkout.ts        The pre-game cutscene and its procedural full-body figures
     touch.ts          Mobile controls
     portrait.ts       Procedural player portraits and team crests
     radar.ts          Attribute graphs
-    screens/          home, play, builder, myplayer, parks, season, store,
-                      stats, records, settings
+    screens/          home, play, practice, builder, myplayer, parks, season,
+                      store, accessories (Locker), stats, records, settings
   net/client.ts       Online foundation: prediction adapter, reconciliation
 ```
 

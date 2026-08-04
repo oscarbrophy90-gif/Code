@@ -90,6 +90,9 @@ export function renderMyPlayer(): HTMLElement {
   return root;
 }
 
+/** Badges with nothing to do while a miss is an automatic turnover. */
+const REBOUND_BADGES = ['boxOut', 'reboundChaser', 'putbackArtist'];
+
 // --------------------------------------------------------------- attributes
 
 function renderAttributes(): HTMLElement {
@@ -319,6 +322,13 @@ function renderBadges(): HTMLElement {
                   ),
                   gated
                     ? el('div', { class: 'hint', style: 'margin-top:14px;color:var(--amber)' }, `Raise ${ATTRIBUTE_META[def.gate].label} to keep this badge climbing.`)
+                    : null,
+                  REBOUND_BADGES.includes(def.id)
+                    ? el(
+                        'div',
+                        { class: 'hint', style: 'margin-top:10px;color:var(--amber)' },
+                        'Under 1v1 rules a miss is an instant turnover, so this badge only has work to do in the practice gym.',
+                      )
                     : null,
                   el(
                     'button',
