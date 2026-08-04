@@ -5,6 +5,7 @@ import {
   LIVE_EVENTS,
   PARKS,
   activeXpMultiplier,
+  formatHeight,
   generateOpponent,
   hashString,
   isEventLive,
@@ -71,6 +72,24 @@ export function renderPlay(_params: RouteParams): HTMLElement {
   );
 
   const rerender = () => navigate('play');
+
+  // Which build is walking out. Every mode runs the equipped one, so it belongs
+  // in front of you before you pick an opponent, not buried two screens away.
+  root.append(
+    el(
+      'div',
+      { class: 'equipped-bar mb' },
+      el('span', { class: 'eq-label' }, 'Playing as'),
+      el('b', { class: 'eq-name' }, player.name),
+      el(
+        'span',
+        { class: 'eq-line' },
+        `${player.build.position} · ${formatHeight(player.build.heightIn)} · ${store.overall()} OVR`,
+      ),
+      el('span', { class: 'spacer' }),
+      el('button', { class: 'btn sm', onclick: () => navigate('myplayer', { tab: 'builds' }) }, 'Change build'),
+    ),
+  );
 
   root.append(
     el(

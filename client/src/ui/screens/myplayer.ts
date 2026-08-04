@@ -16,22 +16,28 @@ import {
   levelProgress,
   totalUpgradeCost,
   upgradeCost,
+  TITLE_BY_ID,
   type AttributeKey,
   type BadgeCategory,
+  type MyPlayer,
 } from '@hoops/shared';
 
-import { store } from '../../state/store.ts';
+import { store, MAX_SLOTS } from '../../state/store.ts';
 import { audio } from '../../engine/audio.ts';
-import { navigate, refresh } from '../../main.ts';
-import { bar, el, fmt, overlay, panel, tabs, toast } from '../dom.ts';
+import { navigate, refresh, type RouteParams } from '../../main.ts';
+import { bar, confirmDialog, el, fmt, overlay, panel, tabs, toast } from '../dom.ts';
 import { portraitEl } from '../portrait.ts';
 import { radarEl } from '../radar.ts';
 
-type Tab = 'attributes' | 'badges' | 'animations';
+type Tab = 'attributes' | 'badges' | 'animations' | 'builds';
 let tab: Tab = 'attributes';
 let badgeCategory: BadgeCategory | 'all' = 'all';
 
-export function renderMyPlayer(): HTMLElement {
+export function renderMyPlayer(params: RouteParams = {}): HTMLElement {
+  // Deep link from Play: "Change build" lands straight on the builds tab.
+  if (typeof params.tab === 'string' && ['attributes', 'badges', 'animations', 'builds'].includes(params.tab)) {
+    tab = params.tab as Tab;
+  }
   const player = store.player;
   const overall = computeOverall(player.attributes, player.build.position);
   const lp = levelProgress(player.xp);
@@ -67,6 +73,23 @@ export function renderMyPlayer(): HTMLElement {
         ),
         el('div', { class: 'ovr' }, el('b', {}, String(overall)), el('span', {}, 'OVR')),
       ),
+      el(
+        'div',
+        { class: 'row', style: 'margin-top:14px' },
+        el(
+          'button',
+          {
+            class: 'btn sm',
+            onclick: () => {
+              tab = 'builds';
+              refresh();
+            },
+          },
+          `View builds (${store.profile.players.length}/${MAX_SLOTS})`,
+        ),
+        el('button', { class: 'btn sm', onclick: () => navigate('builder') }, 'Create new build'),
+        el('span', { class: 'pill hot' }, 'Equipped'),
+      ),
     ),
     el('div', { style: 'height:14px' }),
     tabs(
@@ -74,6 +97,7 @@ export function renderMyPlayer(): HTMLElement {
         { id: 'attributes', label: 'Attributes' },
         { id: 'badges', label: 'Badges' },
         { id: 'animations', label: 'Animations' },
+        { id: 'builds', label: 'Builds' },
       ],
       tab,
       (id) => {
@@ -85,9 +109,124 @@ export function renderMyPlayer(): HTMLElement {
 
   if (tab === 'attributes') root.appendChild(renderAttributes());
   else if (tab === 'badges') root.appendChild(renderBadges());
+  else if (tab === 'builds') root.appendChild(renderBuilds());
   else root.appendChild(renderAnimations());
 
   return root;
+}
+
+// ------------------------------------------------------------------- builds
+
+/**
+ * Every build you own, and which one is equipped. Only the equipped build can
+ * play, so this is where you switch before a game.
+ */
+function renderBuilds(): HTMLElement {
+  const players = store.profile.players;
+  const activeSlot = store.profile.activeSlot;
+
+  return el(
+    'div',
+    {},
+    el(
+      'p',
+      { class: 'hint mb' },
+      'One build is equipped at a time and it is the one that walks out on court. Coins, badges and career records belong to the build that earned them, so switching is a real decision, not a costume change.',
+    ),
+    el(
+      'div',
+      { class: 'grid cols-3 mb' },
+      ...players.map((p, i) => renderBuildCard(p, i, i === activeSlot)),
+      players.length < MAX_SLOTS
+        ? el(
+            'button',
+            { class: 'panel build-new', onclick: () => navigate('builder') },
+            el('span', { style: 'font-size:30px;font-weight:900;line-height:1' }, '+'),
+            el('span', { style: 'font-size:13px;font-weight:800' }, 'Create new build'),
+            el('span', { class: 'faint', style: 'font-size:11px' }, `${MAX_SLOTS - players.length} slot${MAX_SLOTS - players.length === 1 ? '' : 's'} free`),
+          )
+        : el(
+            'div',
+            { class: 'panel', style: 'display:grid;place-items:center;text-align:center;padding:20px;gap:4px' },
+            el('span', { style: 'font-size:13px;font-weight:800' }, 'All slots full'),
+            el('span', { class: 'faint', style: 'font-size:11px' }, 'Delete a build to make room for a new one.'),
+          ),
+    ),
+  );
+}
+
+function renderBuildCard(p: MyPlayer, slot: number, equipped: boolean): HTMLElement {
+  const overall = computeOverall(p.attributes, p.build.position);
+  const caps = computeCaps(p.build);
+  const ceiling = computeOverall(
+    Object.fromEntries(ATTRIBUTE_KEYS.map((k) => [k, caps[k]])) as typeof p.attributes,
+    p.build.position,
+  );
+  const title = TITLE_BY_ID[p.loadout.titleId];
+  const games = p.stats.gamesPlayed;
+
+  return el(
+    'div',
+    { class: `panel build-card ${equipped ? 'on' : ''}` },
+    el(
+      'div',
+      { class: 'row', style: 'align-items:flex-start' },
+      portraitEl(p, 64),
+      el(
+        'div',
+        { style: 'min-width:0;flex:1' },
+        el('div', { style: 'font-weight:900;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis' }, p.name),
+        title && title.id !== 'title-none'
+          ? el('span', { class: 'title-tag', style: `--tint:${title.color};margin-top:4px` }, title.name)
+          : null,
+      ),
+      el('div', { class: 'ovr', style: 'margin-left:auto' }, el('b', {}, String(overall)), el('span', {}, 'OVR')),
+    ),
+    el(
+      'div',
+      { style: 'margin-top:10px' },
+      el('div', { class: 'kv' }, el('span', { class: 'k' }, 'Position'), el('span', { class: 'v' }, p.build.position)),
+      el('div', { class: 'kv' }, el('span', { class: 'k' }, 'Height'), el('span', { class: 'v' }, formatHeight(p.build.heightIn))),
+      el('div', { class: 'kv' }, el('span', { class: 'k' }, 'Weight'), el('span', { class: 'v' }, `${p.build.weightLb} lb`)),
+      el('div', { class: 'kv' }, el('span', { class: 'k' }, 'Number'), el('span', { class: 'v' }, `#${p.build.jerseyNumber}`)),
+      el('div', { class: 'kv' }, el('span', { class: 'k' }, 'Ceiling'), el('span', { class: 'v' }, `${ceiling} OVR`)),
+      el('div', { class: 'kv' }, el('span', { class: 'k' }, 'Record'), el('span', { class: 'v' }, games === 0 ? 'No games' : `${p.stats.wins}W – ${p.stats.losses}L`)),
+    ),
+    el(
+      'div',
+      { class: 'row', style: 'margin-top:12px' },
+      equipped
+        ? el('span', { class: 'pill hot' }, 'Equipped')
+        : el(
+            'button',
+            {
+              class: 'btn sm primary',
+              onclick: () => {
+                store.selectSlot(slot);
+                audio.play('levelUp');
+                toast(`${p.name} equipped`, 'good');
+                refresh();
+              },
+            },
+            'Equip',
+          ),
+      el('button', { class: 'btn sm', onclick: () => navigate('builder') }, 'New build'),
+      store.profile.players.length > 1
+        ? el(
+            'button',
+            {
+              class: 'btn sm danger',
+              onclick: () =>
+                confirmDialog('Delete build?', `${p.name} and all of their progress will be removed. This cannot be undone.`, () => {
+                  store.deleteSlot(slot);
+                  refresh();
+                }),
+            },
+            'Delete',
+          )
+        : null,
+    ),
+  );
 }
 
 /** Badges with nothing to do while a miss is an automatic turnover. */

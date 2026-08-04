@@ -196,9 +196,10 @@ class Store {
     this.profile.settings = { ...defaultSettings(), ...this.profile.settings };
   }
 
-  /** True once at least one build exists. Play is locked until then. */
+  /** True once a build exists and one of them is equipped. Play is locked
+   *  until then — every mode runs the equipped build, so there has to be one. */
   get hasPlayer(): boolean {
-    return this.profile.players.length > 0;
+    return !!this.profile.players[this.profile.activeSlot];
   }
 
   get player(): MyPlayer {
@@ -281,7 +282,7 @@ class Store {
     this.update((p) => {
       p.players.splice(slot, 1);
       p.players.forEach((pl, i) => (pl.slot = i));
-      p.activeSlot = Math.min(p.activeSlot, p.players.length - 1);
+      p.activeSlot = Math.max(0, Math.min(p.activeSlot, p.players.length - 1));
     });
   }
 

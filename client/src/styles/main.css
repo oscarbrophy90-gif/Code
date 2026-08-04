@@ -1739,3 +1739,67 @@ input[type='text']:focus {
 .challenge-prize:hover {
   border-color: var(--rarity);
 }
+
+/* ---------------------------------------------------------------- builds */
+
+.build-card {
+  padding: 14px;
+  border: 1px solid var(--line);
+  transition: border-color 0.14s, box-shadow 0.14s;
+}
+
+.build-card.on {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+.build-card .ovr {
+  flex: none;
+}
+
+.build-new {
+  display: grid;
+  place-items: center;
+  gap: 5px;
+  padding: 20px;
+  text-align: center;
+  border: 1px dashed var(--line);
+  color: var(--text-dim);
+  transition: border-color 0.14s, color 0.14s;
+}
+
+.build-new:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.equipped-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 11px 16px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.eq-label {
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.eq-name {
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.eq-line {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-dim);
+}
