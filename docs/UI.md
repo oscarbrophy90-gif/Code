@@ -13,10 +13,10 @@ competing with anything else on screen.
 --text    #eef2f8
 
 --green   #3ef07a    perfect release. Reserved.
---orange  #ff7a3d    primary accent, ranked
+--orange  #ff7a3d    primary accent, All-Star
 --amber   #ffc53d    currency, contested green
---blue    #4aa3ff    casual, blocks
---purple  #a06bff    parks, elite tier
+--blue    #4aa3ff    Rookie, blocks
+--purple  #a06bff    parks, Superstar
 --red     #ff4d5e    danger, low stamina
 ```
 
@@ -30,44 +30,50 @@ data URI.
 
 ## Layout
 
-A fixed top bar (brand, nav, level/currency/rank chips) over a single scrolling screen
-host. Screens are plain DOM; only the match is a canvas.
+A fixed top bar (brand, nav, level/Coins/highest-difficulty chips) over a single scrolling
+screen host. Screens are plain DOM; only the match is a canvas.
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│ ◉ HOOPS ELITE   HOME PLAY MYPLAYER PARKS …   LV 12  24,850 CC │
+│ ◉ HOOPS ELITE  HOME PLAY MYPLAYER PARKS …  LV 12 24,850 All-Star│
 ├──────────────────────────────────────────────────────────────┤
 │                                                              │
 │   ┌─ player card ─────────────┐  ┌─ season ──────────────┐   │
 │   │ [portrait]  Rookie    61  │  │ S4: Skyline           │   │
 │   │ SG 6'5" 200lb      OVR    │  │ ▓▓▓▓▓▓░░░  12d 22h    │   │
 │   │ LV 1  ▓▓▓░░░░░░           │  └───────────────────────┘   │
-│   └───────────────────────────┘  ┌─ rank ────────────────┐   │
-│   ┌─ RANKED 1v1 ──────────────┐  │ ⬡ Bronze IV   0 RP    │   │
-│   │ Climb Bronze to Legend.   │  └───────────────────────┘   │
+│   └───────────────────────────┘  ┌─ career ladder ───────┐   │
+│   ┌─ 1v1 vs CPU ──────────────┐  │ ⬡ All-Star  3/6 clear │   │
+│   │ Six difficulties.         │  └───────────────────────┘   │
 │   └───────────────────────────┘  ┌─ daily challenges ────┐   │
-│   ┌ QUICK PLAY ┐ ┌ PRACTICE ┐    │ Land 3 chase-downs    │   │
-│   └────────────┘ └──────────┘    └───────────────────────┘   │
+│   ┌ PRACTICE  ┐ ┌ RECORDS  ┐     │ Land 3 chase-downs    │   │
+│   └───────────┘ └──────────┘     └───────────────────────┘   │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-Mode tiles carry a `--tint` custom property that drives a radial glow, the kicker colour
-and the hover border, so a new mode is one call with a colour.
+Mode tiles and difficulty cards carry a `--tint` custom property that drives the glow, the
+accent colour and the hover border, so a new mode or difficulty is one call with a colour.
+The six difficulties run cool to hot — blue for Rookie through pink for Hall of Fame — so
+the ladder reads as a temperature before you read a word of it.
+
+Attribute graphs are drawn on canvas as a seven-axis radar: the filled green polygon is
+what you are, the dashed orange outline is your build's ceiling. Nineteen attributes do
+not fit on a radar legibly, so each axis averages a related group.
 
 ## Screens
 
 | Screen | Purpose |
 | --- | --- |
-| **Home** | Player card, mode tiles, season banner, rank, live events, daily challenges, career summary. |
-| **Play** | Online queues with the live search band, solo with five difficulties and a free-run gym, the event list, court selection, and the rules panel. |
-| **MyPlayer** | Three tabs. *Attributes* shows every rating with its cap marked in red and the exact upgrade price. *Badges* shows all forty with tier, progress and gating attribute. *Animations* covers jump shots, dunk packages and the equipped loadout. |
-| **Builder** | Save slots, body sliders with live cap recalculation, appearance, templates, and a "what this build does well" grading panel. |
-| **Parks** | Five parks with a walk-around top-down hub — WASD or drag to move, step onto a court ring to queue. |
-| **Season** | Battle pass with both tracks and per-tier claiming, the challenge board, and end-of-season ranked rewards. |
+| **Home** | Player card, mode tiles, season banner, career ladder, live events, daily challenges, career summary. |
+| **Play** | The six-difficulty picker, each card showing its traits, a difficulty meter and your record on it; the selected level expands into what it actually does. Plus the practice gym, event list, court selection, career ladder and rules. |
+| **MyPlayer** | Three tabs. *Attributes* opens with a radar graph of your spread against your build ceiling, then all nineteen ratings with the cap marked in red and the exact upgrade price. *Badges* shows all forty with tier, progress and gating attribute. *Animations* covers jump shots, dunk packages and the equipped loadout. |
+| **Builder** | Save slots, body sliders with live cap recalculation, jersey number, appearance, accessories, templates, a live radar graph, and a "what this build does well" grading panel. |
+| **Parks** | Five parks with a walk-around top-down hub — WASD or drag to move, step onto a court ring to start a run. |
+| **Season** | Battle pass with both tracks and per-tier claiming, the challenge board, and end-of-season rewards. |
 | **Store** | Twelve cosmetic categories, rarity-coloured, with purchase and equip in one tap. |
 | **Stats** | Career totals with per-game averages, highlight counters, teammate grade, and a per-build comparison. |
-| **Ranks** | Your standing, the tier ladder, and worldwide/regional leaderboards (with a deterministic offline sample when the server is unreachable). |
-| **Settings** | Shot meter style, display, audio, server address and region, cloud save, profile export/import. |
+| **Records** | The six-rung career ladder with your record on each difficulty, highest level cleared, and personal bests. |
+| **Settings** | Shot meter style, display, audio, profile export/import and reset. |
 
 ## The match HUD
 
@@ -86,17 +92,17 @@ Everything on screen during play answers a question the player is actively askin
                         └───┘
 
   STAMINA  ▓▓▓▓▓▓▓░░░    CONTEST ▓▓░░░░             bottom-left readouts
-  SPACE shoot · E drive · F steal            60 FPS · 34 ms
+  SPACE shoot · E drive · F steal                     60 FPS
 ```
 
-- **Score bug** — score, shot clock, format, and the ranked tier when it applies.
+- **Score bug** — score, shot clock and format.
 - **Shot meter** — five styles, switchable in Settings or mid-match from the pause menu.
 - **Stamina and contest** — the two numbers that decide whether the next shot is worth
   taking, shown as bars rather than percentages so they are readable peripherally.
-- **Callouts** — `CLEAR THE BALL`, `CHECK BALL`, and the grade flash (`GREEN`, `EXCELLENT`,
-  `EARLY`, `LATE`, `WILD`) in the grade's own colour.
-- **World popups** — `+2`, `ANKLES!`, `POSTER!`, `CHASE-DOWN!` rise from the player who
-  earned them and fade.
+- **Callouts** — `CLEAR THE BALL`, `CHECK BALL`, `FREE THROW · n TO SHOOT`, and the grade
+  flash (`GREEN`, `EXCELLENT`, `EARLY`, `LATE`, `WILD`) in the grade's own colour.
+- **World popups** — `+2`, `ANKLES!`, `POSTER!`, `CHASE-DOWN!`, `FOUL — 2 SHOTS` rise from
+  the player who earned them and fade.
 
 ### Shot meter styles
 

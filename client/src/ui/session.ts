@@ -1,5 +1,7 @@
 import {
   BADGE_BY_ID,
+  DIFFICULTIES,
+  DIFFICULTY_LABEL,
   CURRENCY_SHORT,
   TIER_COLOR,
   TIER_INDEX,
@@ -10,8 +12,6 @@ import {
   generateChallenges,
   levelForXp,
   levelProgress,
-  rankLabel,
-  updateRank,
   type BadgeState,
   type ChallengeMetric,
   type Difficulty,
@@ -37,6 +37,8 @@ export interface StartMatchOptions {
   localSide?: 0 | 1;
   seed?: number;
   eventName?: string;
+  /** practice gym runs pay nothing and do not touch the career ladder */
+  practice?: boolean;
 }
 
 export function startMatch(opts: StartMatchOptions): void {
@@ -65,9 +67,6 @@ export interface RewardSummary {
   levelBefore: number;
   levelAfter: number;
   badgeUps: { id: string; to: string }[];
-  rankDelta: number;
-  rankBefore: number;
-  rankAfter: number;
   passTierBefore: number;
   passTierAfter: number;
   challengesCompleted: string[];
@@ -80,12 +79,11 @@ export interface RewardSummary {
 function applyResult(result: MatchResult, opts: StartMatchOptions): RewardSummary {
   const player = store.player;
   const levelBefore = levelForXp(player.xp);
-  const rankBefore = player.rank.points;
   const passBefore = Math.floor(store.profile.battlePass.tierXp / XP_PER_TIER) + 1;
 
   const reward = computeMatchReward({
     won: result.won,
-    playlist: opts.playlist,
+    playlist: opts.practice ? 'private' : opts.playlist,
     stats: result.stats,
     scoreFor: result.score[0],
     scoreAgainst: result.score[1],
@@ -115,6 +113,22 @@ function applyResult(result: MatchResult, opts: StartMatchOptions): RewardSummar
       s.losses++;
       s.currentWinStreak = 0;
     }
+
+    // Difficulty ladder. Practice runs are excluded so the record means something.
+    if (!opts.practice) {
+      const d = opts.difficulty;
+      s.gamesByDifficulty[d] = (s.gamesByDifficulty[d] ?? 0) + 1;
+      if (result.won) {
+        s.winsByDifficulty[d] = (s.winsByDifficulty[d] ?? 0) + 1;
+        const current = s.highestDifficultyBeaten;
+        if (!current || DIFFICULTIES.indexOf(d) > DIFFICULTIES.indexOf(current)) {
+          s.highestDifficultyBeaten = d;
+        }
+      }
+    }
+
+    s.freeThrowsMade += result.stats.ftm;
+    s.freeThrowsAttempted += result.stats.fta;
     s.points += m.points;
     s.fgm += m.fgm;
     s.fga += m.fga;
@@ -134,12 +148,6 @@ function applyResult(result: MatchResult, opts: StartMatchOptions): RewardSummar
     const grade = Math.max(-3, Math.min(3, m.gradePoints * 0.5 + (result.won ? 0.8 : -0.4)));
     s.teammateGradeSum += grade;
     s.teammateGradeCount++;
-
-    // Ranked ladder.
-    if (opts.playlist === 'ranked') {
-      updateRank(p.rank, opts.opponentRankPoints ?? p.rank.points, result.won, result.score[0], result.score[1]);
-      s.highestRankPoints = Math.max(s.highestRankPoints, p.rank.points);
-    }
 
     // Battle pass.
     profile.battlePass.tierXp += reward.xp;
@@ -180,9 +188,6 @@ function applyResult(result: MatchResult, opts: StartMatchOptions): RewardSummar
     levelBefore,
     levelAfter,
     badgeUps,
-    rankDelta: store.player.rank.points - rankBefore,
-    rankBefore,
-    rankAfter: store.player.rank.points,
     passTierBefore: passBefore,
     passTierAfter: store.profile.battlePass.tier,
     challengesCompleted,
@@ -236,6 +241,7 @@ function showResults(result: MatchResult, summary: RewardSummary, opts: StartMat
         statTile('FG', `${m.fgm}/${m.fga}`),
         statTile('GREEN', `${m.greens}`),
         statTile('GREEN%', ratio(m.greens, m.fga)),
+        statTile('FT', `${m.ftm}/${m.fta}`),
         statTile('REB', m.rebounds),
         statTile('STL', m.steals),
         statTile('BLK', m.blocks),
@@ -295,24 +301,28 @@ function showResults(result: MatchResult, summary: RewardSummary, opts: StartMat
           el('div', { style: 'color:var(--green);font-weight:800;font-size:12px;margin-top:6px' }, `Level up! ${summary.levelBefore} → ${summary.levelAfter}`),
       ),
 
-      opts.playlist === 'ranked' &&
+      !opts.practice &&
         el(
           'div',
           { class: 'panel', style: 'margin-bottom:16px' },
           el(
             'div',
             { class: 'row' },
-            el('span', { class: 'dim' }, 'Ranked'),
+            el('span', { class: 'dim' }, 'Difficulty'),
             el('span', { class: 'spacer' }),
-            el(
-              'b',
-              { style: `color:${summary.rankDelta >= 0 ? 'var(--green)' : 'var(--red)'}` },
-              `${summary.rankDelta >= 0 ? '+' : ''}${summary.rankDelta} RP`,
-            ),
+            el('b', {}, DIFFICULTY_LABEL[opts.difficulty]),
           ),
-          el('div', { style: 'font-size:19px;font-weight:900;margin-top:4px' }, rankLabel(summary.rankAfter)),
-          store.player.rank.placementGamesLeft > 0 &&
-            el('div', { class: 'faint', style: 'font-size:11px' }, `${store.player.rank.placementGamesLeft} placement games left`),
+          won && store.player.stats.highestDifficultyBeaten === opts.difficulty
+            ? el(
+                'div',
+                { style: 'color:var(--green);font-weight:800;font-size:12px;margin-top:6px' },
+                `New career best — ${DIFFICULTY_LABEL[opts.difficulty]} cleared`,
+              )
+            : el(
+                'div',
+                { class: 'faint', style: 'font-size:11px;margin-top:4px' },
+                `Record on this level: ${store.player.stats.winsByDifficulty[opts.difficulty] ?? 0}W of ${store.player.stats.gamesByDifficulty[opts.difficulty] ?? 0}`,
+              ),
         ),
 
       summary.badgeUps.length > 0 &&

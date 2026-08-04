@@ -1,8 +1,8 @@
-import { PARKS, generateOpponent, hashString, opponentForRank, type ParkDef } from '@hoops/shared';
+import { PARKS, computeOverall, generateOpponent, hashString, type ParkDef } from '@hoops/shared';
 
 import { store } from '../../state/store.ts';
 import { navigate } from '../../main.ts';
-import { el, panel, toast } from '../dom.ts';
+import { el, panel } from '../dom.ts';
 import { startMatch } from '../session.ts';
 import { hexA, mix } from '../../render/court.ts';
 
@@ -81,13 +81,12 @@ export function renderParks(): HTMLElement {
           ),
         ),
         panel(
-          'Squad',
-          el('p', { class: 'hint', style: 'margin:0 0 12px' }, 'Invite a friend to run with you. Squads keep you in the same lobby across queues and private matches.'),
+          'Runs',
+          el('p', { class: 'hint', style: 'margin:0 0 12px' }, 'Every court here runs a CPU opponent at your selected difficulty. Walk up to one and step on the ring to start.'),
           el(
             'div',
             { class: 'row' },
-            el('button', { class: 'btn sm', onclick: () => toast('Squad invites need a signed-in session on the Hoops Elite server.') }, 'Invite friend'),
-            el('button', { class: 'btn sm', onclick: () => navigate('play', { mode: 'ranked' }) }, 'Queue ranked'),
+            el('button', { class: 'btn sm', onclick: () => navigate('play') }, 'Choose difficulty'),
           ),
         ),
         panel(
@@ -119,8 +118,8 @@ function buildHub(park: ParkDef): HTMLElement {
   const H = 480;
 
   const allCourts: CourtNode[] = [
-    { x: 210, y: 150, r: 62, label: 'Ranked Court', mode: 'ranked', busy: 0.7 },
-    { x: 470, y: 110, r: 58, label: 'Casual Court', mode: 'casual', busy: 0.4 },
+    { x: 210, y: 150, r: 62, label: 'Main Court', mode: 'ranked', busy: 0.7 },
+    { x: 470, y: 110, r: 58, label: 'Side Court', mode: 'casual', busy: 0.4 },
     { x: 700, y: 200, r: 58, label: 'King of the Court', mode: 'kotc', busy: 0.9 },
     { x: 330, y: 340, r: 54, label: 'Training Rim', mode: 'training', busy: 0.1 },
   ];
@@ -206,7 +205,7 @@ function buildHub(park: ParkDef): HTMLElement {
     }
     if (court.mode === 'kotc') {
       startMatch({
-        opponent: opponentForRank(player.rank.points, 'kotc'),
+        opponent: generateOpponent(Math.max(60, computeOverall(player.attributes, player.build.position)), hashString(`kotc-${Date.now()}`)),
         difficulty: 'allStar',
         parkId: park.id,
         playlist: 'event',
@@ -215,7 +214,7 @@ function buildHub(park: ParkDef): HTMLElement {
       });
       return;
     }
-    navigate('play', { mode: court.mode });
+    navigate('play');
   }
 
   const loop = (now: number) => {

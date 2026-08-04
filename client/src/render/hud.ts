@@ -3,7 +3,6 @@ import {
   GRADE_LABEL,
   activeShotMeter,
   currentContest,
-  rankLabel,
   type MatchState,
   type ShotGrade,
   type ShotMeterStyle,
@@ -63,7 +62,7 @@ export class Hud {
   }
 
   // ------------------------------------------------------------- score bug
-  drawScoreBug(ctx: CanvasRenderingContext2D, state: MatchState, w: number, localSide: Side, rankPoints: number): void {
+  drawScoreBug(ctx: CanvasRenderingContext2D, state: MatchState, w: number, localSide: Side): void {
     const pad = 14;
     const barW = Math.min(430, w - pad * 2);
     const x = (w - barW) / 2;
@@ -113,16 +112,6 @@ export class Hud {
     ctx.fillStyle = '#626e86';
     ctx.fillText(`FIRST TO ${state.config.targetScore} • WIN BY ${state.config.winBy}`, x + barW / 2, y + 14);
     ctx.restore();
-
-    // Rank chip under the bug for ranked play.
-    if (state.config.playlist === 'ranked') {
-      ctx.save();
-      ctx.textAlign = 'center';
-      ctx.font = '800 10px Inter, system-ui, sans-serif';
-      ctx.fillStyle = '#97a2b8';
-      ctx.fillText(rankLabel(rankPoints).toUpperCase(), x + barW / 2, y + h + 16);
-      ctx.restore();
-    }
   }
 
   // ------------------------------------------------------------- shot meter
@@ -398,6 +387,22 @@ export class Hud {
       ctx.font = '700 11px Inter, system-ui, sans-serif';
       ctx.fillStyle = '#97a2b8';
       ctx.fillText('Take it back behind the arc before you can score', w / 2, h - 58);
+    }
+
+    if (state.phase === 'freeThrow' && state.freeThrow) {
+      const mine = state.freeThrow.side === side;
+      ctx.font = '900 24px Inter, system-ui, sans-serif';
+      ctx.fillStyle = mine ? '#ffc53d' : '#97a2b8';
+      ctx.fillText(
+        mine ? `FREE THROW · ${state.freeThrow.remaining} TO SHOOT` : 'FREE THROW',
+        w / 2,
+        h / 2 - 60,
+      );
+      if (mine) {
+        ctx.font = '700 12px Inter, system-ui, sans-serif';
+        ctx.fillStyle = '#97a2b8';
+        ctx.fillText('Hold shoot and release in the green — nobody can contest this one', w / 2, h / 2 - 40);
+      }
     }
 
     if (state.phase === 'checkball') {

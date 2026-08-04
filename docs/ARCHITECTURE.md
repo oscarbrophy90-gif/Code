@@ -2,8 +2,16 @@
 
 ## The central decision
 
-The match simulation is a pure, deterministic function that lives in `shared/` and is
-imported unchanged by both the client and the server.
+The whole game is a pure, deterministic function:
+
+```
+stepMatch(state, [inputA, inputB], dt)
+```
+
+It lives in `shared/`, has no DOM and no Node dependencies, and **does not know where its
+two input streams come from**. Today the client fills side A from your keyboard and side B
+from `AiController`. That single fact is what makes the game single-player now and online
+later without a rewrite — a network adapter substitutes for the AI at one call site.
 
 ```
                     shared/src/sim/match.ts
@@ -11,22 +19,18 @@ imported unchanged by both the client and the server.
                               │
               ┌───────────────┴───────────────┐
               │                               │
-        client (predicts)              server (authoritative)
-        renders at 60–144 fps          simulates at 120 Hz
-        sends inputs at 60 Hz          broadcasts snapshots at 20 Hz
+       your input (60 Hz)            AiController  ← today
+                                     network adapter ← later
 ```
 
-Everything else follows from this. Because the same code produces the same result from
-the same inputs and seed:
+Because the same code produces the same result from the same inputs and seed:
 
-- The client can start a shot the instant you press the button and be right about the
-  outcome, so a green release feels immediate rather than round-trip-delayed.
-- The server can recompute any shot from authoritative positions and never has to trust a
-  client-reported result. There is no "I made it, trust me" message in the protocol.
-- Anti-cheat can compare a player's real input stream against what the simulation would
-  need, instead of pattern-matching on symptoms.
 - A match is fully reproducible from `(seed, inputStreamA, inputStreamB)`, which is what
-  makes replays, dispute review and regression testing possible.
+  makes replays and regression testing possible — real games become test fixtures.
+- The AI can be tested as rigorously as the physics. The difficulty curve in
+  `docs/GAMEPLAY.md` is measured by running the simulation headless and is asserted in CI.
+- When online is turned on, a server can recompute any shot from authoritative positions
+  and never has to trust a client-reported result.
 
 Determinism is enforced by construction: the simulation never reads `Math.random`,
 `Date.now` or any ambient state. All randomness comes from a seeded `Rng` (mulberry32)
@@ -40,7 +44,7 @@ No dependencies, no DOM, no Node APIs. This is the game.
 
 ```
 shared/src/
-  types.ts        Domain types: attributes, builds, badges, profile, ranks
+  types.ts        Domain types: 19 attributes, builds, badges, difficulties
   ratings.ts      Attribute caps from body, overall calculation, upgrade costs
   badges.ts       40 badge definitions, tier thresholds, progression events
   shooting.ts     Shot profiles, green windows, contest, make percentages
@@ -54,7 +58,7 @@ shared/src/
     moves.ts      12 dribble moves, 5 dunk packages
     state.ts      Simulation state and input shapes
     match.ts      createMatch / stepMatch — the whole game
-    ai.ts         Bot controller with lagged perception and adaptive difficulty
+    ai.ts         Six CPU difficulties, lagged perception, tendency reading
   data/
     teams.ts      12 original clubs with procedural crest descriptors
     parks.ts      5 parks with palettes
@@ -82,17 +86,20 @@ client/src/
     hud.ts            Score bug, five shot-meter styles, callouts
   ui/
     match.ts          Wires sim + render + input together
-    session.ts        Applies rewards, badges, rank and challenges after a game
+    session.ts        Applies rewards, badges, ladder and challenges after a game
     touch.ts          Mobile controls
     portrait.ts       Procedural player portraits and team crests
+    radar.ts          Attribute graphs
     screens/          home, play, builder, myplayer, parks, season, store,
-                      stats, leaderboard, settings
-  net/client.ts       WebSocket client, prediction adapter, reconciliation
+                      stats, records, settings
+  net/client.ts       Online foundation: prediction adapter, reconciliation
 ```
 
 ### `server/`
 
-Node with `ws`. Runs on `--experimental-strip-types`, so there is no build step.
+The online foundation. Not used by the single-player build, but kept in the repo,
+typechecked, and verified working — see `docs/NETWORKING.md`. Node with `ws`, running on
+`--experimental-strip-types`, so there is no build step.
 
 ```
 server/src/
@@ -145,12 +152,16 @@ actually did. Draw order is depth-sorted by `z` each frame.
 5. The ball is launched along an arc whose endpoint encodes the result: a make targets
    the rim, an early release flies long, a late one comes up short.
 6. A `shotRelease` event drives the HUD flash, audio, badge progress and statistics.
-7. Online, the server has done exactly the same thing from the same inputs and seed, and
-   its snapshot confirms it.
+7. If the shot was a heavily contested finish, a foul may be called instead, moving the
+   game into the `freeThrow` phase where the same meter runs uncontested.
 
 ## Persistence
 
-Locally the profile is one JSON blob in `localStorage`, written on a 220 ms debounce and
-flushed on `visibilitychange` and `beforeunload`. Online it is mirrored to the server as
-an opaque blob for cross-device continuity — the server stores it, never parses it, and
-never derives rank or currency from it. Competitive state lives in server tables.
+The profile is one JSON blob in `localStorage`, written on a 220 ms debounce and flushed
+on `visibilitychange` and `beforeunload`. It can be exported and imported as a file from
+Settings.
+
+The server's cloud-save path stores the same blob opaquely — it never parses it and never
+derives progression from it. That separation exists so that if online is turned on later,
+editing `localStorage` is not an exploit: anything competitive would live in server tables
+instead.

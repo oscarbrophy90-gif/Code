@@ -3,7 +3,10 @@ import { COURT, distanceToRim, isBeyondArc } from './court.ts';
 import { DRIBBLE_MOVES, type DribbleMoveId } from './moves.ts';
 import { emptyInput, type MatchState, type PlayerInput, type Side } from './state.ts';
 
-export type Difficulty = 'rookie' | 'pro' | 'allStar' | 'superstar' | 'legend';
+import { DIFFICULTIES, type Difficulty } from '../types.ts';
+
+export type { Difficulty };
+export { DIFFICULTIES };
 
 export interface AiProfile {
   /** seconds of perception lag on the opponent's position */
@@ -22,14 +25,35 @@ export interface AiProfile {
   moveRate: number;
   /** 0..1 how well it recognises and cuts off a drive */
   helpIq: number;
+  /** 0 = basic handles, 1 = intermediate, 2 = signature combos */
+  moveTier: 0 | 1 | 2;
+  /** how many moves it will chain back to back */
+  comboLength: number;
+  /** 0..1 how strongly it adapts to the human's shot tendencies */
+  tendencyRead: number;
+  /** 0..1 chance it jumps at a pump fake or bites on a size-up */
+  bitesOnFakes: number;
 }
 
+/**
+ * Six difficulties, each a genuinely different opponent rather than the same
+ * bot with a rating multiplier. The levers that matter most to how a game
+ * feels are reaction time (can you beat it with a move?), release error (does
+ * it punish you from outside?) and tendency reading (does it learn?).
+ */
 export const DIFFICULTY_PRESETS: Record<Difficulty, AiProfile> = {
-  rookie: { reactionTime: 0.34, standoff: 4.6, stealAggression: 0.08, contestIq: 0.3, shotSelection: 0.35, releaseError: 0.3, moveRate: 0.35, helpIq: 0.3 },
-  pro: { reactionTime: 0.26, standoff: 3.9, stealAggression: 0.14, contestIq: 0.48, shotSelection: 0.5, releaseError: 0.2, moveRate: 0.5, helpIq: 0.48 },
-  allStar: { reactionTime: 0.19, standoff: 3.3, stealAggression: 0.2, contestIq: 0.64, shotSelection: 0.66, releaseError: 0.13, moveRate: 0.7, helpIq: 0.65 },
-  superstar: { reactionTime: 0.14, standoff: 2.8, stealAggression: 0.26, contestIq: 0.78, shotSelection: 0.8, releaseError: 0.085, moveRate: 0.9, helpIq: 0.8 },
-  legend: { reactionTime: 0.1, standoff: 2.4, stealAggression: 0.32, contestIq: 0.9, shotSelection: 0.9, releaseError: 0.055, moveRate: 1.1, helpIq: 0.92 },
+  // Misses open shots often, slow to react, poor decisions. Easy to beat.
+  rookie: { reactionTime: 0.42, standoff: 5.2, stealAggression: 0.05, contestIq: 0.18, shotSelection: 0.3, releaseError: 0.34, moveRate: 0.25, helpIq: 0.2, moveTier: 0, comboLength: 1, tendencyRead: 0, bitesOnFakes: 0.75 },
+  // Slightly smarter defense and shot selection, the occasional dribble move.
+  semiPro: { reactionTime: 0.32, standoff: 4.4, stealAggression: 0.1, contestIq: 0.36, shotSelection: 0.45, releaseError: 0.24, moveRate: 0.45, helpIq: 0.36, moveTier: 0, comboLength: 2, tendencyRead: 0, bitesOnFakes: 0.6 },
+  // Balanced. Good defense, simple combos, punishes bad mistakes.
+  pro: { reactionTime: 0.25, standoff: 3.8, stealAggression: 0.16, contestIq: 0.52, shotSelection: 0.6, releaseError: 0.17, moveRate: 0.65, helpIq: 0.52, moveTier: 1, comboLength: 2, tendencyRead: 0.2, bitesOnFakes: 0.45 },
+  // Strong pressure, better timing, advanced moves, reads your tendencies.
+  allStar: { reactionTime: 0.19, standoff: 3.2, stealAggression: 0.22, contestIq: 0.68, shotSelection: 0.72, releaseError: 0.115, moveRate: 0.85, helpIq: 0.68, moveTier: 1, comboLength: 3, tendencyRead: 0.55, bitesOnFakes: 0.32 },
+  // High IQ, excellent selection, aggressive, uses signature moves.
+  superstar: { reactionTime: 0.14, standoff: 2.7, stealAggression: 0.28, contestIq: 0.82, shotSelection: 0.84, releaseError: 0.075, moveRate: 1.05, helpIq: 0.82, moveTier: 2, comboLength: 3, tendencyRead: 0.8, bitesOnFakes: 0.2 },
+  // Elite reactions, rarely a bad decision. Plays like a real competitor.
+  hallOfFame: { reactionTime: 0.095, standoff: 2.3, stealAggression: 0.34, contestIq: 0.93, shotSelection: 0.93, releaseError: 0.045, moveRate: 1.3, helpIq: 0.94, moveTier: 2, comboLength: 4, tendencyRead: 1, bitesOnFakes: 0.09 },
 };
 
 interface Sample {
@@ -62,6 +86,11 @@ export class AiController {
   /** rolling read of how well the human is timing shots, drives adaptivity */
   private opponentGreenRate = 0.4;
   private opponentShots = 0;
+  /** rolling share of the human's shots taken from behind the arc */
+  private opponentThreeRate = 0.4;
+  /** rolling share of the human's possessions that attacked the rim */
+  private opponentDriveRate = 0.3;
+  private ftPlannedRelease: number | null = null;
 
   private side: Side;
   adaptive: boolean;
@@ -74,11 +103,28 @@ export class AiController {
     this.rng = new Rng(seed);
   }
 
-  /** Feed shot results so adaptive difficulty can track the human's form. */
-  notifyOpponentShot(wasGreen: boolean): void {
+  /**
+   * Feed the human's shot results. Beyond adaptive difficulty this builds the
+   * scouting report: how often they shoot from deep and how often they attack
+   * the rim, which is what `tendencyRead` acts on.
+   */
+  notifyOpponentShot(wasGreen: boolean, wasThree = false, wasDrive = false): void {
     this.opponentShots++;
     const alpha = 0.25;
     this.opponentGreenRate = this.opponentGreenRate * (1 - alpha) + (wasGreen ? 1 : 0) * alpha;
+    const beta = 0.2;
+    this.opponentThreeRate = this.opponentThreeRate * (1 - beta) + (wasThree ? 1 : 0) * beta;
+    this.opponentDriveRate = this.opponentDriveRate * (1 - beta) + (wasDrive ? 1 : 0) * beta;
+  }
+
+  /** What the bot currently believes about the human. Surfaced in the HUD. */
+  scoutingReport(): { threeRate: number; driveRate: number; greenRate: number; shots: number } {
+    return {
+      threeRate: this.opponentThreeRate,
+      driveRate: this.opponentDriveRate,
+      greenRate: this.opponentGreenRate,
+      shots: this.opponentShots,
+    };
   }
 
   private adapt(state: MatchState): void {
@@ -109,6 +155,11 @@ export class AiController {
     while (this.history.length > 2 && state.time - this.history[0].t > 0.6) this.history.shift();
 
     const input = emptyInput();
+    if (state.phase === 'freeThrow') {
+      if (state.freeThrow?.side === this.side) this.shootFreeThrow(state, input);
+      return input;
+    }
+    this.ftPlannedRelease = null;
     if (state.phase !== 'live') {
       // Walk back to a sensible spot between possessions.
       return input;
@@ -121,6 +172,25 @@ export class AiController {
     else if (state.ball.state === 'loose' || state.ball.state === 'shot') this.chaseBall(state, input);
     else this.defense(state, input, dt);
     return input;
+  }
+
+  /** Free throws are pure timing, so difficulty shows up directly here. */
+  private shootFreeThrow(state: MatchState, input: PlayerInput): void {
+    const me = state.players[this.side];
+    if (me.state !== 'shooting') {
+      this.ftPlannedRelease = null;
+      input.shoot = true;
+      return;
+    }
+    if (!me.shotProfile) return;
+    if (this.ftPlannedRelease === null) {
+      // A stationary, uncontested shot is the bot's best look of the game.
+      const error = this.gaussian() * this.profile.releaseError * 0.65;
+      this.ftPlannedRelease = Math.max(0.3, me.shotProfile.idealPoint + error);
+    }
+    const progress = me.shotElapsed / me.shotProfile.meterDuration;
+    input.shoot = progress < this.ftPlannedRelease;
+    if (!input.shoot) this.ftPlannedRelease = null;
   }
 
   private perceived(): Sample {
@@ -199,7 +269,10 @@ export class AiController {
     }
 
     if (state.time >= this.nextMoveAt && defDist < 6.5 && me.stamina > 0.3) {
-      this.nextMoveAt = state.time + this.rng.range(0.5, 1.6) / Math.max(0.2, this.profile.moveRate);
+      // comboLength shortens the gap between moves, so higher difficulties
+      // string together real combinations rather than isolated moves.
+      const chain = 1 + (this.profile.comboLength - 1) * 0.28;
+      this.nextMoveAt = state.time + this.rng.range(0.4, 1.5) / Math.max(0.2, this.profile.moveRate * chain);
       const preferRight = opp.x > me.x ? -1 : 1;
       this.moveTarget = this.pickMove(state);
       this.commitDirX = preferRight * this.rng.range(0.6, 1);
@@ -220,18 +293,28 @@ export class AiController {
     input.sprint = defDist < 3 && me.stamina > 0.4;
   }
 
+  /**
+   * Move selection is gated by difficulty as well as ratings: a Rookie only
+   * has basic handles, Pro adds intermediate moves, and Superstar and above
+   * unlock the signature combos.
+   */
   private pickMove(state: MatchState): DribbleMoveId {
     const me = state.players[this.side];
     const legal = MOVE_POOL.filter((id) => {
       const def = DRIBBLE_MOVES.find((m) => m.id === id)!;
-      return me.cfg.attrs[def.gate] >= def.requires;
+      if (me.cfg.attrs[def.gate] < def.requires) return false;
+      if (def.signature) return this.profile.moveTier >= 2;
+      if (def.requires > 0) return this.profile.moveTier >= 1;
+      return true;
     });
-    // Higher difficulty bots prefer moves that actually break defenders down.
-    if (this.profile.moveRate > 0.8 && this.rng.chance(0.55)) {
-      const strong = legal.filter((id) => DRIBBLE_MOVES.find((m) => m.id === id)!.ankleBase >= 0.14);
+    if (!legal.length) return 'crossover';
+
+    // Higher tiers prefer moves that actually break a defender down.
+    if (this.profile.moveTier >= 1 && this.rng.chance(0.35 + this.profile.moveTier * 0.2)) {
+      const strong = legal.filter((id) => DRIBBLE_MOVES.find((m) => m.id === id)!.ankleBase >= 0.04);
       if (strong.length) return this.rng.pick(strong);
     }
-    return this.rng.pick(legal.length ? legal : (['crossover'] as DribbleMoveId[]));
+    return this.rng.pick(legal);
   }
 
   // ------------------------------------------------------------------ defense
@@ -245,10 +328,19 @@ export class AiController {
     const predX = read.x + read.vx * lead;
     const predZ = read.z + read.vz * lead;
 
+    // Scouting report: a bot that reads tendencies crowds a shooter out past
+    // the arc and sags off a driver, instead of playing everyone the same way.
+    const read3 = (this.opponentThreeRate - 0.4) * this.profile.tendencyRead;
+    const readDrive = (this.opponentDriveRate - 0.3) * this.profile.tendencyRead;
+    const oppBeyondArc = isBeyondArc(predX, predZ);
+    let standoff = this.profile.standoff;
+    if (oppBeyondArc) standoff -= read3 * 2.2; // close out harder on a shooter
+    else standoff += readDrive * 1.6; // give ground to a slasher and wall up
+
     // Stand between the handler and the rim.
     const toRim = this.toward(COURT.rimX, COURT.rimZ, predX, predZ);
-    const targetX = predX + toRim.x * this.profile.standoff;
-    const targetZ = predZ + toRim.z * this.profile.standoff;
+    const targetX = predX + toRim.x * Math.max(1.4, standoff);
+    const targetZ = predZ + toRim.z * Math.max(1.4, standoff);
 
     const dx = targetX - me.x;
     const dz = targetZ - me.z;
@@ -260,6 +352,11 @@ export class AiController {
     }
 
     const realDist = Math.hypot(opp.x - me.x, opp.z - me.z);
+
+    // Pump fakes only work on bots that bite, which is a difficulty trait.
+    if (opp.fakeTimer > 0.2 && realDist < 6 && me.y === 0) {
+      if (this.rng.chance(this.profile.bitesOnFakes * dt * 9)) input.contest = true;
+    }
 
     // Contest a live jumper. Bots with low IQ jump late or not at all.
     if (opp.state === 'shooting' && opp.shotProfile) {

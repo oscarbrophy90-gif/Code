@@ -1,6 +1,6 @@
 import './styles/main.css';
 
-import { CURRENCY_SHORT, levelProgress, rankLabel } from '@hoops/shared';
+import { CURRENCY_SHORT, DIFFICULTY_LABEL, levelProgress } from '@hoops/shared';
 import { store } from './state/store.ts';
 import { audio } from './engine/audio.ts';
 import { clear, el, fmt } from './ui/dom.ts';
@@ -13,7 +13,7 @@ import { renderParks } from './ui/screens/parks.ts';
 import { renderSeason } from './ui/screens/season.ts';
 import { renderStore } from './ui/screens/store.ts';
 import { renderStats } from './ui/screens/stats.ts';
-import { renderLeaderboard } from './ui/screens/leaderboard.ts';
+import { renderRecords } from './ui/screens/records.ts';
 import { renderSettings } from './ui/screens/settings.ts';
 
 export type Route =
@@ -25,7 +25,7 @@ export type Route =
   | 'season'
   | 'store'
   | 'stats'
-  | 'leaderboard'
+  | 'records'
   | 'settings';
 
 const SCREENS: Record<Route, (params: RouteParams) => HTMLElement> = {
@@ -37,7 +37,7 @@ const SCREENS: Record<Route, (params: RouteParams) => HTMLElement> = {
   season: renderSeason,
   store: renderStore,
   stats: renderStats,
-  leaderboard: renderLeaderboard,
+  records: renderRecords,
   settings: renderSettings,
 };
 
@@ -49,7 +49,7 @@ const NAV: { route: Route; label: string }[] = [
   { route: 'season', label: 'Season' },
   { route: 'store', label: 'Store' },
   { route: 'stats', label: 'Stats' },
-  { route: 'leaderboard', label: 'Ranks' },
+  { route: 'records', label: 'Records' },
   { route: 'settings', label: 'Settings' },
 ];
 
@@ -132,11 +132,16 @@ function renderTopbar(): void {
       el('span', { class: 'chip xp', title: `Level ${lp.level}` }, el('span', { class: 'dot' }), `LV ${lp.level}`),
       el(
         'span',
-        { class: 'chip cc', title: 'Court Credits — earned only through play' },
+        { class: 'chip cc', title: 'Coins — earned only through play' },
         el('span', { class: 'dot' }),
         `${fmt(player.currency)} ${CURRENCY_SHORT}`,
       ),
-      el('span', { class: 'chip', title: 'Ranked tier' }, el('span', { class: 'dot' }), rankLabel(player.rank.points)),
+      el(
+        'span',
+        { class: 'chip', title: 'Highest CPU difficulty beaten' },
+        el('span', { class: 'dot' }),
+        player.stats.highestDifficultyBeaten ? DIFFICULTY_LABEL[player.stats.highestDifficultyBeaten] : 'Unranked',
+      ),
     ),
   );
 }

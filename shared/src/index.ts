@@ -12,7 +12,7 @@ export * from './sim/court.ts';
 export * from './sim/moves.ts';
 export * from './sim/state.ts';
 export * from './sim/match.ts';
-export * from './sim/ai.ts';
+export { AiController, DIFFICULTY_PRESETS, type AiProfile } from './sim/ai.ts';
 
 export * from './data/teams.ts';
 export * from './data/parks.ts';

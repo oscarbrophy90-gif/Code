@@ -21,8 +21,9 @@ import { store, MAX_SLOTS } from '../../state/store.ts';
 import { navigate, refresh } from '../../main.ts';
 import { bar, confirmDialog, el, fmt, panel, segmented, slider, toast } from '../dom.ts';
 import { drawPortrait, portraitEl } from '../portrait.ts';
+import { radarEl } from '../radar.ts';
 
-let draft: BuildSpec = { position: 'SG', heightIn: 77, weightLb: 200, wingspanIn: 80 };
+let draft: BuildSpec = { position: 'SG', jerseyNumber: 23, heightIn: 77, weightLb: 200, wingspanIn: 80 };
 let draftName = '';
 
 export function renderBuilder(): HTMLElement {
@@ -184,6 +185,17 @@ function renderCreator(): HTMLElement {
           },
         }),
         slider({
+          label: 'Jersey number',
+          value: draft.jerseyNumber,
+          min: 0,
+          max: 99,
+          display: (v) => `#${v}`,
+          onInput: (v) => {
+            draft.jerseyNumber = v;
+            rerenderCreator();
+          },
+        }),
+        slider({
           label: 'Wingspan',
           value: draft.wingspanIn,
           min: wing.min,
@@ -213,7 +225,7 @@ function renderCreator(): HTMLElement {
                 class: 'btn sm',
                 style: 'flex-direction:column;align-items:flex-start;text-align:left;padding:10px',
                 onclick: () => {
-                  draft = { position: t.position, heightIn: t.heightIn, weightLb: t.weightLb, wingspanIn: t.wingspanIn };
+                  draft = { position: t.position, jerseyNumber: draft.jerseyNumber, heightIn: t.heightIn, weightLb: t.weightLb, wingspanIn: t.wingspanIn };
                   rerenderCreator();
                 },
               },
@@ -348,6 +360,7 @@ function renderCreator(): HTMLElement {
               el('span', {}, draft.position),
               el('span', {}, formatHeight(draft.heightIn)),
               el('span', {}, `${draft.weightLb} lb`),
+              el('span', {}, `#${draft.jerseyNumber}`),
             ),
             el('div', { class: 'faint', style: 'font-size:11px;margin-top:6px' }, `Starts at ${overall} OVR · ceiling ${ceiling} OVR`),
           ),
@@ -368,11 +381,22 @@ function renderCreator(): HTMLElement {
                 return;
               }
               draftName = '';
-              toast(`${name} created — go earn some Court Credits`, 'good');
+              toast(`${name} created — go earn some Coins`, 'good');
               navigate('myplayer');
             },
           },
           store.profile.players.length >= MAX_SLOTS ? 'All slots full' : 'Create build',
+        ),
+      ),
+
+      panel(
+        'Attribute graph',
+        radarEl(preview, caps, 300),
+        el(
+          'div',
+          { class: 'row', style: 'justify-content:center;margin-top:8px' },
+          el('span', { class: 'chip' }, el('span', { class: 'dot', style: 'background:#3ef07a' }), 'At creation'),
+          el('span', { class: 'chip' }, el('span', { class: 'dot', style: 'background:#ff7a3d' }), 'Ceiling'),
         ),
       ),
 
@@ -409,11 +433,11 @@ function renderCreator(): HTMLElement {
 
 function describeBuild(caps: Record<string, number>): { label: string; grade: string; color: string }[] {
   const groups: [string, string[]][] = [
-    ['Outside scoring', ['threePoint', 'midRange']],
-    ['Inside scoring', ['layup', 'dunk']],
-    ['Playmaking', ['ballHandle', 'passing']],
+    ['Outside scoring', ['threePoint', 'midRange', 'freeThrow']],
+    ['Inside scoring', ['layup', 'dunk', 'closeShot']],
+    ['Playmaking', ['ballHandle', 'passAccuracy']],
     ['Perimeter defense', ['perimeterDefense', 'steal']],
-    ['Interior defense', ['interiorDefense', 'block', 'rebounding']],
+    ['Interior defense', ['interiorDefense', 'block', 'defensiveRebound']],
     ['Athleticism', ['speed', 'acceleration', 'vertical']],
     ['Physicality', ['strength', 'stamina']],
   ];

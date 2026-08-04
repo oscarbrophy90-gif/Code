@@ -25,6 +25,7 @@ import { audio } from '../../engine/audio.ts';
 import { navigate, refresh } from '../../main.ts';
 import { bar, el, fmt, overlay, panel, tabs, toast } from '../dom.ts';
 import { portraitEl } from '../portrait.ts';
+import { radarEl } from '../radar.ts';
 
 type Tab = 'attributes' | 'badges' | 'animations';
 let tab: Tab = 'attributes';
@@ -117,7 +118,7 @@ function renderAttributes(): HTMLElement {
       gained++;
     }
     if (gained === 0) {
-      toast(p.attributes[key] >= cap ? 'That attribute is already at your build cap' : 'Not enough Court Credits', 'bad');
+      toast(p.attributes[key] >= cap ? 'That attribute is already at your build cap' : 'Not enough Coins', 'bad');
       return;
     }
     store.update((profile) => {
@@ -136,7 +137,40 @@ function renderAttributes(): HTMLElement {
     el(
       'p',
       { class: 'hint mb' },
-      'Every point is bought with Court Credits earned by playing. There is no purchase path for ratings — the store and battle pass sell cosmetics only, so a maxed build is a time investment, never a payment.',
+      'Every point is bought with Coins earned by playing. There is no purchase path for ratings — the store and battle pass sell cosmetics only, so a maxed build is a time investment, never a payment.',
+    ),
+    el(
+      'div',
+      { class: 'grid cols-2', style: 'margin-bottom:14px' },
+      panel(
+        'Attribute graph',
+        radarEl(player.attributes, caps, 300),
+        el(
+          'div',
+          { class: 'row', style: 'justify-content:center;margin-top:8px' },
+          el('span', { class: 'chip' }, el('span', { class: 'dot', style: 'background:#3ef07a' }), 'Current'),
+          el('span', { class: 'chip' }, el('span', { class: 'dot', style: 'background:#ff7a3d' }), 'Build ceiling'),
+        ),
+      ),
+      panel(
+        'Where you stand',
+        ...groups.map((group) => {
+          const cur = group.keys.reduce((a, k) => a + player.attributes[k], 0) / group.keys.length;
+          const cap = group.keys.reduce((a, k) => a + caps[k], 0) / group.keys.length;
+          return el(
+            'div',
+            { class: 'barrow', style: 'margin-bottom:10px' },
+            el('span', { class: 'lbl' }, group.name),
+            el('span', { class: 'val' }, `${Math.round(cur)} / ${Math.round(cap)}`),
+            bar((cur - 25) / 74),
+          );
+        }),
+        el(
+          'div',
+          { class: 'hint', style: 'margin-top:6px' },
+          'The dashed outline on the graph is the hard ceiling your height, weight and wingspan allow. Upgrades can never pass it.',
+        ),
+      ),
     ),
     el(
       'div',

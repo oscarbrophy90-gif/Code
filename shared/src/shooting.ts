@@ -10,7 +10,8 @@ export type ShotType =
   | 'floater'
   | 'euroLayup'
   | 'dunk'
-  | 'contactDunk';
+  | 'contactDunk'
+  | 'freeThrow';
 
 export interface JumpshotDef {
   id: string;
@@ -114,17 +115,22 @@ function lerp(a: number, b: number, t: number): number {
 }
 
 /** Which attribute governs this shot. */
-export function shotAttribute(input: Pick<ShotInput, 'shotType' | 'isThree'>): keyof Attributes {
+export function shotAttribute(input: Pick<ShotInput, 'shotType' | 'isThree' | 'distance'>): keyof Attributes {
   switch (input.shotType) {
+    case 'freeThrow':
+      return 'freeThrow';
     case 'dunk':
     case 'contactDunk':
       return 'dunk';
     case 'layup':
-    case 'floater':
     case 'euroLayup':
       return 'layup';
+    case 'floater':
+      return 'closeShot';
     default:
-      return input.isThree ? 'threePoint' : 'midRange';
+      // Inside ten feet a jumper is a close shot, not a mid-range look.
+      if (input.isThree) return 'threePoint';
+      return input.distance <= 10 ? 'closeShot' : 'midRange';
   }
 }
 
@@ -138,6 +144,7 @@ const SHOT_TYPE_MOD: Record<ShotType, { window: number; time: number; base: numb
   euroLayup: { window: 1.15, time: 0.86, base: 0.99 },
   dunk: { window: 1.6, time: 0.72, base: 1.0 },
   contactDunk: { window: 1.4, time: 0.8, base: 1.0 },
+  freeThrow: { window: 2.2, time: 1.15, base: 1.15 },
 };
 
 /**

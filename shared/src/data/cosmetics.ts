@@ -8,8 +8,8 @@ const jerseys: StoreItem[] = [
   { id: 'jersey-forge', name: 'Foundry Forge Kit', category: 'jersey', price: 3200, rarity: 'rare', colors: ['#c2452d', '#ffb347'], description: 'Molten orange over charcoal.' },
   { id: 'jersey-voltage', name: 'Meridian Voltage Kit', category: 'jersey', price: 3200, rarity: 'rare', colors: ['#f0c419', '#4ad9ff'], description: 'High-vis yellow with a circuit trim.' },
   { id: 'jersey-royals', name: 'Crown Heights Royals Kit', category: 'jersey', price: 3200, rarity: 'rare', colors: ['#6b3fc4', '#c9a227'], description: 'Purple and gold, crown on the chest.' },
-  { id: 'jersey-elite', name: 'Elite Ladder Kit', category: 'jersey', price: 0, rarity: 'epic', colors: ['#a06bff', '#d9bcff'], requirement: 'Reach Elite rank', description: 'Only ladder players wear this one.' },
-  { id: 'jersey-legend', name: 'Legend Banner Kit', category: 'jersey', price: 0, rarity: 'legendary', colors: ['#ff5c8a', '#ffd23d'], requirement: 'Reach Legend rank', description: 'Season banner stitched across the back.' },
+  { id: 'jersey-elite', name: 'Elite Ladder Kit', category: 'jersey', price: 0, rarity: 'epic', colors: ['#a06bff', '#d9bcff'], requirement: 'Beat Superstar', description: 'Only ladder climbers wear this one.' },
+  { id: 'jersey-legend', name: 'Legend Banner Kit', category: 'jersey', price: 0, rarity: 'legendary', colors: ['#ff5c8a', '#ffd23d'], requirement: 'Beat Hall of Fame', description: 'Season banner stitched across the back.' },
   { id: 'jersey-midnight', name: 'Midnight Reflective', category: 'jersey', price: 7500, rarity: 'epic', colors: ['#101018', '#00e5b0'], description: 'Black-on-black that lights up under floodlights.' },
 ];
 
@@ -77,7 +77,7 @@ const courts: StoreItem[] = [
   { id: 'court-hardwood', name: 'Polished Hardwood', category: 'court', price: 8000, rarity: 'rare', colors: ['#c08c4a', '#f8f4ec'], description: 'Indoor feel, glossy finish.' },
   { id: 'court-neon', name: 'Neon Grid', category: 'court', price: 13500, rarity: 'epic', colors: ['#101018', '#00e5b0'], description: 'Reactive lines that pulse on a green.' },
   { id: 'court-sand', name: 'Packed Sand', category: 'court', price: 9500, rarity: 'rare', colors: ['#e0c48a', '#fff3d6'], description: 'Beach lines burned into the surface.' },
-  { id: 'court-marble', name: 'Champion Marble', category: 'court', price: 22000, rarity: 'legendary', colors: ['#e8e4dc', '#c9a227'], requirement: 'Win a Seasonal Championship', description: 'Poured for winners only.' },
+  { id: 'court-marble', name: 'Champion Marble', category: 'court', price: 22000, rarity: 'legendary', colors: ['#e8e4dc', '#c9a227'], requirement: 'Complete the career ladder', description: 'Poured for winners only.' },
 ];
 
 const jumpshotItems: StoreItem[] = JUMPSHOTS.map((j) => ({

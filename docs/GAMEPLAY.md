@@ -125,6 +125,11 @@ either a gather of speed or a standing leaper's rating right under the basket; o
 you get a layup, floater or eurostep finish, all of which run through the normal shot
 meter with a wider window.
 
+Which rating governs a shot depends on where it comes from: **Layup** for drives and
+eurosteps, **Close Shot** for floaters and any jumper inside ten feet, **Mid Range**
+outside that, **Three Point** past the arc, **Dunk** for throw-downs and **Free Throw**
+at the stripe.
+
 A contact dunk requires a contact-capable dunk package and a defender inside 3.4 feet,
 then rolls your Dunk/Strength/Vertical and Contact Finisher against their Interior
 Defense/Strength and Rim Protector. It knocks the defender back and finishes at ~97%.
@@ -142,9 +147,10 @@ Defense/Strength and Rim Protector. It knocks the defender back and finishes at 
 - **Steals.** `F` reaches in. The handler is 45% more vulnerable mid-dribble-animation and
   40% less vulnerable while shooting. A failed reach staggers you for 0.32 s and puts the
   attempt on a 1.25 s cooldown — the risk is real.
-- **Rebounds.** A miss produces a physical carom off the rim. Both players have a grab
-  radius from Rebounding and Rebound Chaser; contested boards resolve by weight from
-  Rebounding, Vertical, Strength, height and whether you left the floor.
+- **Rebounds.** A miss produces a physical carom off the rim. Which rating applies depends
+  on who shot it: chasing your own miss uses **Offensive Rebound**, everything else uses
+  **Defensive Rebound**. Contested boards resolve by weight from that rating, Vertical,
+  Strength, height and whether you left the floor.
 
 ## Rules
 
@@ -155,31 +161,91 @@ After a change of possession or an offensive rebound the ball must be taken back
 arc before it can be scored; the HUD calls this out and shots are suppressed until you
 clear. A shot already in the air beats the shot-clock buzzer.
 
+## Fouls and free throws
+
+A defender who leaves his feet into a finisher gives up a shooting foul. Rates are
+deliberately low — around 1.8 fouls per game — so a foul punishes a reckless contest
+rather than interrupting the flow.
+
+```
+chance  = 0.17 at the rim (0.08 outside) if the defender is airborne
+        + 0.05 within two feet
+        + 0.04 if the defender is already beaten
+chance *= 1 − discipline        Interior Defense and Immovable reduce it
+```
+
+Inside the arc is one free throw, behind it is two, each worth a point. Free throws run
+through the same meter with no contest, no drift and a window scaled by the **Free
+Throw** rating — the one shot in the game that is purely your timing. A make keeps the
+ball under make-it-take-it; a miss on the last attempt is a live rebound off the rim.
+
 ## AI
 
-The bot is not a cheating mirror of your inputs. It reads a **lagged** copy of your
-position from a rolling history buffer — 340 ms at Rookie down to 100 ms at Legend — so
-a well-timed hesitation genuinely beats it.
+Six difficulties, and they are not one bot with a multiplier. The levers that change how
+a game *feels* are reaction time (can you beat it with a move?), release error (does it
+punish you?), the move pool (what can it do to you?) and tendency reading (does it
+learn?).
 
-| Difficulty | Reaction | Standoff | Contest IQ | Release error |
-| --- | --- | --- | --- | --- |
-| Rookie | 340 ms | 4.6 ft | 30% | ±30% |
-| Pro | 260 ms | 3.9 ft | 48% | ±20% |
-| All-Star | 190 ms | 3.3 ft | 64% | ±13% |
-| Superstar | 140 ms | 2.8 ft | 78% | ±8.5% |
-| Legend | 100 ms | 2.4 ft | 90% | ±5.5% |
+| Difficulty | Reaction | Standoff | Release error | Moves | Reads you |
+| --- | --- | --- | --- | --- | --- |
+| Rookie | 420 ms | 5.2 ft | ±34% | basic only, no chaining | no |
+| Semi-Pro | 320 ms | 4.4 ft | ±24% | basic, chains 2 | no |
+| Pro | 250 ms | 3.8 ft | ±17% | advanced, chains 2 | a little |
+| All-Star | 190 ms | 3.2 ft | ±11.5% | advanced, chains 3 | yes |
+| Superstar | 140 ms | 2.7 ft | ±7.5% | signature, chains 3 | strongly |
+| Hall of Fame | 95 ms | 2.3 ft | ±4.5% | signature, chains 4 | fully |
 
-On defense it predicts where you are going (scaled by its help IQ), positions between you
-and the rim, contests jumpers on a timing read, protects the rim, and gambles for strips
-mostly while you are mid-animation.
+Higher difficulties also field a slightly better build — from −8 OVR at Rookie to +9 at
+Hall of Fame — so the level changes both the opponent and the player behind it.
 
-On offense its willingness to shoot rises with how much space you give it and with shot
-clock pressure, so possessions resolve. It commits to drives for a full second rather than
-re-deciding every frame, uses dribble moves at a difficulty-scaled rate, and attacks
-immediately when it breaks you down.
+Measured against a **constant reference opponent** over 40 games each:
 
-**Adaptive difficulty** tracks the score margin and a rolling estimate of your green rate,
-then nudges reaction time, standoff, contest IQ, release error and shot selection by up to
-±22%. It tightens when it is losing badly or you are shooting well, and loosens when it is
-running away with the game — but it is capped so it never becomes a different difficulty
-than the one you selected.
+| | Rookie | Semi-Pro | Pro | All-Star | Superstar | Hall of Fame |
+| --- | --- | --- | --- | --- | --- | --- |
+| You win | 93% | 85% | 63% | 35% | 13% | 3% |
+| CPU FG% | 22.5 | 27.9 | 31.2 | 46.4 | 61.8 | 71.3 |
+| CPU green% | 5.4 | 10.6 | 13.1 | 23.6 | 35.2 | 49.6 |
+| CPU moves/game | 5.2 | 6.2 | 7.1 | 9.8 | 11.7 | 14.9 |
+
+Rookie genuinely "misses open shots often" at 22.5%; Hall of Fame genuinely plays like a
+strong competitor at 71%. This curve is asserted in the test suite, so a balance change
+that flattens it fails CI.
+
+### Perception
+
+The bot reads a **lagged** copy of your position from a rolling history buffer rather
+than the current frame. That is what makes a hesitation or a well-timed combo work: at
+Rookie you have 420 ms of lie in your favour, at Hall of Fame only 95 ms.
+
+It also bites on pump fakes in proportion to difficulty — 75% at Rookie down to 9% at
+Hall of Fame — so a fake is a real tool early and nearly wasted late.
+
+### The scouting report
+
+Every shot you take updates two rolling averages: what share come from behind the arc,
+and what share attack the rim. From All-Star upward the bot acts on it:
+
+```
+standoff −= (threeRate − 0.4) × tendencyRead × 2.2   // crowd a shooter
+standoff += (driveRate − 0.3) × tendencyRead × 1.6   // sag off a slasher
+```
+
+Spam threes against Superstar and it starts closing out past the arc, which opens the
+drive. Live on drives and it walls up the paint, which opens the jumper. The
+counter-play is to actually vary your shot selection.
+
+### Adaptive difficulty
+
+On top of that, the bot tracks the score margin and a rolling estimate of your green
+rate, then nudges reaction time, standoff, contest IQ, release error and shot selection
+by up to ±22%. It tightens when it is losing badly or you are shooting well, and loosens
+when it is running away with the game — capped so it never becomes a different
+difficulty than the one you chose.
+
+### Offense
+
+Willingness to shoot rises with the space you give it and with shot-clock pressure, so
+possessions resolve. It commits to drives for a full second rather than re-deciding every
+frame, picks moves from a difficulty-gated pool, and attacks immediately when it breaks
+you down. It shoots its own free throws with a tighter error than in open play, because a
+stationary uncontested shot is its best look of the game.

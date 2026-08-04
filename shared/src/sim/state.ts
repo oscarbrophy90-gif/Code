@@ -149,7 +149,7 @@ export interface Ball {
   settled: boolean;
 }
 
-export type MatchPhase = 'warmup' | 'checkball' | 'live' | 'deadball' | 'over';
+export type MatchPhase = 'warmup' | 'checkball' | 'live' | 'deadball' | 'freeThrow' | 'over';
 
 export interface MatchConfig {
   targetScore: number;
@@ -178,6 +178,10 @@ export interface PlayerMatchStats {
   contactDunks: number;
   chaseDownBlocks: number;
   bestStreak: number;
+  ftm: number;
+  fta: number;
+  foulsDrawn: number;
+  foulsCommitted: number;
   /** running teammate-grade style score, -3..+3 mapped later */
   gradePoints: number;
 }
@@ -198,6 +202,10 @@ export function emptyStats(): PlayerMatchStats {
     contactDunks: 0,
     chaseDownBlocks: 0,
     bestStreak: 0,
+    ftm: 0,
+    fta: 0,
+    foulsDrawn: 0,
+    foulsCommitted: 0,
     gradePoints: 0,
   };
 }
@@ -215,6 +223,8 @@ export type SimEvent =
   | { type: 'dunk'; side: Side }
   | { type: 'turnover'; side: Side; reason: 'shotClock' | 'outOfBounds' | 'strip' }
   | { type: 'clear'; side: Side }
+  | { type: 'foul'; on: Side; by: Side; shots: number }
+  | { type: 'freeThrow'; side: Side; made: boolean; remaining: number }
   | { type: 'phase'; phase: MatchPhase }
   | { type: 'gameOver'; winner: Side; score: [number, number] };
 
@@ -233,6 +243,8 @@ export interface MatchState {
   shotClock: number;
   clock: number;
   stats: [PlayerMatchStats, PlayerMatchStats];
+  /** set while the game is stopped at the stripe */
+  freeThrow: { side: Side; remaining: number } | null;
   events: SimEvent[];
   config: MatchConfig;
   winner: Side | null;

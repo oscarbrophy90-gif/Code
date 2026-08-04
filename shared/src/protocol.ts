@@ -144,7 +144,7 @@ export interface PackedSnapshot {
   rng: number;
 }
 
-export const PHASE_IDS = ['warmup', 'checkball', 'live', 'deadball', 'over'] as const;
+export const PHASE_IDS = ['warmup', 'checkball', 'live', 'deadball', 'freeThrow', 'over'] as const;
 export const BALL_STATE_IDS = ['held', 'shot', 'loose', 'dunking', 'dead'] as const;
 export const ACT_STATE_IDS = [
   'idle',

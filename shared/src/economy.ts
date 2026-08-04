@@ -2,12 +2,12 @@ import type { PlayerMatchStats } from './sim/state.ts';
 import type { Playlist } from './types.ts';
 
 /**
- * Currency ("Court Credits", CC) and XP are earned only through play. There is
- * no purchase path for attributes — the premium battle pass track sells
- * cosmetics and XP boosts, never ratings.
+ * Coins and XP are earned only through play. There is no purchase path for
+ * attributes — the premium battle pass track sells cosmetics and XP boosts,
+ * never ratings.
  */
-export const CURRENCY_NAME = 'Court Credits';
-export const CURRENCY_SHORT = 'CC';
+export const CURRENCY_NAME = 'Coins';
+export const CURRENCY_SHORT = 'Coins';
 
 export interface MatchReward {
   currency: number;

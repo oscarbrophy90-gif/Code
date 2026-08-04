@@ -1,4 +1,4 @@
-import { computeOverall, formatHeight, rankLabel, type MyPlayer } from '@hoops/shared';
+import { DIFFICULTY_LABEL, computeOverall, formatHeight, type MyPlayer } from '@hoops/shared';
 
 import { store } from '../../state/store.ts';
 import { el, fmt, panel, ratio } from '../dom.ts';
@@ -22,6 +22,7 @@ export function renderStats(): HTMLElement {
       bigStat('FG %', ratio(s.fgm, s.fga), `${fmt(s.fgm)} / ${fmt(s.fga)}`),
       bigStat('3PT %', ratio(s.tpm, s.tpa), `${fmt(s.tpm)} / ${fmt(s.tpa)}`),
       bigStat('Green %', ratio(s.greens, s.fga), `${fmt(s.greens)} perfect releases`),
+      bigStat('FT %', ratio(s.freeThrowsMade, s.freeThrowsAttempted), `${fmt(s.freeThrowsMade)} / ${fmt(s.freeThrowsAttempted)}`),
     ),
 
     el(
@@ -31,15 +32,16 @@ export function renderStats(): HTMLElement {
         'div',
         { style: 'display:grid;gap:14px' },
         panel(
-          'Per game',
+          'Per game averages',
           table([
-            ['Points', (s.points / games).toFixed(1), fmt(s.points)],
-            ['Rebounds', (s.rebounds / games).toFixed(1), fmt(s.rebounds)],
-            ['Assists', (s.assists / games).toFixed(1), fmt(s.assists)],
-            ['Steals', (s.steals / games).toFixed(1), fmt(s.steals)],
-            ['Blocks', (s.blocks / games).toFixed(1), fmt(s.blocks)],
+            ['PPG — points', (s.points / games).toFixed(1), fmt(s.points)],
+            ['RPG — rebounds', (s.rebounds / games).toFixed(1), fmt(s.rebounds)],
+            ['APG — assists', (s.assists / games).toFixed(1), fmt(s.assists)],
+            ['SPG — steals', (s.steals / games).toFixed(1), fmt(s.steals)],
+            ['BPG — blocks', (s.blocks / games).toFixed(1), fmt(s.blocks)],
             ['Turnovers', (s.turnovers / games).toFixed(1), fmt(s.turnovers)],
             ['Field goals', (s.fga / games).toFixed(1), fmt(s.fga)],
+            ['Free throws', (s.freeThrowsAttempted / games).toFixed(1), fmt(s.freeThrowsAttempted)],
             ['Greens', (s.greens / games).toFixed(1), fmt(s.greens)],
           ]),
         ),
@@ -66,8 +68,13 @@ export function renderStats(): HTMLElement {
             el('span', { class: 'k' }, 'Average teammate grade'),
             el('span', { class: 'v' }, s.teammateGradeCount ? gradeLetter(s.teammateGradeSum / s.teammateGradeCount) : '—'),
           ),
-          el('div', { class: 'kv' }, el('span', { class: 'k' }, 'Highest rank'), el('span', { class: 'v' }, rankLabel(Math.max(s.highestRankPoints, player.rank.points)))),
-          el('div', { class: 'kv' }, el('span', { class: 'k' }, 'Current rank'), el('span', { class: 'v' }, `${rankLabel(player.rank.points)} · ${fmt(player.rank.points)} RP`)),
+          el(
+            'div',
+            { class: 'kv' },
+            el('span', { class: 'k' }, 'Highest difficulty beaten'),
+            el('span', { class: 'v' }, s.highestDifficultyBeaten ? DIFFICULTY_LABEL[s.highestDifficultyBeaten] : '—'),
+          ),
+          el('div', { class: 'kv' }, el('span', { class: 'k' }, 'Fouls drawn'), el('span', { class: 'v' }, fmt(s.freeThrowsAttempted))),
         ),
         panel('All builds', ...store.profile.players.map(buildRow)),
       ),
@@ -85,7 +92,7 @@ function buildRow(p: MyPlayer): HTMLElement {
       'div',
       { style: 'min-width:0;flex:1' },
       el('div', { style: 'font-weight:800;font-size:13px' }, p.name),
-      el('div', { class: 'faint', style: 'font-size:11px' }, `${p.build.position} · ${formatHeight(p.build.heightIn)} · ${computeOverall(p.attributes, p.build.position)} OVR`),
+      el('div', { class: 'faint', style: 'font-size:11px' }, `${p.build.position} · #${p.build.jerseyNumber} · ${formatHeight(p.build.heightIn)} · ${computeOverall(p.attributes, p.build.position)} OVR`),
     ),
     el(
       'div',

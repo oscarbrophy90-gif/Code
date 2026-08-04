@@ -4,7 +4,7 @@ import {
   RARITY_COLOR,
   STORE_BY_ID,
   itemsInCategory,
-  tierForPoints,
+  DIFFICULTIES,
   type StoreCategory,
   type StoreItem,
 } from '@hoops/shared';
@@ -44,7 +44,7 @@ export function renderStore(params: RouteParams): HTMLElement {
     el(
       'p',
       { class: 'page-sub' },
-      `Everything here is bought with Court Credits you earned playing. Cosmetics change how you look and how your animations feel — they never change a rating. You have ${fmt(player.currency)} ${CURRENCY_SHORT}.`,
+      `Everything here is bought with Coins you earned playing. Cosmetics change how you look and how your animations feel — they never change a rating. You have ${fmt(player.currency)} ${CURRENCY_SHORT}.`,
     ),
     tabs(
       CATEGORIES.map((c) => ({ id: c.id, label: c.label })),
@@ -193,15 +193,23 @@ function equip(item: StoreItem): void {
   refresh();
 }
 
-/** Rank- and achievement-gated items cannot be bought at all. */
+/** Prestige items are earned on the career ladder, never bought. */
 function requirementMet(item: StoreItem): { ok: boolean; message: string } {
   if (!item.requirement) return { ok: true, message: '' };
-  const tier = tierForPoints(store.player.rank.points).tier;
-  if (item.requirement.includes('Elite')) {
-    return { ok: tier === 'elite' || tier === 'legend', message: 'Reach Elite rank to unlock this.' };
+  const stats = store.player.stats;
+  const beaten = (d: (typeof DIFFICULTIES)[number]) => (stats.winsByDifficulty[d] ?? 0) > 0;
+
+  if (item.requirement.includes('Superstar')) {
+    return { ok: beaten('superstar'), message: 'Beat Superstar to unlock this.' };
   }
-  if (item.requirement.includes('Legend')) {
-    return { ok: tier === 'legend', message: 'Reach Legend rank to unlock this.' };
+  if (item.requirement.includes('Hall of Fame')) {
+    return { ok: beaten('hallOfFame'), message: 'Beat Hall of Fame to unlock this.' };
+  }
+  if (item.requirement.includes('career ladder')) {
+    return {
+      ok: DIFFICULTIES.every(beaten),
+      message: 'Beat every difficulty to unlock this.',
+    };
   }
   return { ok: false, message: item.requirement };
 }

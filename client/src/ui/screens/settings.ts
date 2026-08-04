@@ -1,8 +1,7 @@
-import { REGIONS, type GameSettings, type Region, type ShotMeterStyle } from '@hoops/shared';
+import type { GameSettings, ShotMeterStyle } from '@hoops/shared';
 
 import { store } from '../../state/store.ts';
 import { audio } from '../../engine/audio.ts';
-import { net } from '../../net/client.ts';
 import { refresh } from '../../main.ts';
 import { confirmDialog, el, panel, segmented, slider, toast } from '../dom.ts';
 
@@ -29,7 +28,7 @@ export function renderSettings(): HTMLElement {
     'div',
     { class: 'wrap' },
     el('h1', { class: 'page' }, 'Settings'),
-    el('p', { class: 'page-sub' }, 'Presentation and connection options. Nothing here changes gameplay balance — meter style and audio are preference, not advantage.'),
+    el('p', { class: 'page-sub' }, 'Presentation options. Nothing here changes gameplay balance — meter style and audio are preference, not advantage.'),
 
     el(
       'div',
@@ -123,83 +122,6 @@ export function renderSettings(): HTMLElement {
       ),
 
       panel(
-        'Online',
-        el('div', { class: 'faint', style: 'font-size:11px;margin-bottom:6px' }, 'Server address'),
-        el('input', {
-          type: 'text',
-          value: s.serverUrl,
-          oninput: (e: Event) => set('serverUrl', (e.target as HTMLInputElement).value),
-        }),
-        el('div', { class: 'faint', style: 'font-size:11px;margin:12px 0 6px' }, 'Region'),
-        segmented(
-          REGIONS.map((r) => ({ value: r as Region, label: r.toUpperCase() })),
-          store.profile.region,
-          (v) => {
-            store.update((p) => {
-              p.region = v;
-            });
-            refresh();
-          },
-        ),
-        el(
-          'div',
-          { class: 'row', style: 'margin-top:14px' },
-          el(
-            'button',
-            {
-              class: 'btn sm',
-              onclick: () => {
-                void net
-                  .connect()
-                  .then(() => toast('Connected to the Hoops Elite server', 'good'))
-                  .catch((e: Error) => toast(e.message, 'bad'));
-              },
-            },
-            'Test connection',
-          ),
-          el(
-            'button',
-            {
-              class: 'btn sm',
-              onclick: () => {
-                void net
-                  .saveProfile()
-                  .then(() => toast('Profile pushed to cloud save', 'good'))
-                  .catch((e: Error) => toast(e.message, 'bad'));
-              },
-            },
-            'Upload cloud save',
-          ),
-          el(
-            'button',
-            {
-              class: 'btn sm',
-              onclick: () => {
-                void net
-                  .loadProfile()
-                  .then((blob) => {
-                    if (!blob) {
-                      toast('No cloud save found for this account', 'bad');
-                      return;
-                    }
-                    confirmDialog('Restore cloud save?', 'Your local progress will be replaced by the version stored on the server.', () => {
-                      if (store.importBlob(blob)) {
-                        toast('Cloud save restored', 'good');
-                        refresh();
-                      } else {
-                        toast('That cloud save could not be read', 'bad');
-                      }
-                    });
-                  })
-                  .catch((e: Error) => toast(e.message, 'bad'));
-              },
-            },
-            'Restore cloud save',
-          ),
-        ),
-      ),
-
-      panel(
         'Profile',
         el('div', { class: 'faint', style: 'font-size:11px;margin-bottom:6px' }, 'Display name'),
         el('input', {
@@ -272,7 +194,7 @@ export function renderSettings(): HTMLElement {
         'About',
         el('p', { class: 'hint', style: 'margin:0 0 10px' }, 'Hoops Elite is an original basketball game. Every team, player, court, logo and animation in it was created for this project — there are no third-party league, club or player likenesses anywhere in the build.'),
         el('div', { class: 'kv' }, el('span', { class: 'k' }, 'Simulation rate'), el('span', { class: 'v' }, '120 Hz fixed')),
-        el('div', { class: 'kv' }, el('span', { class: 'k' }, 'Netcode'), el('span', { class: 'v' }, 'Server authoritative + client prediction')),
+        el('div', { class: 'kv' }, el('span', { class: 'k' }, 'Mode'), el('span', { class: 'v' }, 'Single player vs CPU')),
         el('div', { class: 'kv' }, el('span', { class: 'k' }, 'Monetisation'), el('span', { class: 'v' }, 'Cosmetic only')),
       ),
     ),

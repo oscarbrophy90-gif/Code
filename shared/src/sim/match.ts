@@ -159,6 +159,7 @@ export function createMatch(
     shotClock: config.shotClock,
     clock: config.timeLimit,
     stats: [emptyStats(), emptyStats()],
+    freeThrow: null,
     events: [],
     config,
     winner: null,
@@ -224,6 +225,12 @@ export function stepMatch(state: MatchState, inputs: [PlayerInput, PlayerInput],
         state.events.push({ type: 'phase', phase: 'live' });
       }
     }
+  }
+
+  if (state.phase === 'freeThrow') {
+    updateFreeThrow(state, inputs, dt, rng);
+    state.rngState = rng.snapshot();
+    return;
   }
 
   const live = state.phase === 'live';
@@ -682,8 +689,10 @@ function releaseShot(state: MatchState, side: Side, rng: Rng): void {
   p.state = 'airborne';
   p.shotProfile = null;
 
-  // Block check at the release point.
+  // Block check at the release point, then a foul check on what got through.
+  const interior = distanceToRim(p.x, p.z) < 9;
   if (tryBlock(state, other(side), side, rng, false)) return;
+  if (tryFoul(state, other(side), side, rng, interior)) return;
 
   const three = p.shotIsThree;
   const result = resolveShot(profile, releasePoint, rng.next(), three);
@@ -832,6 +841,7 @@ function completeFinish(state: MatchState, side: Side, rng: Rng): void {
   p.state = 'airborne';
 
   if (tryBlock(state, other(side), side, rng, true)) return;
+  if (tryFoul(state, other(side), side, rng, true)) return;
 
   const contact = p.shotType === 'contactDunk';
   const defDist = Math.hypot(d.x - p.x, d.z - p.z);
@@ -1062,11 +1072,13 @@ function tryCollect(state: MatchState, rng: Rng): void {
     const p = state.players[side];
     const dist = Math.hypot(ball.x - p.x, ball.z - p.z);
     const boardBadge = badgeLevel(p.cfg.badges, 'reboundChaser');
-    const grabRadius = 2.0 + (p.cfg.attrs.rebounding / 99) * 1.4 + boardBadge * 0.9;
+    // Chasing your own miss is an offensive board; everything else is defensive.
+    const boardRating = ball.shotBy === side ? p.cfg.attrs.offensiveRebound : p.cfg.attrs.defensiveRebound;
+    const grabRadius = 2.0 + (boardRating / 99) * 1.4 + boardBadge * 0.9;
     const reach = reachHeight(p) + 0.6;
     if (dist <= grabRadius && ball.y <= reach && p.stagger < 0.7) {
       const weight =
-        p.cfg.attrs.rebounding * 0.55 +
+        boardRating * 0.55 +
         p.cfg.attrs.vertical * 0.2 +
         p.cfg.attrs.strength * 0.15 +
         (p.cfg.heightIn - 72) * 0.6 +
@@ -1111,6 +1123,222 @@ function tryCollect(state: MatchState, rng: Rng): void {
     state.needsClear = true;
   }
   state.shotClock = state.config.shotClock;
+}
+
+// -------------------------------------------------------------- free throws
+
+/**
+ * A defender who leaves his feet into a finisher gives up a shooting foul.
+ * Rates are deliberately low — fouls should punish a reckless contest, not
+ * interrupt the flow of every possession.
+ */
+function tryFoul(state: MatchState, defSide: Side, offSide: Side, rng: Rng, atRim: boolean): boolean {
+  const d = state.players[defSide];
+  const p = state.players[offSide];
+  const dist = Math.hypot(p.x - d.x, p.z - d.z);
+  if (dist > 3.4) return false;
+
+  let chance = 0;
+  if (d.y > 0.35) chance += atRim ? 0.17 : 0.08;
+  if (dist < 2.0) chance += 0.05;
+  if (d.stagger > 0.4) chance += 0.04; // beaten defenders grab
+  if (chance <= 0) return false;
+
+  // Discipline: a strong interior defender fouls less often on the same play.
+  const discipline = clamp01((d.cfg.attrs.interiorDefense - 55) / 44) * 0.35 + badgeLevel(d.cfg.badges, 'immovable') * 0.25;
+  chance *= 1 - discipline;
+
+  if (!rng.chance(clamp01(chance))) return false;
+
+  // Behind the arc is worth two at the stripe, inside it is worth one.
+  const shots = isBeyondArc(p.x, p.z) ? 2 : 1;
+  awardFreeThrows(state, offSide, defSide, shots);
+  return true;
+}
+
+function awardFreeThrows(state: MatchState, offSide: Side, defSide: Side, shots: number): void {
+  state.stats[offSide].foulsDrawn++;
+  state.stats[defSide].foulsCommitted++;
+  state.stats[defSide].gradePoints -= 0.25;
+  state.events.push({ type: 'foul', on: offSide, by: defSide, shots });
+
+  state.freeThrow = { side: offSide, remaining: shots };
+  state.phase = 'freeThrow';
+  state.phaseTimer = 1.1;
+  state.possession = offSide;
+  state.needsClear = false;
+  state.events.push({ type: 'phase', phase: 'freeThrow' });
+
+  setupFreeThrowPositions(state);
+}
+
+function setupFreeThrowPositions(state: MatchState): void {
+  const shooterSide = state.freeThrow!.side;
+  const shooter = state.players[shooterSide];
+  const other_ = state.players[other(shooterSide)];
+
+  shooter.x = 0;
+  shooter.z = COURT.freeThrowZ;
+  shooter.vx = shooter.vz = shooter.y = shooter.vy = 0;
+  shooter.state = 'idle';
+  shooter.stagger = 0;
+  shooter.staggerTimer = 0;
+  shooter.shotProfile = null;
+  shooter.shotElapsed = 0;
+  shooter.facing = Math.PI;
+
+  other_.x = 7;
+  other_.z = COURT.freeThrowZ - 6;
+  other_.vx = other_.vz = other_.y = other_.vy = 0;
+  other_.state = 'idle';
+  other_.stagger = 0;
+  other_.facing = 0;
+
+  const ball = state.ball;
+  ball.state = 'held';
+  ball.owner = shooterSide;
+  ball.shotBy = null;
+  ball.shotGrade = null;
+  // A trip to the line is also a breather.
+  shooter.stamina = clamp01(shooter.stamina + 0.14);
+  other_.stamina = clamp01(other_.stamina + 0.1);
+}
+
+function buildFreeThrowProfile(state: MatchState, side: Side): ShotProfile {
+  const p = state.players[side];
+  return computeShotProfile({
+    attrs: p.cfg.attrs,
+    badges: p.cfg.badges,
+    jumpshotId: p.cfg.jumpshotId,
+    shotType: 'freeThrow',
+    distance: 15,
+    isThree: false,
+    // Nobody is allowed to contest a free throw, and the shooter is set.
+    contest: 0,
+    stamina: p.stamina,
+    driftSpeed: 0,
+    greenStreak: p.greenStreak,
+    makeStreak: p.makeStreak,
+    clutch: Math.max(state.score[0], state.score[1]) >= state.config.targetScore - 2,
+    heightDelta: 0,
+  });
+}
+
+function updateFreeThrow(state: MatchState, inputs: [PlayerInput, PlayerInput], dt: number, rng: Rng): void {
+  const ft = state.freeThrow;
+  if (!ft) {
+    state.phase = 'live';
+    return;
+  }
+  const shooter = state.players[ft.side];
+  const input = inputs[ft.side];
+
+  if (state.phaseTimer > 0) {
+    state.phaseTimer -= dt;
+    return;
+  }
+
+  // The ball is in the shooter's hands until the meter starts.
+  if (shooter.state !== 'shooting') {
+    if (input.shoot) {
+      shooter.state = 'shooting';
+      shooter.shotElapsed = 0;
+      shooter.shotType = 'freeThrow';
+      shooter.shotFromX = shooter.x;
+      shooter.shotFromZ = shooter.z;
+      shooter.shotIsThree = false;
+      shooter.shotDrift = 0;
+      shooter.shotProfile = buildFreeThrowProfile(state, ft.side);
+    }
+    state.ball.x = shooter.x + 0.8;
+    state.ball.z = shooter.z;
+    state.ball.y = 3.4;
+    return;
+  }
+
+  shooter.shotElapsed += dt;
+  shooter.shotProfile = buildFreeThrowProfile(state, ft.side);
+  const profile = shooter.shotProfile;
+  const forced = shooter.shotElapsed >= profile.meterDuration * 1.4;
+  if (input.shoot && !forced) {
+    state.ball.y = 3.4 + (shooter.shotElapsed / profile.meterDuration) * 3.2;
+    return;
+  }
+
+  const releasePoint = clamp(shooter.shotElapsed / profile.meterDuration, 0, 1.4);
+  const result = resolveShot(profile, releasePoint, rng.next(), false);
+
+  shooter.state = 'idle';
+  shooter.shotProfile = null;
+  shooter.shotElapsed = 0;
+
+  const stats = state.stats[ft.side];
+  stats.fta++;
+  if (result.grade === 'green') {
+    stats.greens++;
+    shooter.greenStreak++;
+  } else {
+    shooter.greenStreak = 0;
+  }
+
+  state.events.push({
+    type: 'shotRelease',
+    side: ft.side,
+    grade: result.grade,
+    made: result.made,
+    value: 1,
+    timingError: result.timingError,
+    shotType: 'freeThrow',
+  });
+
+  ft.remaining--;
+  state.events.push({ type: 'freeThrow', side: ft.side, made: result.made, remaining: ft.remaining });
+
+  if (result.made) {
+    stats.ftm++;
+    stats.points++;
+    state.score[ft.side] += 1;
+    state.events.push({ type: 'score', side: ft.side, value: 1, score: [state.score[0], state.score[1]] });
+    awardBadgeProgress(shooter.cfg.badges, shooter.cfg.attrs, 'anyMake', 0.5);
+
+    const target = state.config.targetScore;
+    const opp = state.score[other(ft.side)];
+    if ((state.score[ft.side] >= target && state.score[ft.side] - opp >= state.config.winBy) || state.score[ft.side] >= state.config.maxScore) {
+      state.freeThrow = null;
+      finishGame(state, ft.side);
+      return;
+    }
+  }
+
+  if (ft.remaining > 0) {
+    state.phaseTimer = 0.9;
+    setupFreeThrowPositions(state);
+    return;
+  }
+
+  // Last attempt resolved: a make keeps the ball (make it take it), a miss is
+  // a live rebound off the rim.
+  state.freeThrow = null;
+  if (result.made) {
+    state.phase = 'deadball';
+    state.phaseTimer = 0.9;
+    state.possession = state.config.makeItTakeIt ? ft.side : other(ft.side);
+    state.events.push({ type: 'phase', phase: 'deadball' });
+  } else {
+    state.phase = 'live';
+    state.shotClock = state.config.shotClock;
+    const ball = state.ball;
+    ball.state = 'loose';
+    ball.owner = null;
+    ball.shotBy = ft.side;
+    ball.x = COURT.rimX + rng.range(-1, 1);
+    ball.z = COURT.rimZ + rng.range(0.5, 2.5);
+    ball.y = COURT.rimY - 0.5;
+    ball.vx = rng.range(-6, 6);
+    ball.vz = rng.range(3, 9);
+    ball.vy = rng.range(2, 5);
+    state.events.push({ type: 'phase', phase: 'live' });
+  }
 }
 
 // ------------------------------------------------------------------- scoring

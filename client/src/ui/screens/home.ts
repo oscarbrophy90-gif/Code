@@ -1,14 +1,14 @@
 import {
   CURRENCY_SHORT,
+  DIFFICULTIES,
+  DIFFICULTY_LABEL,
   LIVE_EVENTS,
   formatHeight,
   generateChallenges,
   isEventLive,
   levelProgress,
-  rankLabel,
   seasonForTime,
   seasonTimeRemaining,
-  tierForPoints,
 } from '@hoops/shared';
 
 import { store } from '../../state/store.ts';
@@ -23,7 +23,11 @@ export function renderHome(): HTMLElement {
   const now = Date.now();
   const season = seasonForTime(now);
   const remaining = seasonTimeRemaining(now);
-  const tier = tierForPoints(player.rank.points);
+  const cleared = DIFFICULTIES.filter((d) => (player.stats.winsByDifficulty[d] ?? 0) > 0).length;
+  const best = player.stats.highestDifficultyBeaten;
+  const ladderColor = best
+    ? { rookie: '#4aa3ff', semiPro: '#3ef07a', pro: '#ffc53d', allStar: '#ff7a3d', superstar: '#a06bff', hallOfFame: '#ff5c8a' }[best]
+    : '#3b4252';
   const challenges = generateChallenges(now).filter((c) => c.scope === 'daily');
 
   return el(
@@ -77,14 +81,14 @@ export function renderHome(): HTMLElement {
         el(
           'div',
           { class: 'mode-grid' },
-          modeTile('Ranked', 'Ranked 1v1', 'Climb Bronze to Legend. Skill-based matchmaking, seasonal rewards.', '#ff7a3d', true, () =>
-            navigate('play', { mode: 'ranked' }),
+          modeTile('Play now', '1v1 vs CPU', 'Six difficulties from Rookie to Hall of Fame. Adaptive AI that learns how you play.', '#ff7a3d', true, () =>
+            navigate('play'),
           ),
-          modeTile('Casual', 'Quick Play', 'No rank on the line. Same rules, looser matchmaking.', '#4aa3ff', false, () =>
-            navigate('play', { mode: 'casual' }),
+          modeTile('Practice', 'Practice Gym', 'No defender, 60-second clock. Dial in your release.', '#3ef07a', false, () =>
+            navigate('play'),
           ),
-          modeTile('Solo', 'Practice & AI', 'Five difficulties, adaptive AI, free run to dial in your timing.', '#3ef07a', false, () =>
-            navigate('play', { mode: 'solo' }),
+          modeTile('Records', 'Career Ladder', 'Track every difficulty you have cleared and your personal bests.', '#4aa3ff', false, () =>
+            navigate('records'),
           ),
           modeTile('Parks', 'Enter a Park', 'Walk the courts, squad up, queue from anywhere.', '#a06bff', false, () => navigate('parks')),
         ),
@@ -117,29 +121,31 @@ export function renderHome(): HTMLElement {
         ),
 
         panel(
-          'Rank',
+          'Career ladder',
           el(
             'div',
             { class: 'row' },
             el('div', {
-              style: `width:42px;height:48px;clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);background:linear-gradient(160deg, ${tier.glow}, ${tier.color})`,
+              style: `width:42px;height:48px;clip-path:polygon(50% 0,100% 25%,100% 75%,50% 100%,0 75%,0 25%);background:linear-gradient(160deg, ${ladderColor}, ${ladderColor}88)`,
             }),
             el(
               'div',
               {},
-              el('div', { style: 'font-size:17px;font-weight:900' }, rankLabel(player.rank.points)),
-              el('div', { class: 'faint', style: 'font-size:11px' }, `${fmt(player.rank.points)} RP · season high ${fmt(player.rank.seasonHigh)}`),
+              el(
+                'div',
+                { style: 'font-size:17px;font-weight:900' },
+                player.stats.highestDifficultyBeaten ? DIFFICULTY_LABEL[player.stats.highestDifficultyBeaten] : 'Unranked',
+              ),
+              el('div', { class: 'faint', style: 'font-size:11px' }, `${cleared} of ${DIFFICULTIES.length} difficulties cleared`),
             ),
           ),
-          player.rank.placementGamesLeft > 0
-            ? el('div', { class: 'hint', style: 'margin-top:10px' }, `${player.rank.placementGamesLeft} placement games left — results swing your rank harder until they are done.`)
-            : el(
-                'div',
-                { class: 'barrow', style: 'margin-top:12px' },
-                el('span', { class: 'lbl' }, 'Progress in tier'),
-                el('span', { class: 'val' }, `${Math.round(((player.rank.points - tier.min) / (tier.max - tier.min)) * 100)}%`),
-                bar((player.rank.points - tier.min) / (tier.max - tier.min)),
-              ),
+          el(
+            'div',
+            { class: 'barrow', style: 'margin-top:12px' },
+            el('span', { class: 'lbl' }, 'Ladder progress'),
+            el('span', { class: 'val' }, `${Math.round((cleared / DIFFICULTIES.length) * 100)}%`),
+            bar(cleared / DIFFICULTIES.length),
+          ),
         ),
 
         panel(

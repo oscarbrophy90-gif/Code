@@ -81,8 +81,8 @@ export function buildBattlePass(season: SeasonDef): PassReward[] {
       milestone
         ? { tier, track: 'free', kind: 'cosmetic', name: `${season.name.split(': ')[1]} Jersey ${tier / 10}`, itemId: `bp-${season.id}-free-jersey-${tier}` }
         : tier % 5 === 0
-          ? { tier, track: 'free', kind: 'currency', name: `${1500 + tier * 25} Court Credits`, amount: 1500 + tier * 25 }
-          : { tier, track: 'free', kind: 'currency', name: `${400 + tier * 15} Court Credits`, amount: 400 + tier * 15 },
+          ? { tier, track: 'free', kind: 'currency', name: `${1500 + tier * 25} Coins`, amount: 1500 + tier * 25 }
+          : { tier, track: 'free', kind: 'currency', name: `${400 + tier * 15} Coins`, amount: 400 + tier * 15 },
     );
 
     const premiumKind: PassReward['kind'] =
@@ -96,7 +96,7 @@ export function buildBattlePass(season: SeasonDef): PassReward[] {
             ? `${season.name.split(': ')[1]} Drop ${Math.ceil(tier / 4)}`
             : premiumKind === 'boost'
               ? 'Double XP (1 hour)'
-              : `${900 + tier * 30} Court Credits`;
+              : `${900 + tier * 30} Coins`;
     rewards.push({
       tier,
       track: 'premium',

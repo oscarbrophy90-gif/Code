@@ -4,12 +4,14 @@
  */
 
 export const ATTRIBUTE_KEYS = [
-  'threePoint',
+  'closeShot',
   'midRange',
+  'threePoint',
+  'freeThrow',
   'layup',
   'dunk',
   'ballHandle',
-  'passing',
+  'passAccuracy',
   'speed',
   'acceleration',
   'strength',
@@ -17,9 +19,10 @@ export const ATTRIBUTE_KEYS = [
   'stamina',
   'perimeterDefense',
   'interiorDefense',
-  'rebounding',
   'steal',
   'block',
+  'offensiveRebound',
+  'defensiveRebound',
 ] as const;
 
 export type AttributeKey = (typeof ATTRIBUTE_KEYS)[number];
@@ -50,6 +53,8 @@ export type Playlist = 'casual' | 'ranked' | 'private';
 /** Physical build inputs chosen in the MyPlayer creator. */
 export interface BuildSpec {
   position: Position;
+  /** 0–99, shown on the jersey */
+  jerseyNumber: number;
   /** inches, 68–90 */
   heightIn: number;
   /** pounds, 160–290 */
@@ -118,7 +123,26 @@ export interface CareerStats {
   currentWinStreak: number;
   longestWinStreak: number;
   highestRankPoints: number;
+  /** hardest difficulty this build has actually won on */
+  highestDifficultyBeaten: Difficulty | null;
+  /** games won per difficulty, for the ladder display */
+  winsByDifficulty: Partial<Record<Difficulty, number>>;
+  gamesByDifficulty: Partial<Record<Difficulty, number>>;
+  freeThrowsMade: number;
+  freeThrowsAttempted: number;
 }
+
+export const DIFFICULTIES = ['rookie', 'semiPro', 'pro', 'allStar', 'superstar', 'hallOfFame'] as const;
+export type Difficulty = (typeof DIFFICULTIES)[number];
+
+export const DIFFICULTY_LABEL: Record<Difficulty, string> = {
+  rookie: 'Rookie',
+  semiPro: 'Semi-Pro',
+  pro: 'Pro',
+  allStar: 'All-Star',
+  superstar: 'Superstar',
+  hallOfFame: 'Hall of Fame',
+};
 
 export interface RankState {
   points: number;

@@ -1,4 +1,6 @@
 import {
+  DIFFICULTIES,
+  DIFFICULTY_LABEL,
   DIFFICULTY_PRESETS,
   LIVE_EVENTS,
   PARKS,
@@ -6,97 +8,148 @@ import {
   generateOpponent,
   hashString,
   isEventLive,
-  opponentForRank,
-  rankLabel,
-  searchBand,
   type Difficulty,
 } from '@hoops/shared';
 
 import { store } from '../../state/store.ts';
-import { net } from '../../net/client.ts';
 import { navigate, type RouteParams } from '../../main.ts';
-import { el, fmt, overlay, panel, segmented, toast } from '../dom.ts';
+import { el, fmt, overlay, panel } from '../dom.ts';
 import { startMatch } from '../session.ts';
 import { CONTROL_SHEET } from '../../engine/input.ts';
 
-const DIFFICULTIES: { value: Difficulty; label: string }[] = [
-  { value: 'rookie', label: 'Rookie' },
-  { value: 'pro', label: 'Pro' },
-  { value: 'allStar', label: 'All-Star' },
-  { value: 'superstar', label: 'Superstar' },
-  { value: 'legend', label: 'Legend' },
-];
+/** How each level actually plays, in the player's language rather than stats. */
+export const DIFFICULTY_BLURB: Record<Difficulty, { tag: string; traits: string[]; color: string }> = {
+  rookie: {
+    tag: 'Learning the game',
+    traits: ['Misses open shots often', 'Poor defensive decisions', 'Slow reactions', 'Easy to beat'],
+    color: '#4aa3ff',
+  },
+  semiPro: {
+    tag: 'Getting the hang of it',
+    traits: ['Slightly smarter defense', 'Better shot selection', 'Occasional dribble moves', 'Still forgiving'],
+    color: '#3ef07a',
+  },
+  pro: {
+    tag: 'A fair fight',
+    traits: ['Balanced experience', 'Good defense', 'Uses simple combos', 'Punishes bad mistakes'],
+    color: '#ffc53d',
+  },
+  allStar: {
+    tag: 'You need a plan',
+    traits: ['Strong defensive pressure', 'Better shot timing', 'Advanced dribble moves', 'Reads your tendencies'],
+    color: '#ff7a3d',
+  },
+  superstar: {
+    tag: 'Every possession counts',
+    traits: ['High basketball IQ', 'Excellent shot selection', 'Aggressive defense', 'Uses signature moves'],
+    color: '#a06bff',
+  },
+  hallOfFame: {
+    tag: 'Bring everything',
+    traits: ['Elite reaction speed', 'Excellent defense', 'Advanced dribble combos', 'Rarely makes a bad decision'],
+    color: '#ff5c8a',
+  },
+};
 
 let difficulty: Difficulty = 'pro';
 let parkId = 'downtown';
 
-export function renderPlay(params: RouteParams): HTMLElement {
-  const mode = String(params.mode ?? 'ranked');
+export function renderPlay(_params: RouteParams): HTMLElement {
   const player = store.player;
   const now = Date.now();
-  const band = searchBand(player.rank.points, 0);
+  const stats = player.stats;
 
   const root = el('div', { class: 'wrap' });
 
   root.append(
     el('h1', { class: 'page' }, 'Play'),
-    el('p', { class: 'page-sub' }, 'Every mode is the same game: half court, make-it-take-it, first to eleven, win by two. Twos from behind the arc, ones inside.'),
+    el(
+      'p',
+      { class: 'page-sub' },
+      'Half court, one on one, make it take it. Twos from behind the arc and ones inside, first to eleven, win by two. Pick your opponent and go.',
+    ),
   );
 
-  const rerender = () => {
-    navigate('play', { mode });
-  };
+  const rerender = () => navigate('play');
 
   root.append(
     el(
       'div',
       { class: 'split' },
+
+      // --------------------------------------------------------- left column
       el(
         'div',
         { style: 'display:grid;gap:14px' },
 
         panel(
-          'Online',
+          'Choose your opponent',
           el(
             'div',
-            { class: 'mode-grid' },
-            tile('Ranked 1v1', `Matchmaking ${fmt(Math.round(band.min))}–${fmt(Math.round(band.max))} RP · you are ${rankLabel(player.rank.points)}`, '#ff7a3d', () =>
-              queueOnline('ranked'),
-            ),
-            tile('Casual 1v1', 'Play loose. Results do not touch your rank.', '#4aa3ff', () => queueOnline('casual')),
-            tile('Private match', 'Create a code or join a friend.', '#a06bff', () => privateMatchDialog()),
+            { class: 'diff-grid' },
+            ...DIFFICULTIES.map((d) => {
+              const info = DIFFICULTY_BLURB[d];
+              const beaten = (stats.winsByDifficulty[d] ?? 0) > 0;
+              const played = stats.gamesByDifficulty[d] ?? 0;
+              return el(
+                'button',
+                {
+                  class: `diff ${difficulty === d ? 'on' : ''}`,
+                  style: `--tint:${info.color}`,
+                  onclick: () => {
+                    difficulty = d;
+                    rerender();
+                  },
+                },
+                el(
+                  'div',
+                  { class: 'diff-head' },
+                  el('span', { class: 'diff-name' }, DIFFICULTY_LABEL[d]),
+                  beaten ? el('span', { class: 'diff-check', title: 'Beaten' }, '✓') : null,
+                ),
+                el('div', { class: 'diff-tag' }, info.tag),
+                el(
+                  'div',
+                  { class: 'diff-pips' },
+                  ...Array.from({ length: 6 }, (_, i) =>
+                    el('i', { class: i <= DIFFICULTIES.indexOf(d) ? 'on' : '' }),
+                  ),
+                ),
+                played > 0
+                  ? el('div', { class: 'diff-record' }, `${stats.winsByDifficulty[d] ?? 0}W of ${played}`)
+                  : el('div', { class: 'diff-record faint' }, 'Not played'),
+              );
+            }),
           ),
-          el(
-            'p',
-            { class: 'hint', style: 'margin-top:12px' },
-            'Online play needs the Hoops Elite server running. Start it with ',
-            el('span', { class: 'keycap' }, 'npm run dev:server'),
-            ' or point at your own host in Settings. If it is unreachable you will be offered an offline game against a matched AI instead.',
-          ),
-        ),
 
-        panel(
-          'Solo',
-          el('div', { class: 'mb' }, segmented(DIFFICULTIES, difficulty, (v) => {
-            difficulty = v;
-            rerender();
-          })),
           el(
             'div',
-            { class: 'hint mb' },
-            describeDifficulty(difficulty),
+            { class: 'panel', style: 'margin-top:14px;padding:14px' },
+            el(
+              'div',
+              { style: `font-size:11px;font-weight:900;letter-spacing:.16em;text-transform:uppercase;color:${DIFFICULTY_BLURB[difficulty].color}` },
+              DIFFICULTY_LABEL[difficulty],
+            ),
+            el(
+              'ul',
+              { style: 'margin:8px 0 0;padding-left:18px;font-size:12.5px;color:var(--text-dim);line-height:1.7' },
+              ...DIFFICULTY_BLURB[difficulty].traits.map((t) => el('li', {}, t)),
+            ),
+            el('div', { class: 'hint', style: 'margin-top:10px' }, describeDifficulty(difficulty)),
           ),
+
           el(
             'div',
-            { class: 'row' },
-            el('button', { class: 'btn primary', onclick: () => playAi(false) }, 'Play AI'),
-            el('button', { class: 'btn', onclick: () => playAi(true) }, 'Free run (no defender)'),
-            el('button', { class: 'btn', onclick: () => showControls() }, 'Controls'),
+            { class: 'row', style: 'margin-top:14px' },
+            el('button', { class: 'btn primary xl', onclick: () => playAi(false) }, `Play ${DIFFICULTY_LABEL[difficulty]}`),
+            el('button', { class: 'btn', onclick: () => playAi(true) }, 'Practice gym'),
+            el('button', { class: 'btn', onclick: showControls }, 'Controls'),
           ),
         ),
 
         panel(
           'Events',
+          el('p', { class: 'hint', style: 'margin:0 0 12px' }, 'Rotating rulesets against the same CPU difficulty you have selected. Shorter games, different pressure.'),
           ...LIVE_EVENTS.map((e) => {
             const live = isEventLive(e, now);
             return el(
@@ -119,6 +172,7 @@ export function renderPlay(params: RouteParams): HTMLElement {
         ),
       ),
 
+      // -------------------------------------------------------- right column
       el(
         'div',
         { style: 'display:grid;gap:14px' },
@@ -128,7 +182,7 @@ export function renderPlay(params: RouteParams): HTMLElement {
             'div',
             { style: 'display:grid;gap:7px' },
             ...PARKS.map((p) => {
-              const locked = store.player.level < p.unlockLevel;
+              const locked = player.level < p.unlockLevel;
               return el(
                 'button',
                 {
@@ -153,24 +207,57 @@ export function renderPlay(params: RouteParams): HTMLElement {
         ),
 
         panel(
+          'Career ladder',
+          el('p', { class: 'hint', style: 'margin:0 0 12px' }, 'Beat every difficulty to complete the ladder. Your highest cleared level is your career mark.'),
+          ...DIFFICULTIES.map((d) => {
+            const wins = stats.winsByDifficulty[d] ?? 0;
+            const games = stats.gamesByDifficulty[d] ?? 0;
+            return el(
+              'div',
+              { class: 'kv' },
+              el(
+                'span',
+                { class: 'k', style: wins > 0 ? `color:${DIFFICULTY_BLURB[d].color};font-weight:800` : '' },
+                DIFFICULTY_LABEL[d],
+              ),
+              el('span', { class: 'v' }, games === 0 ? '—' : `${wins}/${games}`),
+            );
+          }),
+          el(
+            'div',
+            { style: 'margin-top:12px;font-size:12px' },
+            el('span', { class: 'faint' }, 'Highest beaten: '),
+            el(
+              'b',
+              { style: `color:${stats.highestDifficultyBeaten ? DIFFICULTY_BLURB[stats.highestDifficultyBeaten].color : 'var(--text-faint)'}` },
+              stats.highestDifficultyBeaten ? DIFFICULTY_LABEL[stats.highestDifficultyBeaten] : 'None yet',
+            ),
+          ),
+        ),
+
+        panel(
           'Rules',
           el('div', { class: 'kv' }, el('span', { class: 'k' }, 'Format'), el('span', { class: 'v' }, '1v1 half court')),
           el('div', { class: 'kv' }, el('span', { class: 'k' }, 'Scoring'), el('span', { class: 'v' }, '1s and 2s')),
           el('div', { class: 'kv' }, el('span', { class: 'k' }, 'Target'), el('span', { class: 'v' }, 'First to 11, win by 2')),
           el('div', { class: 'kv' }, el('span', { class: 'k' }, 'Shot clock'), el('span', { class: 'v' }, '14 seconds')),
           el('div', { class: 'kv' }, el('span', { class: 'k' }, 'Possession'), el('span', { class: 'v' }, 'Make it, take it')),
+          el('div', { class: 'kv' }, el('span', { class: 'k' }, 'Fouls'), el('span', { class: 'v' }, 'Shooting fouls only')),
           el('div', { class: 'kv' }, el('span', { class: 'k' }, 'Clear'), el('span', { class: 'v' }, 'Back past the arc')),
         ),
       ),
     ),
   );
 
-  // ---------------------------------------------------------------- actions
-  function playAi(freeRun: boolean): void {
+  // ------------------------------------------------------------------ actions
+  function playAi(practice: boolean): void {
     const overall = store.overall();
-    const opponent = generateOpponent(freeRun ? 60 : Math.max(60, overall - 2), hashString(`ai-${Date.now()}`));
-    if (freeRun) {
-      // A passive opponent turns the court into a shooting gym.
+    // The CPU is built near your own level so the difficulty setting, not a
+    // ratings gap, is what decides how hard the game feels.
+    const target = practice ? 60 : Math.max(60, Math.min(99, overall + difficultyOverallBump(difficulty)));
+    const opponent = generateOpponent(target, hashString(`ai-${difficulty}-${Date.now()}`));
+
+    if (practice) {
       opponent.attrs.perimeterDefense = 25;
       opponent.attrs.interiorDefense = 25;
       opponent.attrs.steal = 25;
@@ -178,12 +265,15 @@ export function renderPlay(params: RouteParams): HTMLElement {
       opponent.attrs.speed = 25;
       opponent.name = 'Practice Dummy';
     }
+
     startMatch({
       opponent,
-      difficulty: freeRun ? 'rookie' : difficulty,
+      difficulty: practice ? 'rookie' : difficulty,
       parkId,
       playlist: 'casual',
-      config: freeRun ? { targetScore: 21, maxScore: 21, shotClock: 60, winBy: 1 } : undefined,
+      config: practice ? { targetScore: 21, maxScore: 21, shotClock: 60, winBy: 1 } : undefined,
+      eventName: practice ? 'Practice Gym' : undefined,
+      practice,
     });
   }
 
@@ -195,9 +285,9 @@ export function renderPlay(params: RouteParams): HTMLElement {
       'double-xp': { targetScore: 11, maxScore: 15, shotClock: 14, winBy: 2 },
       'season-champs': { targetScore: 15, maxScore: 21, shotClock: 14, winBy: 2 },
     };
+    const overall = store.overall();
     startMatch({
-      opponent: opponentForRank(store.player.rank.points, eventId),
-      opponentRankPoints: store.player.rank.points,
+      opponent: generateOpponent(Math.max(60, overall + difficultyOverallBump(difficulty)), hashString(`${eventId}-${Date.now()}`)),
       difficulty,
       parkId,
       playlist: 'event',
@@ -206,185 +296,19 @@ export function renderPlay(params: RouteParams): HTMLElement {
     });
   }
 
-  function queueOnline(playlist: 'ranked' | 'casual'): void {
-    let cancelled = false;
-    let waited = 0;
-
-    overlay((close) => {
-      const status = el('div', { style: 'font-size:13px;color:var(--text-dim)' }, 'Connecting to matchmaking…');
-      const bandLine = el('div', { class: 'faint', style: 'font-size:11px;margin-top:6px' }, '');
-
-      const tick = window.setInterval(() => {
-        waited += 1;
-        const b = searchBand(store.player.rank.points, waited);
-        bandLine.textContent = `Searching ${fmt(Math.round(b.min))} – ${fmt(Math.round(b.max))} RP · ${waited}s`;
-      }, 1000);
-
-      const stop = () => {
-        cancelled = true;
-        clearInterval(tick);
-        net.cancelQueue();
-        close();
-      };
-
-      void net
-        .queue(playlist, store.simConfig(), store.player.rank.points, parkId, (msg) => {
-          status.textContent = msg;
-        })
-        .then((found) => {
-          if (cancelled) return;
-          clearInterval(tick);
-          close();
-          startMatch({
-            opponent: found.opponent,
-            opponentRankPoints: found.opponentRank,
-            difficulty: 'allStar',
-            parkId,
-            playlist,
-            localSide: found.side,
-            seed: found.seed,
-            net: found.adapter,
-            config: found.config,
-          });
-        })
-        .catch((err: Error) => {
-          if (cancelled) return;
-          clearInterval(tick);
-          close();
-          offerOffline(playlist, err.message);
-        });
-
-      return el(
-        'div',
-        { class: 'center' },
-        el('div', { class: 'spinner' }),
-        el('h2', { style: 'margin:0 0 6px;font-size:20px;font-weight:900' }, playlist === 'ranked' ? 'Ranked 1v1' : 'Casual 1v1'),
-        status,
-        bandLine,
-        el('button', { class: 'btn', style: 'margin-top:20px', onclick: stop }, 'Cancel'),
-      );
-    });
-  }
-
-  function offerOffline(playlist: 'ranked' | 'casual', reason: string): void {
-    overlay((close) =>
-      el(
-        'div',
-        {},
-        el('h2', { style: 'margin:0 0 8px;font-size:20px;font-weight:900' }, 'Matchmaking unavailable'),
-        el('p', { class: 'dim', style: 'margin:0 0 6px' }, reason),
-        el('p', { class: 'hint', style: 'margin:0 0 20px' }, 'You can still play a rank-matched AI opponent offline. Casual rewards apply; ranked points are not adjusted.'),
-        el(
-          'div',
-          { class: 'row' },
-          el(
-            'button',
-            {
-              class: 'btn primary',
-              onclick: () => {
-                close();
-                startMatch({
-                  opponent: opponentForRank(store.player.rank.points, playlist),
-                  difficulty: difficultyForRank(),
-                  parkId,
-                  playlist: 'casual',
-                });
-              },
-            },
-            'Play offline',
-          ),
-          el('button', { class: 'btn', onclick: close }, 'Back'),
-        ),
-      ),
-    );
-  }
-
-  function privateMatchDialog(): void {
-    overlay((close) => {
-      const codeInput = el('input', { type: 'text', placeholder: 'Enter a 5-character code', maxlength: 5 }) as HTMLInputElement;
-      return el(
-        'div',
-        {},
-        el('h2', { style: 'margin:0 0 6px;font-size:20px;font-weight:900' }, 'Private match'),
-        el('p', { class: 'dim', style: 'margin:0 0 18px' }, 'Create a lobby and share the code, or join one. Private games pay reduced currency so they cannot be farmed.'),
-        el(
-          'div',
-          { class: 'row mb' },
-          el(
-            'button',
-            {
-              class: 'btn primary',
-              onclick: () => {
-                void net
-                  .createPrivate(store.simConfig())
-                  .then((code) => toast(`Lobby created — share code ${code}`, 'good'))
-                  .catch((e: Error) => toast(e.message, 'bad'));
-              },
-            },
-            'Create lobby',
-          ),
-        ),
-        codeInput,
-        el(
-          'button',
-          {
-            class: 'btn block',
-            style: 'margin-top:10px',
-            onclick: () => {
-              const code = codeInput.value.trim().toUpperCase();
-              if (code.length < 4) {
-                toast('Enter the full code', 'bad');
-                return;
-              }
-              close();
-              void net
-                .joinPrivate(code, store.simConfig())
-                .then((found) =>
-                  startMatch({
-                    opponent: found.opponent,
-                    difficulty: 'allStar',
-                    parkId,
-                    playlist: 'private',
-                    localSide: found.side,
-                    seed: found.seed,
-                    net: found.adapter,
-                    config: found.config,
-                  }),
-                )
-                .catch((e: Error) => toast(e.message, 'bad'));
-            },
-          },
-          'Join lobby',
-        ),
-      );
-    });
-  }
-
   return root;
 }
 
-function difficultyForRank(): Difficulty {
-  const rp = store.player.rank.points;
-  if (rp > 4400) return 'legend';
-  if (rp > 3650) return 'superstar';
-  if (rp > 2150) return 'allStar';
-  if (rp > 700) return 'pro';
-  return 'rookie';
+/** Higher difficulties also field a slightly better build, not just better AI. */
+function difficultyOverallBump(d: Difficulty): number {
+  return { rookie: -8, semiPro: -4, pro: 0, allStar: 3, superstar: 6, hallOfFame: 9 }[d];
 }
 
 function describeDifficulty(d: Difficulty): string {
   const p = DIFFICULTY_PRESETS[d];
-  return `Reaction ${Math.round(p.reactionTime * 1000)}ms · on-ball distance ${p.standoff.toFixed(1)} ft · contest IQ ${Math.round(p.contestIq * 100)}% · release error ±${(p.releaseError * 100).toFixed(1)}%. Adaptive difficulty nudges these while you play based on the score and how well you are timing your shots.`;
-}
-
-function tile(name: string, desc: string, tint: string, onclick: () => void): HTMLElement {
-  return el(
-    'button',
-    { class: 'mode', style: `--tint:${tint}`, onclick },
-    el('span', { class: 'kicker' }, 'Online'),
-    el('span', { class: 'name' }, name),
-    el('span', { class: 'desc' }, desc),
-  );
+  const moves = p.moveTier === 0 ? 'basic handles only' : p.moveTier === 1 ? 'advanced handles' : 'signature combos';
+  const reads = p.tendencyRead > 0 ? `, adapts to your shot selection` : '';
+  return `Reaction ${Math.round(p.reactionTime * 1000)}ms · on-ball distance ${p.standoff.toFixed(1)} ft · release error ±${(p.releaseError * 100).toFixed(1)}% · ${moves}, chains up to ${p.comboLength}${reads}. Build ${difficultyOverallBump(d) >= 0 ? '+' : ''}${difficultyOverallBump(d)} OVR versus yours.`;
 }
 
 function showControls(): void {
@@ -393,7 +317,11 @@ function showControls(): void {
       'div',
       {},
       el('h2', { style: 'margin:0 0 6px;font-size:20px;font-weight:900' }, 'Controls'),
-      el('p', { class: 'dim', style: 'margin:0 0 16px' }, 'Keyboard shown. A gamepad maps movement to the left stick, dribble moves to right-stick flicks, and shoot to the bottom face button.'),
+      el(
+        'p',
+        { class: 'dim', style: 'margin:0 0 16px' },
+        'Keyboard shown. A gamepad maps movement to the left stick, dribble moves to right-stick flicks, and shoot to the bottom face button.',
+      ),
       el(
         'div',
         { style: 'display:grid;gap:7px' },
@@ -409,3 +337,5 @@ function showControls(): void {
     ),
   );
 }
+
+export { fmt };

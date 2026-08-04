@@ -48,6 +48,11 @@ function emptyCareerStats(): CareerStats {
     currentWinStreak: 0,
     longestWinStreak: 0,
     highestRankPoints: 0,
+    highestDifficultyBeaten: null,
+    winsByDifficulty: {},
+    gamesByDifficulty: {},
+    freeThrowsMade: 0,
+    freeThrowsAttempted: 0,
   };
 }
 
@@ -118,6 +123,7 @@ function createProfile(): Profile {
   const season = seasonForTime(now);
   const player = createPlayer(0, 'Rookie', {
     position: 'SG',
+    jerseyNumber: 23,
     heightIn: 77,
     weightLb: 200,
     wingspanIn: 80,
@@ -170,14 +176,9 @@ class Store {
     const season = seasonForTime(now);
     if (this.profile.seasonId !== season.id) {
       this.profile.seasonId = season.id;
+      // Only the battle pass resets. Career statistics and the difficulty
+      // ladder carry over — a cleared difficulty stays cleared.
       this.profile.battlePass = { seasonId: season.id, tier: 1, tierXp: 0, premium: false, claimed: [] };
-      for (const p of this.profile.players) {
-        p.stats.highestRankPoints = Math.max(p.stats.highestRankPoints, p.rank.points);
-        // Soft reset: a new season starts everyone lower but keeps their floor.
-        p.rank.points = Math.round(p.rank.points * 0.62);
-        p.rank.placementGamesLeft = 3;
-        p.rank.seasonHigh = p.rank.points;
-      }
     }
     this.profile.challenges = syncChallengeStates(generateChallenges(now), this.profile.challenges);
     this.profile.settings = { ...defaultSettings(), ...this.profile.settings };

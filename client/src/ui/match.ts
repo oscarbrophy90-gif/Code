@@ -239,10 +239,23 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
             localAttempts++;
             if (e.grade === 'green') localGreens++;
             hud.flashGrade(e.grade);
+            // Scouting report: the CPU learns what kind of shots you take.
+            const wasDrive = e.shotType === 'layup' || e.shotType === 'dunk' || e.shotType === 'contactDunk' || e.shotType === 'euroLayup';
+            ai?.notifyOpponentShot(e.grade === 'green', e.value === 2, wasDrive);
           }
-          ai?.notifyOpponentShot(e.side !== remoteSide && e.grade === 'green');
           hud.push(GRADE_LABEL[e.grade], GRADE_COLOR[e.grade], p.x, p.z, e.grade === 'green');
           if (e.grade === 'green') audio.play('green');
+          break;
+        }
+        case 'foul': {
+          const p = state.players[e.on];
+          audio.play('whistle');
+          hud.push(e.shots === 2 ? 'FOUL — 2 SHOTS' : 'FOUL — 1 SHOT', '#ffc53d', p.x, p.z, true);
+          break;
+        }
+        case 'freeThrow': {
+          const p = state.players[e.side];
+          if (!e.made) hud.push('MISS', '#ff4d5e', p.x, p.z);
           break;
         }
         case 'score': {
@@ -353,7 +366,7 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
     hud.drawShotMeter(ctx, cam, state, localSide, settings.shotMeterStyle, width, height);
     ctx.restore();
 
-    hud.drawScoreBug(ctx, state, width, localSide, store.player.rank.points);
+    hud.drawScoreBug(ctx, state, width, localSide);
     hud.drawCallouts(ctx, state, localSide, width, height);
     drawFooter(ctx, width, height, loop.fps, opts.net?.latencyMs() ?? null, settings.touchControls);
 

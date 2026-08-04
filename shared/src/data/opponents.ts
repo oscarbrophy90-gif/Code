@@ -21,8 +21,8 @@ const BUILD_TEMPLATES: { name: string; position: Position; heightIn: number; wei
   { name: 'Shot Creator', position: 'PG', heightIn: 74, weightLb: 185, wingspanIn: 78, focus: ['ballHandle', 'threePoint', 'speed', 'acceleration'] },
   { name: 'Two-Way Guard', position: 'SG', heightIn: 77, weightLb: 200, wingspanIn: 82, focus: ['threePoint', 'perimeterDefense', 'steal', 'midRange'] },
   { name: 'Slasher', position: 'SF', heightIn: 79, weightLb: 215, wingspanIn: 84, focus: ['layup', 'dunk', 'acceleration', 'strength'] },
-  { name: 'Stretch Big', position: 'PF', heightIn: 82, weightLb: 235, wingspanIn: 87, focus: ['threePoint', 'rebounding', 'interiorDefense', 'strength'] },
-  { name: 'Paint Beast', position: 'C', heightIn: 85, weightLb: 265, wingspanIn: 91, focus: ['dunk', 'rebounding', 'block', 'interiorDefense'] },
+  { name: 'Stretch Big', position: 'PF', heightIn: 82, weightLb: 235, wingspanIn: 87, focus: ['threePoint', 'defensiveRebound', 'interiorDefense', 'strength'] },
+  { name: 'Paint Beast', position: 'C', heightIn: 85, weightLb: 265, wingspanIn: 91, focus: ['dunk', 'offensiveRebound', 'defensiveRebound', 'block', 'interiorDefense'] },
   { name: 'Lockdown Wing', position: 'SF', heightIn: 80, weightLb: 210, wingspanIn: 86, focus: ['perimeterDefense', 'steal', 'block', 'layup'] },
 ];
 
@@ -32,6 +32,7 @@ export function generateOpponent(targetOverall: number, seed: number): SimPlayer
   const template = rng.pick(BUILD_TEMPLATES);
   const build: BuildSpec = {
     position: template.position,
+    jerseyNumber: rng.int(0, 100),
     heightIn: template.heightIn + rng.int(-1, 2),
     weightLb: template.weightLb + rng.int(-8, 9),
     wingspanIn: template.wingspanIn + rng.int(-1, 2),
