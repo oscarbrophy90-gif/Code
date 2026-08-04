@@ -133,6 +133,55 @@ function renderCreator(): HTMLElement {
   const host = el('div', { class: 'split' });
   const rerender = () => host.replaceWith(renderCreator());
 
+  /**
+   * Any number from 0 to 99, typed or nudged. A slider made you hunt for the
+   * one you wanted; this lets you just say it.
+   */
+  function jerseyField(): HTMLElement {
+    const input = el('input', {
+      type: 'number',
+      min: 0,
+      max: 99,
+      value: draft.jerseyNumber,
+      class: 'jersey-input',
+      'aria-label': 'Jersey number',
+      oninput: (e: Event) => {
+        const raw = (e.target as HTMLInputElement).value;
+        if (raw === '') return; // let the field be empty while you retype
+        draft.jerseyNumber = Math.max(0, Math.min(99, Math.floor(Number(raw) || 0)));
+      },
+      onblur: () => {
+        input.value = String(draft.jerseyNumber);
+        rerender();
+      },
+    }) as HTMLInputElement;
+
+    const nudge = (by: number) =>
+      el(
+        'button',
+        {
+          class: 'btn sm',
+          onclick: () => {
+            draft.jerseyNumber = (draft.jerseyNumber + by + 100) % 100;
+            rerender();
+          },
+        },
+        by > 0 ? '+' : '−',
+      );
+
+    return el(
+      'div',
+      { class: 'slider' },
+      el(
+        'div',
+        { class: 'head' },
+        el('span', { class: 'dim' }, 'Jersey number — anything from 0 to 99'),
+        el('b', {}, `#${draft.jerseyNumber}`),
+      ),
+      el('div', { class: 'jersey-row' }, nudge(-1), input, nudge(1)),
+    );
+  }
+
   const nameInput = el('input', {
     type: 'text',
     placeholder: 'Player name',
@@ -161,8 +210,11 @@ function renderCreator(): HTMLElement {
             POSITIONS.map((p) => ({ value: p as Position, label: p })),
             draft.position,
             (v) => {
-              // Snapping to the position's typical build keeps every switch legal.
+              // Height and weight snap to the position's typical build so every
+              // switch stays legal, but your number is your number.
+              const keptNumber = draft.jerseyNumber;
               draft = defaultBuildFor(v);
+              draft.jerseyNumber = keptNumber;
               rerender();
             },
           ),
@@ -210,17 +262,7 @@ function renderCreator(): HTMLElement {
             rerender();
           },
         }),
-        slider({
-          label: 'Jersey number',
-          value: draft.jerseyNumber,
-          min: 0,
-          max: 99,
-          display: (v) => `#${v}`,
-          onInput: (v) => {
-            draft.jerseyNumber = v;
-            rerender();
-          },
-        }),
+        jerseyField(),
         el(
           'div',
           { class: 'hint' },

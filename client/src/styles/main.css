@@ -1803,3 +1803,34 @@ input[type='text']:focus {
   font-weight: 700;
   color: var(--text-dim);
 }
+
+.jersey-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.jersey-input {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 14px;
+  font-size: 18px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
+.jersey-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.jersey-row .btn {
+  flex: none;
+  width: 44px;
+  padding: 10px 0;
+  font-size: 16px;
+}
