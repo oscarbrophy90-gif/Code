@@ -1,7 +1,12 @@
 import {
   DIFFICULTIES,
   DIFFICULTY_LABEL,
+  DRILLS,
+  MEDAL_COLOR,
+  TITLES,
+  TITLE_BY_ID,
   computeOverall,
+  drillMedal,
   formatHeight,
   type Difficulty,
   type MyPlayer,
@@ -101,8 +106,100 @@ export function renderRecords(): HTMLElement {
           el('div', { class: 'kv' }, el('span', { class: 'k' }, 'Contact dunks'), el('span', { class: 'v' }, fmt(s.contactDunks))),
           el('div', { class: 'kv' }, el('span', { class: 'k' }, 'Chase-down blocks'), el('span', { class: 'v' }, fmt(s.chaseDownBlocks))),
         ),
+        renderDrillBoard(),
+        renderTitleCase(),
         panel('All builds', ...store.profile.players.map(buildRow)),
       ),
+    ),
+  );
+}
+
+// ------------------------------------------------------------- drill records
+
+/** Best rep count on each training drill, with the medal it earned. */
+function renderDrillBoard(): HTMLElement {
+  const bests = store.player.drillBests;
+  const golds = DRILLS.filter((d) => drillMedal(d, bests[d.id] ?? 0) === 'gold').length;
+
+  return panel(
+    `Training drills (${golds}/${DRILLS.length} gold)`,
+    ...DRILLS.map((d) => {
+      const best = bests[d.id] ?? 0;
+      const medal = drillMedal(d, best);
+      return el(
+        'div',
+        { class: 'kv' },
+        el(
+          'span',
+          { class: 'k' },
+          el('b', { style: `color:${d.color}` }, d.name),
+          el('div', { class: 'faint', style: 'font-size:11px' }, `Gold at ${d.tiers[2]} reps`),
+        ),
+        el(
+          'span',
+          { class: 'v', style: `color:${best > 0 ? MEDAL_COLOR[medal] : 'var(--text-faint)'}` },
+          best > 0 ? `${best}${medal === 'none' ? '' : ` · ${medal}`}` : '—',
+        ),
+      );
+    }),
+    el(
+      'button',
+      { class: 'btn sm block', style: 'margin-top:12px', onclick: () => navigate('practice') },
+      'Go to the practice gym',
+    ),
+  );
+}
+
+// -------------------------------------------------------------- title case
+
+/** Which titles you have collected, and what the rest take. */
+function renderTitleCase(): HTMLElement {
+  const owned = store.player.unlocked;
+  const equipped = TITLE_BY_ID[store.player.loadout.titleId];
+  const have = TITLES.filter((t) => owned.includes(t.id));
+  const earnable = TITLES.filter((t) => !owned.includes(t.id) && t.earn);
+
+  return panel(
+    `Titles (${have.length}/${TITLES.length})`,
+    equipped && equipped.id !== 'title-none'
+      ? el(
+          'div',
+          { style: 'margin-bottom:10px' },
+          el('span', { class: 'title-tag', style: `--tint:${equipped.color}` }, equipped.name),
+          el('span', { class: 'faint', style: 'font-size:11px;margin-left:8px' }, 'equipped'),
+        )
+      : el('div', { class: 'faint', style: 'font-size:11.5px;margin-bottom:10px' }, 'No title equipped.'),
+    el(
+      'div',
+      { class: 'row', style: 'gap:5px;margin-bottom:12px' },
+      ...have.map((t) => el('span', { class: 'title-tag', style: `--tint:${t.color};opacity:.85` }, t.name)),
+    ),
+    earnable.length > 0
+      ? el(
+          'div',
+          {},
+          el(
+            'div',
+            { style: 'font-size:10px;font-weight:900;letter-spacing:.16em;text-transform:uppercase;color:var(--text-faint);margin-bottom:6px' },
+            'Still out there',
+          ),
+          ...earnable.slice(0, 6).map((t) =>
+            el(
+              'div',
+              { class: 'kv', style: 'padding:4px 0' },
+              el('span', { class: 'k', style: `color:${t.color}` }, t.name),
+              el('span', { class: 'v faint', style: 'font-size:11px' }, t.earn ?? ''),
+            ),
+          ),
+          earnable.length > 6
+            ? el('div', { class: 'faint', style: 'font-size:11px;margin-top:6px' }, `and ${earnable.length - 6} more`)
+            : null,
+        )
+      : el('div', { style: 'font-size:12px;color:var(--green);font-weight:800' }, 'Every earnable title collected.'),
+    el(
+      'button',
+      { class: 'btn sm block', style: 'margin-top:12px', onclick: () => navigate('locker') },
+      'Change your title',
     ),
   );
 }

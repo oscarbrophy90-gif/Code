@@ -4,7 +4,20 @@ import { test } from 'node:test';
 import { AiController } from '../src/sim/ai.ts';
 import { createMatch, defaultMatchConfig, SIM_DT, stepMatch, drainEvents } from '../src/sim/match.ts';
 import { generateOpponent } from '../src/data/opponents.ts';
-import { computeCaps, computeOverall, startingAttributes, upgradeCost } from '../src/ratings.ts';
+import {
+  clampHeightToPosition,
+  computeCaps,
+  computeOverall,
+  defaultBuildFor,
+  heightRangeFor,
+  startingAttributes,
+  upgradeCost,
+  wingspanFor,
+} from '../src/ratings.ts';
+import { scoutReport } from '../src/scouting.ts';
+import { DEFAULT_TITLES, newlyEarnedTitles, streakBadge } from '../src/data/titles.ts';
+import { DRILLS, SHOOT_AROUND, drillMedal, drillReward } from '../src/data/drills.ts';
+import { DEFAULT_UNLOCKS, STORE_BY_ID } from '../src/data/cosmetics.ts';
 import { computeShotProfile, resolveShot } from '../src/shooting.ts';
 import { freshBadges } from '../src/badges.ts';
 import { isAcceptableMatch, rankLabel, tierForPoints, updateRank, freshRank } from '../src/mmr.ts';
@@ -12,8 +25,20 @@ import { generateChallenges, seasonForTime, buildBattlePass } from '../src/seaso
 import { computeMatchReward } from '../src/economy.ts';
 import { packInput, unpackInput } from '../src/protocol.ts';
 import { emptyInput, emptyStats, type SimEvent } from '../src/sim/state.ts';
-import { ATTRIBUTE_KEYS, DIFFICULTIES, type BuildSpec, type Difficulty } from '../src/types.ts';
+import { ATTRIBUTE_KEYS, DIFFICULTIES, POSITIONS, type BuildSpec, type CareerStats, type Difficulty } from '../src/types.ts';
 import { shotAttribute } from '../src/shooting.ts';
+
+/** A zeroed career, so a title test starts from a player who has done nothing. */
+function emptyCareerStatsForTest(): CareerStats {
+  return {
+    gamesPlayed: 0, wins: 0, losses: 0, points: 0, fgm: 0, fga: 0, tpm: 0, tpa: 0,
+    assists: 0, rebounds: 0, steals: 0, blocks: 0, turnovers: 0, greens: 0,
+    shotAttemptsTimed: 0, ankleBreakers: 0, contactDunks: 0, chaseDownBlocks: 0,
+    teammateGradeSum: 0, teammateGradeCount: 0, currentWinStreak: 0, longestWinStreak: 0,
+    highestRankPoints: 0, highestDifficultyBeaten: null, winsByDifficulty: {},
+    gamesByDifficulty: {}, freeThrowsMade: 0, freeThrowsAttempted: 0,
+  };
+}
 
 function playGame(seed: number) {
   const a = generateOpponent(82, seed);
@@ -434,4 +459,152 @@ test('an uncontested free throw has a far wider window than a contested jumper',
   const contested = computeShotProfile({ ...common, shotType: 'jumper', distance: 24, isThree: true, contest: 0.8, driftSpeed: 6 });
   assert.ok(ft.greenHalfWidth > contested.greenHalfWidth * 2);
   assert.equal(ft.heavilyContested, false);
+});
+
+// ------------------------------------------------------- builds and positions
+
+test('a position cannot be built outside its height band', () => {
+  for (const position of POSITIONS) {
+    const band = heightRangeFor(position);
+    assert.ok(band.min <= band.max, `${position} band is inverted`);
+    assert.equal(clampHeightToPosition(position, band.min - 12), band.min);
+    assert.equal(clampHeightToPosition(position, band.max + 12), band.max);
+    const dflt = defaultBuildFor(position);
+    assert.equal(dflt.position, position);
+    assert.ok(dflt.heightIn >= band.min && dflt.heightIn <= band.max, `${position} default is outside its own band`);
+  }
+  // No point guard can ever be as tall as the shortest legal centre.
+  assert.ok(heightRangeFor('PG').max < heightRangeFor('C').min);
+});
+
+test('height buys size and costs quickness', () => {
+  const short = computeCaps({ position: 'C', jerseyNumber: 0, heightIn: 82, weightLb: 240, wingspanIn: wingspanFor('C', 82) });
+  const tall = computeCaps({ position: 'C', jerseyNumber: 0, heightIn: 89, weightLb: 300, wingspanIn: wingspanFor('C', 89) });
+
+  for (const key of ['strength', 'interiorDefense', 'block', 'offensiveRebound', 'defensiveRebound'] as const) {
+    assert.ok(tall[key] > short[key], `${key} should rise with height (${short[key]} -> ${tall[key]})`);
+  }
+  for (const key of ['speed', 'acceleration', 'ballHandle', 'stamina'] as const) {
+    assert.ok(tall[key] < short[key], `${key} should fall with height (${short[key]} -> ${tall[key]})`);
+  }
+});
+
+test('every position starts at exactly 60 overall', () => {
+  for (const position of POSITIONS) {
+    const build = defaultBuildFor(position);
+    assert.equal(computeOverall(startingAttributes(build), position), 60, `${position} did not start at 60`);
+  }
+});
+
+// -------------------------------------------------------------------- titles
+
+test('titles unlock from what the player actually did', () => {
+  const stats = emptyCareerStatsForTest();
+  assert.equal(newlyEarnedTitles(stats, DEFAULT_TITLES).length, 0, 'a fresh career earns nothing');
+
+  stats.wins = 1;
+  stats.greens = 100;
+  stats.longestWinStreak = 5;
+  const earned = newlyEarnedTitles(stats, DEFAULT_TITLES).map((t) => t.id);
+  assert.ok(earned.includes('title-first-blood'));
+  assert.ok(earned.includes('title-sharpshooter'));
+  assert.ok(earned.includes('title-streaker'));
+  assert.ok(!earned.includes('title-unbeaten'), '10 straight is not 5 straight');
+
+  // Already-owned titles are never handed out twice.
+  assert.equal(newlyEarnedTitles(stats, [...DEFAULT_TITLES, ...earned]).length, 0);
+});
+
+test('the career ladder title needs every difficulty beaten', () => {
+  const stats = emptyCareerStatsForTest();
+  for (const d of DIFFICULTIES) {
+    assert.ok(!newlyEarnedTitles(stats, DEFAULT_TITLES).some((t) => t.id === 'title-ladder'));
+    stats.winsByDifficulty[d] = 1;
+  }
+  assert.ok(newlyEarnedTitles(stats, DEFAULT_TITLES).some((t) => t.id === 'title-ladder'));
+});
+
+test('the win-streak badge only shows on a real streak', () => {
+  const stats = emptyCareerStatsForTest();
+  stats.currentWinStreak = 1;
+  assert.equal(streakBadge(stats), null);
+  stats.currentWinStreak = 3;
+  assert.equal(streakBadge(stats), 'W3');
+  stats.currentWinStreak = 7;
+  assert.equal(streakBadge(stats), '7 STRAIGHT');
+});
+
+// -------------------------------------------------------------------- drills
+
+test('drill medals and payouts rise with reps', () => {
+  for (const drill of DRILLS) {
+    assert.equal(drillMedal(drill, 0), 'none');
+    assert.equal(drillMedal(drill, drill.tiers[0]), 'bronze');
+    assert.equal(drillMedal(drill, drill.tiers[1]), 'silver');
+    assert.equal(drillMedal(drill, drill.tiers[2]), 'gold');
+    assert.equal(drillMedal(drill, drill.tiers[2] * 3), 'gold');
+
+    const bronze = drillReward(drill, drill.tiers[0]);
+    const gold = drillReward(drill, drill.tiers[2]);
+    assert.ok(gold.currency > bronze.currency);
+    assert.ok(gold.xp > bronze.xp);
+    assert.equal(drillReward(drill, 0).currency, 0, 'no reps, no pay');
+  }
+});
+
+test('the shoot-around never pays and never medals', () => {
+  assert.equal(SHOOT_AROUND.freeplay, true);
+  assert.equal(drillMedal(SHOOT_AROUND, 9999), 'none');
+  assert.equal(drillReward(SHOOT_AROUND, 9999).currency, 0);
+  assert.equal(drillReward(SHOOT_AROUND, 9999).xp, 0);
+  assert.ok(!DRILLS.some((d) => d.id === SHOOT_AROUND.id), 'the shoot-around is not a training drill');
+});
+
+// ------------------------------------------------------------------ scouting
+
+test('the scouting report finds a real strength and a real weakness', () => {
+  const build = defaultBuildFor('C');
+  const attrs = startingAttributes(build);
+  attrs.block = 95;
+  attrs.interiorDefense = 95;
+  attrs.threePoint = 25;
+  const report = scoutReport(attrs);
+
+  assert.equal(report.strengths.length, 3);
+  assert.equal(report.weaknesses.length, 3);
+  assert.equal(report.strengths[0].id, 'interior', 'the 95 block/interior big should scout as an interior defender');
+  assert.equal(report.weaknesses[0].id, 'threes', 'a 25 three-point rating is the glaring hole');
+  assert.ok(report.strengths[0].rating > report.weaknesses[0].rating);
+  // Strengths are ordered best first, weaknesses worst first.
+  assert.ok(report.strengths[0].rating >= report.strengths[2].rating);
+  assert.ok(report.weaknesses[0].rating <= report.weaknesses[2].rating);
+});
+
+// ---------------------------------------------------------- challenge rewards
+
+test('weekly and seasonal challenges pay an item that actually exists', () => {
+  for (const time of [0, Date.now(), Date.now() + 86400000 * 90]) {
+    const defs = generateChallenges(time);
+    const weeklies = defs.filter((d) => d.scope === 'weekly');
+    const seasonals = defs.filter((d) => d.scope === 'seasonal');
+    assert.ok(weeklies.length > 0 && seasonals.length > 0);
+
+    for (const d of [...weeklies, ...seasonals]) {
+      assert.ok(d.itemReward, `${d.id} should pay an item`);
+      assert.ok(STORE_BY_ID[d.itemReward as string], `${d.itemReward} is not a real store item`);
+    }
+    for (const d of defs.filter((c) => c.scope === 'daily')) {
+      assert.equal(d.itemReward, undefined, 'dailies pay coins and XP only');
+    }
+  }
+});
+
+test('challenge-only titles can never be bought', () => {
+  for (const id of ['title-grinder', 'title-collector']) {
+    const item = STORE_BY_ID[id];
+    assert.ok(item, `${id} should appear in the store as a locked entry`);
+    assert.equal(item.price, 0);
+    assert.ok(item.requirement, 'it must show what unlocks it instead of a price');
+    assert.ok(!DEFAULT_UNLOCKS.includes(id), 'it must not be granted for free');
+  }
 });
