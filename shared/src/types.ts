@@ -1,0 +1,229 @@
+/**
+ * Core domain types for Hoops Elite.
+ * All content (teams, players, brands) is original — no third-party IP.
+ */
+
+export const ATTRIBUTE_KEYS = [
+  'threePoint',
+  'midRange',
+  'layup',
+  'dunk',
+  'ballHandle',
+  'passing',
+  'speed',
+  'acceleration',
+  'strength',
+  'vertical',
+  'stamina',
+  'perimeterDefense',
+  'interiorDefense',
+  'rebounding',
+  'steal',
+  'block',
+] as const;
+
+export type AttributeKey = (typeof ATTRIBUTE_KEYS)[number];
+export type Attributes = Record<AttributeKey, number>;
+
+export const POSITIONS = ['PG', 'SG', 'SF', 'PF', 'C'] as const;
+export type Position = (typeof POSITIONS)[number];
+
+export const BADGE_CATEGORIES = ['shooting', 'finishing', 'playmaking', 'defense'] as const;
+export type BadgeCategory = (typeof BADGE_CATEGORIES)[number];
+
+export const BADGE_TIERS = ['none', 'bronze', 'silver', 'gold', 'hallOfFame', 'legend'] as const;
+export type BadgeTier = (typeof BADGE_TIERS)[number];
+
+export const RANK_TIERS = [
+  'bronze',
+  'silver',
+  'gold',
+  'platinum',
+  'diamond',
+  'elite',
+  'legend',
+] as const;
+export type RankTier = (typeof RANK_TIERS)[number];
+
+export type Playlist = 'casual' | 'ranked' | 'private';
+
+/** Physical build inputs chosen in the MyPlayer creator. */
+export interface BuildSpec {
+  position: Position;
+  /** inches, 68–90 */
+  heightIn: number;
+  /** pounds, 160–290 */
+  weightLb: number;
+  /** inches, height-4 .. height+9 */
+  wingspanIn: number;
+}
+
+export interface BodyCustomization {
+  skinTone: number; // 0..7
+  hairstyleId: string;
+  facialHairId: string;
+  bodyType: 'lean' | 'athletic' | 'built' | 'heavy';
+  faceScanId: string | null; // placeholder for face-scan pipeline
+  muscleDefinition: number; // 0..1
+}
+
+export interface Loadout {
+  jerseyId: string;
+  shoesId: string;
+  clothingId: string;
+  accessoryId: string | null;
+  jumpshotId: string;
+  dunkPackageId: string;
+  celebrationId: string;
+  emoteId: string;
+  courtId: string;
+  shotMeterStyle: ShotMeterStyle;
+}
+
+export type ShotMeterStyle =
+  | 'arcBar'
+  | 'sideBar'
+  | 'circleRing'
+  | 'dualPips'
+  | 'hidden';
+
+export interface BadgeState {
+  id: string;
+  tier: BadgeTier;
+  /** progress points toward the next tier */
+  progress: number;
+}
+
+export interface CareerStats {
+  gamesPlayed: number;
+  wins: number;
+  losses: number;
+  points: number;
+  fgm: number;
+  fga: number;
+  tpm: number;
+  tpa: number;
+  assists: number;
+  rebounds: number;
+  steals: number;
+  blocks: number;
+  turnovers: number;
+  greens: number;
+  shotAttemptsTimed: number;
+  ankleBreakers: number;
+  contactDunks: number;
+  chaseDownBlocks: number;
+  teammateGradeSum: number;
+  teammateGradeCount: number;
+  currentWinStreak: number;
+  longestWinStreak: number;
+  highestRankPoints: number;
+}
+
+export interface RankState {
+  points: number;
+  tier: RankTier;
+  division: number; // 1..4 inside a tier (Legend has none)
+  placementGamesLeft: number;
+  seasonHigh: number;
+}
+
+export interface MyPlayer {
+  id: string;
+  slot: number;
+  name: string;
+  createdAt: number;
+  updatedAt: number;
+  build: BuildSpec;
+  body: BodyCustomization;
+  loadout: Loadout;
+  /** points spent per attribute above the build's floor */
+  attributes: Attributes;
+  badges: BadgeState[];
+  level: number;
+  xp: number;
+  currency: number;
+  stats: CareerStats;
+  rank: RankState;
+  unlocked: string[];
+}
+
+export interface Profile {
+  version: number;
+  userId: string;
+  displayName: string;
+  region: Region;
+  players: MyPlayer[];
+  activeSlot: number;
+  seasonId: string;
+  battlePass: BattlePassState;
+  challenges: ChallengeState[];
+  settings: GameSettings;
+  lastSyncedAt: number;
+}
+
+export const REGIONS = ['na-east', 'na-west', 'eu', 'apac', 'sa', 'oce'] as const;
+export type Region = (typeof REGIONS)[number];
+
+export interface BattlePassState {
+  seasonId: string;
+  tier: number;
+  tierXp: number;
+  premium: boolean;
+  claimed: number[];
+}
+
+export interface ChallengeState {
+  id: string;
+  progress: number;
+  claimed: boolean;
+  expiresAt: number;
+}
+
+export interface GameSettings {
+  shotMeterStyle: ShotMeterStyle;
+  shotMeterOnFreeThrowOnly: boolean;
+  cameraShake: boolean;
+  fpsCap: 60 | 120 | 0;
+  quality: 'low' | 'medium' | 'high';
+  masterVolume: number;
+  sfxVolume: number;
+  musicVolume: number;
+  touchControls: boolean;
+  reducedMotion: boolean;
+  serverUrl: string;
+}
+
+export interface Team {
+  id: string;
+  city: string;
+  name: string;
+  abbr: string;
+  primary: string;
+  secondary: string;
+  accent: string;
+  /** procedural crest descriptor, drawn at runtime — no external art */
+  crest: {
+    shape: 'shield' | 'circle' | 'diamond' | 'hex' | 'blade';
+    glyph: string;
+    motif: 'bolt' | 'flame' | 'wave' | 'ring' | 'star' | 'peak' | 'claw' | 'orbit';
+  };
+  homePark: string;
+}
+
+export interface ParkDef {
+  id: string;
+  name: string;
+  tagline: string;
+  palette: {
+    sky: [string, string];
+    floor: string;
+    paint: string;
+    line: string;
+    accent: string;
+    ambient: string;
+  };
+  timeOfDay: 'dawn' | 'day' | 'dusk' | 'night';
+  courts: number;
+  unlockLevel: number;
+}

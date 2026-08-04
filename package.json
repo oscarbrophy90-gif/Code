@@ -1,0 +1,27 @@
+{
+  "name": "hoops-elite",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Hoops Elite - a competitive 1v1 basketball game with green-bar shooting, MyPlayer progression, badges, parks and seasons.",
+  "workspaces": [
+    "shared",
+    "client",
+    "server"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=client",
+    "dev:server": "npm run dev --workspace=server",
+    "dev:all": "concurrently -n client,server -c cyan,magenta \"npm:dev\" \"npm:dev:server\"",
+    "build": "npm run build --workspace=client",
+    "preview": "npm run preview --workspace=client",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test --experimental-strip-types shared/test/*.test.ts"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "typescript": "^5.7.3"
+  },
+  "engines": {
+    "node": ">=20.19"
+  }
+}

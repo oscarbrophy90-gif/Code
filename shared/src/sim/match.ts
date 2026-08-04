@@ -1,0 +1,1213 @@
+import { awardBadgeProgress, badgeLevel } from '../badges.ts';
+import { Rng } from '../rng.ts';
+import {
+  computeContest,
+  computeShotProfile,
+  resolveShot,
+  type ShotProfile,
+  type ShotType,
+} from '../shooting.ts';
+import { COURT, clampToCourt, distanceToRim, isBeyondArc, shotValue } from './court.ts';
+import { MOVE_BY_ID, DUNK_PACKAGE_BY_ID, type DribbleMoveId } from './moves.ts';
+import {
+  emptyStats,
+  type Ball,
+  type MatchConfig,
+  type MatchState,
+  type PlayerInput,
+  type SimEvent,
+  type SimPlayer,
+  type SimPlayerConfig,
+  type Side,
+} from './state.ts';
+
+export const SIM_DT = 1 / 120;
+const GRAVITY = 32.17; // ft/s^2
+
+const other = (side: Side): Side => (side === 0 ? 1 : 0);
+const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi : v);
+const clamp01 = (v: number) => clamp(v, 0, 1);
+const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+
+// ---------------------------------------------------------------- attributes
+
+function sprintSpeed(p: SimPlayer): number {
+  const base = lerp(13.5, 21.5, clamp01((p.cfg.attrs.speed - 25) / 74));
+  const weightDrag = 1 - clamp01((p.cfg.weightLb - 210) / 260) * 0.08;
+  return base * weightDrag;
+}
+
+function accelRate(p: SimPlayer): number {
+  return lerp(30, 68, clamp01((p.cfg.attrs.acceleration - 25) / 74));
+}
+
+function jumpHeight(p: SimPlayer): number {
+  return lerp(1.9, 4.0, clamp01((p.cfg.attrs.vertical - 25) / 74));
+}
+
+/** Highest point the player can reach with the ball or a contest hand. */
+function reachHeight(p: SimPlayer): number {
+  const standing = (p.cfg.heightIn / 12) * 1.32 + (p.cfg.wingspanIn - p.cfg.heightIn) / 12;
+  return standing + p.y;
+}
+
+function staminaDrainMult(p: SimPlayer): number {
+  return lerp(1.4, 0.58, clamp01((p.cfg.attrs.stamina - 25) / 74));
+}
+
+// -------------------------------------------------------------- construction
+
+function makePlayer(side: Side, cfg: SimPlayerConfig): SimPlayer {
+  return {
+    side,
+    cfg,
+    x: side === 0 ? -3 : 3,
+    z: side === 0 ? 24 : 18,
+    vx: 0,
+    vz: 0,
+    y: 0,
+    vy: 0,
+    facing: side === 0 ? Math.PI : 0,
+    state: 'idle',
+    stateTimer: 0,
+    stamina: 1,
+    moveId: null,
+    moveTimer: 0,
+    moveDuration: 0,
+    moveDirX: 0,
+    moveDirZ: 0,
+    stagger: 0,
+    staggerTimer: 0,
+    shotElapsed: 0,
+    shotProfile: null,
+    shotType: 'jumper',
+    shotFromX: 0,
+    shotFromZ: 0,
+    shotIsThree: false,
+    shotDrift: 0,
+    handUp: false,
+    contestTimer: 0,
+    stealCooldown: 0,
+    moveCooldown: 0,
+    fakeTimer: 0,
+    greenStreak: 0,
+    makeStreak: 0,
+    distanceRun: 0,
+    comboCount: 0,
+    comboTimer: 0,
+  };
+}
+
+function makeBall(): Ball {
+  return {
+    x: 0,
+    y: 4,
+    z: 20,
+    vx: 0,
+    vy: 0,
+    vz: 0,
+    state: 'held',
+    owner: 0,
+    shotWillGoIn: false,
+    shotBy: null,
+    shotValue: 1,
+    shotGrade: null,
+    flightTime: 0,
+    flightDuration: 1,
+    fromX: 0,
+    fromY: 0,
+    fromZ: 0,
+    toX: 0,
+    toY: 0,
+    toZ: 0,
+    apex: 14,
+    settled: false,
+  };
+}
+
+export function defaultMatchConfig(overrides: Partial<MatchConfig> = {}): MatchConfig {
+  return {
+    targetScore: 11,
+    winBy: 2,
+    maxScore: 15,
+    shotClock: 14,
+    makeItTakeIt: true,
+    timeLimit: 0,
+    parkId: 'downtown',
+    playlist: 'casual',
+    ...overrides,
+  };
+}
+
+export function createMatch(
+  a: SimPlayerConfig,
+  b: SimPlayerConfig,
+  config: MatchConfig,
+  seed: number,
+): MatchState {
+  const state: MatchState = {
+    frame: 0,
+    time: 0,
+    rngState: seed >>> 0 || 1,
+    phase: 'checkball',
+    phaseTimer: 1.4,
+    players: [makePlayer(0, a), makePlayer(1, b)],
+    ball: makeBall(),
+    score: [0, 0],
+    possession: 0,
+    needsClear: false,
+    shotClock: config.shotClock,
+    clock: config.timeLimit,
+    stats: [emptyStats(), emptyStats()],
+    events: [],
+    config,
+    winner: null,
+  };
+  setupCheckball(state, 0);
+  return state;
+}
+
+function setupCheckball(state: MatchState, offense: Side): void {
+  const off = state.players[offense];
+  const def = state.players[other(offense)];
+  state.possession = offense;
+  state.phase = 'checkball';
+  state.phaseTimer = 1.2;
+  state.shotClock = state.config.shotClock;
+  state.needsClear = false;
+
+  off.x = 0;
+  off.z = 25;
+  off.vx = off.vz = 0;
+  off.y = off.vy = 0;
+  off.state = 'dribble';
+  off.stagger = 0;
+  off.staggerTimer = 0;
+  off.moveId = null;
+  off.shotProfile = null;
+  off.facing = Math.PI; // toward the rim
+
+  def.x = 0;
+  def.z = 20;
+  def.vx = def.vz = 0;
+  def.y = def.vy = 0;
+  def.state = 'idle';
+  def.stagger = 0;
+  def.staggerTimer = 0;
+  def.facing = 0;
+
+  const ball = state.ball;
+  ball.state = 'held';
+  ball.owner = offense;
+  ball.settled = false;
+  ball.shotBy = null;
+  ball.shotGrade = null;
+  state.events.push({ type: 'phase', phase: 'checkball' });
+}
+
+// ------------------------------------------------------------------ stepping
+
+export function stepMatch(state: MatchState, inputs: [PlayerInput, PlayerInput], dt = SIM_DT): void {
+  if (state.phase === 'over') return;
+  const rng = new Rng(state.rngState);
+
+  state.frame++;
+  state.time += dt;
+
+  if (state.phase === 'deadball' || state.phase === 'checkball') {
+    state.phaseTimer -= dt;
+    if (state.phaseTimer <= 0) {
+      if (state.phase === 'deadball') {
+        setupCheckball(state, state.possession);
+      } else {
+        state.phase = 'live';
+        state.events.push({ type: 'phase', phase: 'live' });
+      }
+    }
+  }
+
+  const live = state.phase === 'live';
+  if (live) {
+    state.shotClock -= dt;
+    if (state.config.timeLimit > 0) state.clock = Math.max(0, state.clock - dt);
+  }
+
+  for (const side of [0, 1] as Side[]) {
+    updatePlayer(state, side, live ? inputs[side] : neutral(inputs[side]), dt, rng);
+  }
+
+  updateBall(state, dt, rng);
+  resolveBodies(state, dt);
+
+  // A shot already in the air beats the buzzer.
+  const handler = state.players[state.possession];
+  const shotUnderway = handler.state === 'shooting' || handler.state === 'finishing';
+  if (live && state.shotClock <= 0 && state.ball.state === 'held' && !shotUnderway) {
+    turnover(state, state.possession, 'shotClock');
+  }
+
+  if (state.config.timeLimit > 0 && state.clock <= 0 && state.winner === null) {
+    finishGame(state, state.score[0] === state.score[1] ? state.possession : state.score[0] > state.score[1] ? 0 : 1);
+  }
+
+  state.rngState = rng.snapshot();
+}
+
+/** During dead ball phases we honour movement but suppress actions. */
+function neutral(input: PlayerInput): PlayerInput {
+  return { ...input, shoot: false, drive: false, move: null, steal: false, contest: false, fake: false };
+}
+
+// ------------------------------------------------------------------- players
+
+function updatePlayer(state: MatchState, side: Side, input: PlayerInput, dt: number, rng: Rng): void {
+  const p = state.players[side];
+  const opp = state.players[other(side)];
+  const hasBall = state.ball.owner === side && state.ball.state === 'held';
+
+  // Timers -----------------------------------------------------------------
+  p.stateTimer = Math.max(0, p.stateTimer - dt);
+  p.stealCooldown = Math.max(0, p.stealCooldown - dt);
+  p.moveCooldown = Math.max(0, p.moveCooldown - dt);
+  p.fakeTimer = Math.max(0, p.fakeTimer - dt);
+  p.comboTimer = Math.max(0, p.comboTimer - dt);
+  if (p.comboTimer <= 0) p.comboCount = 0;
+
+  if (p.staggerTimer > 0) {
+    p.staggerTimer -= dt;
+    p.stagger = clamp01(p.staggerTimer / 0.9);
+    if (p.staggerTimer <= 0) {
+      p.stagger = 0;
+      if (p.state === 'staggered') p.state = 'idle';
+    }
+  }
+
+  // Vertical ---------------------------------------------------------------
+  if (p.y > 0 || p.vy > 0) {
+    p.vy -= GRAVITY * dt;
+    p.y += p.vy * dt;
+    if (p.y <= 0) {
+      p.y = 0;
+      p.vy = 0;
+      if (p.state === 'airborne' || p.state === 'contesting') {
+        p.state = 'landing';
+        p.stateTimer = 0.14;
+      }
+    }
+  }
+
+  // Shot in progress -------------------------------------------------------
+  if (p.state === 'shooting') {
+    p.shotElapsed += dt;
+    p.shotProfile = buildShotProfile(state, side, p.shotType);
+    const forced = p.shotElapsed >= p.shotProfile.meterDuration * 1.4;
+    if (!input.shoot || forced) {
+      releaseShot(state, side, rng);
+    }
+    applyMovement(state, p, input, dt, 0.28);
+    return;
+  }
+
+  if (p.state === 'finishing') {
+    p.stateTimer -= 0;
+    if (p.stateTimer <= 0) {
+      completeFinish(state, side, rng);
+    }
+    return;
+  }
+
+  // Dribble move animation --------------------------------------------------
+  if (p.state === 'moveLock' && p.moveId) {
+    p.moveTimer += dt;
+    const def = MOVE_BY_ID[p.moveId];
+    const progress = p.moveTimer / p.moveDuration;
+    const shape = Math.sin(Math.min(1, progress) * Math.PI);
+    p.vx += p.moveDirX * def.lateral * shape * dt * 9;
+    p.vz += p.moveDirZ * def.lateral * shape * dt * 9;
+    if (def.retreat > 0) {
+      // Retreat is always away from the rim.
+      const away = normalize(p.x - COURT.rimX, p.z - COURT.rimZ);
+      p.vx += away.x * def.retreat * shape * dt * 9;
+      p.vz += away.z * def.retreat * shape * dt * 9;
+    }
+    const canCancel = progress >= def.cancelPoint;
+    if (canCancel && input.shoot) {
+      startShot(state, side, def.followUp === 'euroLayup' ? 'euroLayup' : (def.followUp as ShotType) ?? 'jumper');
+      return;
+    }
+    if (canCancel && input.drive && distanceToRim(p.x, p.z) < 12) {
+      startFinish(state, side, rng);
+      return;
+    }
+    if (p.moveTimer >= p.moveDuration) {
+      p.state = hasBall ? 'dribble' : 'idle';
+      p.vx += p.moveDirX * def.burst * 0.6;
+      p.vz += p.moveDirZ * def.burst * 0.6;
+      p.moveId = null;
+      p.moveCooldown = 0.08;
+    }
+    applyMovement(state, p, input, dt, 0.45);
+    return;
+  }
+
+  if (p.state === 'landing') {
+    if (p.stateTimer <= 0) p.state = hasBall ? 'dribble' : 'idle';
+    applyMovement(state, p, input, dt, 0.35);
+    return;
+  }
+
+  if (p.state === 'staggered') {
+    applyMovement(state, p, input, dt, 0.25);
+    return;
+  }
+
+  // --- action inputs -------------------------------------------------------
+  if (hasBall) {
+    if (input.fake && p.fakeTimer <= 0 && p.y === 0) {
+      p.fakeTimer = 0.45;
+      p.state = 'idle';
+    }
+
+    if (input.move && p.moveCooldown <= 0 && p.y === 0 && p.fakeTimer <= 0) {
+      tryDribbleMove(state, side, input.move, input, rng);
+      return;
+    }
+
+    if (input.drive && p.y === 0 && distanceToRim(p.x, p.z) < 13 && !state.needsClear) {
+      startFinish(state, side, rng);
+      return;
+    }
+
+    if (input.shoot && p.y === 0 && !state.needsClear) {
+      const dist = distanceToRim(p.x, p.z);
+      startShot(state, side, dist < 5.5 ? 'layup' : dist < 9 ? 'floater' : 'jumper');
+      return;
+    }
+
+    p.state = 'dribble';
+  } else {
+    // --- defence ----------------------------------------------------------
+    if (input.contest && p.y === 0 && p.state !== 'contesting') {
+      const dx = opp.x - p.x;
+      const dz = opp.z - p.z;
+      const dist = Math.sqrt(dx * dx + dz * dz);
+      // Only leave the floor when it can plausibly reach something.
+      if (dist < 7 || state.ball.state === 'shot') {
+        p.state = 'contesting';
+        p.vy = Math.sqrt(2 * GRAVITY * jumpHeight(p) * 0.92);
+        p.y = 0.001;
+        p.stamina = clamp01(p.stamina - 0.03 * staminaDrainMult(p));
+        p.contestTimer = 0.6;
+      }
+    }
+
+    if (input.steal && p.stealCooldown <= 0 && state.ball.state === 'held') {
+      attemptSteal(state, side, rng);
+    }
+
+    p.handUp = input.contest || (p.state === 'contesting' && p.y > 0.2);
+    if (p.state === 'idle' || p.state === 'dribble') p.state = 'idle';
+  }
+
+  applyMovement(state, p, input, dt, 1);
+}
+
+function normalize(x: number, z: number): { x: number; z: number } {
+  const len = Math.hypot(x, z);
+  if (len < 1e-5) return { x: 0, z: 1 };
+  return { x: x / len, z: z / len };
+}
+
+function applyMovement(state: MatchState, p: SimPlayer, input: PlayerInput, dt: number, control: number): void {
+  const hasBall = state.ball.owner === p.side && state.ball.state === 'held';
+  const staggerControl = 1 - p.stagger * 0.85;
+  const airControl = p.y > 0 ? 0.25 : 1;
+  const authority = control * staggerControl * airControl;
+
+  let mag = Math.hypot(input.mx, input.mz);
+  if (mag > 1) {
+    input = { ...input, mx: input.mx / mag, mz: input.mz / mag };
+    mag = 1;
+  }
+
+  const wantsSprint = input.sprint && p.stamina > 0.06 && mag > 0.2;
+  const speedBooster = badgeLevel(p.cfg.badges, 'speedBooster');
+  const quickFirst = badgeLevel(p.cfg.badges, 'quickFirstStep');
+
+  let top = sprintSpeed(p) * (wantsSprint ? 1 : 0.62);
+  if (hasBall) top *= 0.94 + speedBooster * 0.07;
+  // Low stamina bites into top speed.
+  top *= lerp(0.72, 1, clamp01(p.stamina * 1.6));
+
+  const accel = accelRate(p) * (1 + quickFirst * 0.18) * authority;
+  const targetVx = input.mx * top * authority;
+  const targetVz = input.mz * top * authority;
+
+  p.vx += clamp(targetVx - p.vx, -accel * dt, accel * dt);
+  p.vz += clamp(targetVz - p.vz, -accel * dt, accel * dt);
+
+  // Ground friction when no input.
+  if (mag < 0.05 && p.y === 0) {
+    const decel = accel * 1.4 * dt;
+    const speed = Math.hypot(p.vx, p.vz);
+    if (speed <= decel) {
+      p.vx = 0;
+      p.vz = 0;
+    } else {
+      p.vx -= (p.vx / speed) * decel;
+      p.vz -= (p.vz / speed) * decel;
+    }
+  }
+
+  const speed = Math.hypot(p.vx, p.vz);
+  p.distanceRun += speed * dt;
+  p.x += p.vx * dt;
+  p.z += p.vz * dt;
+  const clamped = clampToCourt(p.x, p.z);
+  if (clamped.x !== p.x) p.vx = 0;
+  if (clamped.z !== p.z) p.vz = 0;
+  p.x = clamped.x;
+  p.z = clamped.z;
+
+  if (speed > 0.6) p.facing = Math.atan2(p.vx, -p.vz);
+  else if (hasBall) p.facing = Math.atan2(COURT.rimX - p.x, -(COURT.rimZ - p.z));
+
+  // Stamina model -----------------------------------------------------------
+  const drain = staminaDrainMult(p);
+  if (wantsSprint) {
+    p.stamina = clamp01(p.stamina - 0.085 * drain * dt * (hasBall ? 1.12 : 1));
+  } else if (speed > 1.5) {
+    p.stamina = clamp01(p.stamina - 0.012 * drain * dt);
+  } else {
+    const handlesForDays = badgeLevel(p.cfg.badges, 'handlesForDays');
+    p.stamina = clamp01(p.stamina + (0.115 + handlesForDays * 0.03) * dt / drain);
+  }
+  // Passive trickle so long possessions do not become unplayable.
+  if (!wantsSprint) p.stamina = clamp01(p.stamina + 0.02 * dt / drain);
+
+  // Clear check.
+  if (state.needsClear && state.ball.owner === p.side && distanceToRim(p.x, p.z) >= COURT.clearRadius) {
+    state.needsClear = false;
+    state.events.push({ type: 'clear', side: p.side });
+  }
+}
+
+/** Body-up: the defender slows and redirects a driving handler. */
+function resolveBodies(state: MatchState, dt: number): void {
+  const [a, b] = state.players;
+  const dx = b.x - a.x;
+  const dz = b.z - a.z;
+  const dist = Math.hypot(dx, dz);
+  const minDist = 1.75;
+  if (dist >= minDist || dist < 1e-4) return;
+
+  const nx = dx / dist;
+  const nz = dz / dist;
+  const overlap = minDist - dist;
+
+  const handler = state.ball.owner === 0 ? a : state.ball.owner === 1 ? b : null;
+  const defender = handler ? state.players[other(handler.side)] : null;
+
+  let aShare = 0.5;
+  if (handler && defender) {
+    const handlerPower =
+      handler.cfg.attrs.strength * 0.6 + handler.cfg.attrs.ballHandle * 0.4 + badgeLevel(handler.cfg.badges, 'bully') * 20;
+    const defPower =
+      defender.cfg.attrs.strength * 0.55 +
+      defender.cfg.attrs.perimeterDefense * 0.45 +
+      badgeLevel(defender.cfg.badges, 'immovable') * 22 +
+      badgeLevel(defender.cfg.badges, 'clamps') * 12;
+    const handlerWins = handlerPower / (handlerPower + defPower);
+    aShare = handler === a ? 1 - handlerWins : handlerWins;
+    // Bumping costs the handler speed and a sliver of stamina.
+    const bumpLoss = 1 - clamp01(handlerWins) * 0.55;
+    handler.vx *= 1 - 0.55 * bumpLoss * dt * 12;
+    handler.vz *= 1 - 0.55 * bumpLoss * dt * 12;
+    handler.stamina = clamp01(handler.stamina - 0.02 * dt * staminaDrainMult(handler));
+    if (badgeLevel(defender.cfg.badges, 'menace') > 0) {
+      handler.stamina = clamp01(handler.stamina - badgeLevel(defender.cfg.badges, 'menace') * 0.035 * dt);
+    }
+  }
+
+  a.x -= nx * overlap * aShare;
+  a.z -= nz * overlap * aShare;
+  b.x += nx * overlap * (1 - aShare);
+  b.z += nz * overlap * (1 - aShare);
+
+  const ca = clampToCourt(a.x, a.z);
+  a.x = ca.x;
+  a.z = ca.z;
+  const cb = clampToCourt(b.x, b.z);
+  b.x = cb.x;
+  b.z = cb.z;
+}
+
+// ------------------------------------------------------------- dribble moves
+
+function tryDribbleMove(state: MatchState, side: Side, moveId: DribbleMoveId, input: PlayerInput, rng: Rng): void {
+  const p = state.players[side];
+  const def = MOVE_BY_ID[moveId];
+  if (!def) return;
+  if (p.cfg.attrs[def.gate] < def.requires) return;
+  if (p.stamina < def.staminaCost * 1.5) return;
+
+  const dir = normalize(input.moveDirX || p.vx || 1, input.moveDirZ || p.vz || 0);
+  p.state = 'moveLock';
+  p.moveId = moveId;
+  p.moveTimer = 0;
+  const tightHandles = badgeLevel(p.cfg.badges, 'tightHandles');
+  p.moveDuration = def.duration * (1 - tightHandles * 0.16);
+  p.moveDirX = dir.x;
+  p.moveDirZ = dir.z;
+  p.comboCount++;
+  p.comboTimer = 0.9;
+
+  const handlesForDays = badgeLevel(p.cfg.badges, 'handlesForDays');
+  p.stamina = clamp01(p.stamina - def.staminaCost * (1 - handlesForDays * 0.45) * staminaDrainMult(p));
+
+  state.events.push({ type: 'move', side, move: moveId });
+  awardBadgeProgress(p.cfg.badges, p.cfg.attrs, 'sizeUp', moveId === 'sizeUp' ? 1 : 0.25);
+  if (p.comboCount >= 2) awardBadgeProgress(p.cfg.badges, p.cfg.attrs, 'comboChain', 0.5);
+  if (p.comboCount >= 4) awardBadgeProgress(p.cfg.badges, p.cfg.attrs, 'moveChainLong', 1);
+
+  resolveAnkleBreaker(state, side, def.ankleBase, def.misdirection, dir, rng);
+}
+
+function resolveAnkleBreaker(
+  state: MatchState,
+  side: Side,
+  base: number,
+  misdirection: number,
+  dir: { x: number; z: number },
+  rng: Rng,
+): void {
+  const p = state.players[side];
+  const d = state.players[other(side)];
+  const dist = Math.hypot(d.x - p.x, d.z - p.z);
+  if (dist > 8) return;
+
+  // The defender is punished for carrying momentum the wrong way.
+  const defSpeed = Math.hypot(d.vx, d.vz);
+  const wrongWay = defSpeed > 1 ? clamp01(-(d.vx * dir.x + d.vz * dir.z) / Math.max(1, defSpeed)) : 0.25;
+
+  const handle = p.cfg.attrs.ballHandle + badgeLevel(p.cfg.badges, 'ankleTaker') * 22;
+  const guard = d.cfg.attrs.perimeterDefense + badgeLevel(d.cfg.badges, 'clamps') * 20;
+  const ratio = handle / (handle + guard);
+
+  const proximity = clamp01(1 - dist / 8);
+  const comboBonus = Math.min(3, p.comboCount) * 0.035;
+  const chance = clamp01(base * misdirection * (0.35 + ratio * 1.6) * (0.4 + wrongWay) * (0.45 + proximity) + comboBonus);
+
+  if (rng.chance(chance)) {
+    const severity = clamp01(0.55 + ratio * 0.6 + wrongWay * 0.3);
+    d.staggerTimer = 0.5 + severity * 0.65;
+    d.stagger = 1;
+    d.state = 'staggered';
+    d.vx *= 0.15;
+    d.vz *= 0.15;
+    state.stats[side].ankleBreakers++;
+    state.stats[side].gradePoints += 0.6;
+    state.events.push({ type: 'ankleBreaker', side });
+    awardBadgeProgress(p.cfg.badges, p.cfg.attrs, 'ankleBreaker', 1);
+    awardBadgeProgress(p.cfg.badges, p.cfg.attrs, 'blowBy', 0.5);
+  }
+}
+
+// -------------------------------------------------------------------- shots
+
+function buildShotProfile(state: MatchState, side: Side, shotType: ShotType): ShotProfile {
+  const p = state.players[side];
+  const d = state.players[other(side)];
+  const dist = distanceToRim(p.x, p.z);
+  const three = isBeyondArc(p.x, p.z);
+  const defDist = Math.hypot(d.x - p.x, d.z - p.z);
+  const toShooter = normalize(p.x - d.x, p.z - d.z);
+  const defFacing = Math.sin(d.facing) * toShooter.x + -Math.cos(d.facing) * toShooter.z;
+  const interior = dist < 9;
+
+  const contest = computeContest({
+    defenderDistance: defDist,
+    defenderHandUp: d.handUp || d.state === 'contesting',
+    defenderAirborne: d.y > 0.3,
+    defenderFacing: defFacing,
+    defenderStagger: d.stagger,
+    shooterHeightAdv: p.cfg.heightIn - d.cfg.heightIn,
+    interiorShot: interior,
+    defenderAttrs: d.cfg.attrs,
+    defenderBadges: d.cfg.badges,
+  });
+
+  const scoreDiff = Math.abs(state.score[0] - state.score[1]);
+  const nearWin = Math.max(state.score[0], state.score[1]) >= state.config.targetScore - 1;
+
+  return computeShotProfile({
+    attrs: p.cfg.attrs,
+    badges: p.cfg.badges,
+    jumpshotId: p.cfg.jumpshotId,
+    shotType,
+    distance: dist,
+    isThree: three,
+    contest,
+    stamina: p.stamina,
+    driftSpeed: Math.hypot(p.vx, p.vz),
+    greenStreak: p.greenStreak,
+    makeStreak: p.makeStreak,
+    clutch: nearWin || scoreDiff <= 1,
+    heightDelta: d.cfg.heightIn - p.cfg.heightIn,
+  });
+}
+
+function startShot(state: MatchState, side: Side, shotType: ShotType): void {
+  const p = state.players[side];
+  p.state = 'shooting';
+  p.shotElapsed = 0;
+  p.shotType = shotType;
+  p.shotFromX = p.x;
+  p.shotFromZ = p.z;
+  p.shotIsThree = isBeyondArc(p.x, p.z);
+  p.shotDrift = Math.hypot(p.vx, p.vz);
+  p.shotProfile = buildShotProfile(state, side, shotType);
+  const isFinish = shotType === 'layup' || shotType === 'floater' || shotType === 'euroLayup';
+  p.vy = Math.sqrt(2 * GRAVITY * jumpHeight(p) * (isFinish ? 0.72 : 0.5));
+  p.y = 0.001;
+  p.stamina = clamp01(p.stamina - 0.022 * staminaDrainMult(p));
+}
+
+function releaseShot(state: MatchState, side: Side, rng: Rng): void {
+  const p = state.players[side];
+  const d = state.players[other(side)];
+  const profile = p.shotProfile ?? buildShotProfile(state, side, p.shotType);
+  const releasePoint = clamp(p.shotElapsed / profile.meterDuration, 0, 1.4);
+
+  p.state = 'airborne';
+  p.shotProfile = null;
+
+  // Block check at the release point.
+  if (tryBlock(state, other(side), side, rng, false)) return;
+
+  const three = p.shotIsThree;
+  const result = resolveShot(profile, releasePoint, rng.next(), three);
+  const value = shotValue(p.shotFromX, p.shotFromZ);
+
+  const stats = state.stats[side];
+  stats.fga++;
+  if (three) stats.tpa++;
+  if (result.grade === 'green') {
+    stats.greens++;
+    p.greenStreak++;
+  } else {
+    p.greenStreak = 0;
+  }
+
+  state.events.push({
+    type: 'shotRelease',
+    side,
+    grade: result.grade,
+    made: result.made,
+    value,
+    timingError: result.timingError,
+    shotType: p.shotType,
+  });
+
+  // Badge feed.
+  const attrs = p.cfg.attrs;
+  const badges = p.cfg.badges;
+  if (result.made) {
+    awardBadgeProgress(badges, attrs, 'anyMake', 1);
+    if (profile.heavilyContested) awardBadgeProgress(badges, attrs, 'contestedMake', 1.5);
+    if (p.shotDrift < 1.5) awardBadgeProgress(badges, attrs, 'setMake', 1);
+    else awardBadgeProgress(badges, attrs, 'movingMake', 1);
+    if (p.shotType === 'stepback' || p.shotType === 'fade') awardBadgeProgress(badges, attrs, 'stepbackMake', 1.5);
+    if (p.shotType === 'hopJumper') awardBadgeProgress(badges, attrs, 'hopFinish', 1.5);
+    if (distanceToRim(p.shotFromX, p.shotFromZ) > 27) awardBadgeProgress(badges, attrs, 'deepMake', 2);
+    if (p.stamina < 0.4) awardBadgeProgress(badges, attrs, 'tiredMake', 1.5);
+    if (p.makeStreak >= 2) awardBadgeProgress(badges, attrs, 'streakMake', 1);
+    if (p.greenStreak >= 2) awardBadgeProgress(badges, attrs, 'greenStreak', 1);
+    const nearWin = Math.max(state.score[0], state.score[1]) >= state.config.targetScore - 2;
+    if (nearWin) awardBadgeProgress(badges, attrs, 'clutchMake', 2);
+    if (p.shotType === 'layup' || p.shotType === 'floater') awardBadgeProgress(badges, attrs, 'layupMake', 1);
+    if (p.shotType === 'euroLayup') awardBadgeProgress(badges, attrs, 'euroFinish', 1.5);
+  }
+  if (profile.heavilyContested) {
+    awardBadgeProgress(d.cfg.badges, d.cfg.attrs, distanceToRim(p.x, p.z) < 9 ? 'rimContest' : 'smother', 1);
+  }
+
+  launchBall(state, side, result.made, value, result.timingError, rng);
+  state.ball.shotGrade = result.grade;
+}
+
+function launchBall(
+  state: MatchState,
+  side: Side,
+  made: boolean,
+  value: 1 | 2,
+  timingError: number,
+  rng: Rng,
+): void {
+  const p = state.players[side];
+  const ball = state.ball;
+  const dist = distanceToRim(p.x, p.z);
+
+  ball.state = 'shot';
+  ball.owner = null;
+  ball.shotBy = side;
+  ball.shotWillGoIn = made;
+  ball.shotValue = value;
+  ball.settled = false;
+  ball.flightTime = 0;
+  ball.flightDuration = 0.62 + dist * 0.028;
+
+  ball.fromX = p.x;
+  ball.fromZ = p.z;
+  ball.fromY = reachHeight(p) * 0.94;
+
+  if (made) {
+    ball.toX = COURT.rimX;
+    ball.toZ = COURT.rimZ;
+    ball.toY = COURT.rimY - 0.2;
+  } else {
+    // Early releases fly long, late releases come up short. Wild misses stray
+    // sideways too, so a bad shot reads instantly.
+    const longShort = clamp(-timingError * 9, -1.5, 1.5);
+    const lateral = rng.range(-1, 1) * (0.7 + Math.abs(timingError) * 4.5);
+    const toRim = normalize(COURT.rimX - p.x, COURT.rimZ - p.z);
+    ball.toX = COURT.rimX + toRim.x * longShort * 1.5 + -toRim.z * lateral;
+    ball.toZ = COURT.rimZ + toRim.z * longShort * 1.5 + toRim.x * lateral;
+    ball.toY = COURT.rimY + rng.range(-0.3, 0.5);
+  }
+  ball.apex = Math.max(ball.fromY, COURT.rimY) + 2.4 + dist * 0.16;
+}
+
+// ------------------------------------------------------------------ finishes
+
+function startFinish(state: MatchState, side: Side, rng: Rng): void {
+  const p = state.players[side];
+  const d = state.players[other(side)];
+  const dist = distanceToRim(p.x, p.z);
+  const defDist = Math.hypot(d.x - p.x, d.z - p.z);
+
+  const pkg = DUNK_PACKAGE_BY_ID[p.cfg.dunkPackageId] ?? DUNK_PACKAGE_BY_ID['basic-slam'];
+  // Dunks need rim proximity and either a gather of speed or a standing
+  // leaper's rating from right under the basket.
+  const gather = Math.hypot(p.vx, p.vz);
+  const canDunk =
+    dist < 8 &&
+    p.cfg.attrs.dunk >= 60 &&
+    p.cfg.attrs.vertical >= 55 &&
+    p.stamina > 0.2 &&
+    (gather > 3.2 || (dist < 4.5 && p.cfg.attrs.dunk >= 72));
+
+  if (canDunk) {
+    const contactRoll =
+      pkg.contactCapable && defDist < 3.4
+        ? (p.cfg.attrs.dunk * 0.5 + p.cfg.attrs.strength * 0.3 + p.cfg.attrs.vertical * 0.2 +
+            badgeLevel(p.cfg.badges, 'contactFinisher') * 25) /
+          (d.cfg.attrs.interiorDefense * 0.55 + d.cfg.attrs.strength * 0.45 + badgeLevel(d.cfg.badges, 'rimProtector') * 22 + 40)
+        : 0;
+    const contact = contactRoll > 0 && rng.chance(clamp01((contactRoll - 0.6) * 1.8));
+    p.shotType = contact ? 'contactDunk' : 'dunk';
+    p.state = 'finishing';
+    p.stateTimer = contact ? pkg.duration : pkg.duration * 0.85;
+    p.vy = Math.sqrt(2 * GRAVITY * jumpHeight(p));
+    p.y = 0.001;
+    p.stamina = clamp01(p.stamina - 0.06 * staminaDrainMult(p));
+    if (contact) {
+      d.staggerTimer = 0.7;
+      d.stagger = 1;
+      d.state = 'staggered';
+    }
+  } else {
+    const euro = p.moveId === 'euro';
+    startShot(state, side, euro ? 'euroLayup' : dist < 4.5 ? 'layup' : 'floater');
+    return;
+  }
+  p.shotFromX = p.x;
+  p.shotFromZ = p.z;
+  p.shotIsThree = false;
+}
+
+function completeFinish(state: MatchState, side: Side, rng: Rng): void {
+  const p = state.players[side];
+  const d = state.players[other(side)];
+  p.state = 'airborne';
+
+  if (tryBlock(state, other(side), side, rng, true)) return;
+
+  const contact = p.shotType === 'contactDunk';
+  const defDist = Math.hypot(d.x - p.x, d.z - p.z);
+  const rimPressure = clamp01(1 - defDist / 6) * (d.y > 0.4 ? 1.2 : 0.75);
+  const noFear = badgeLevel(p.cfg.badges, 'noFear');
+  const base = contact ? 0.97 : 0.9;
+  const chance = clamp01(
+    base -
+      rimPressure * 0.32 * (1 - noFear * 0.5) +
+      (p.cfg.attrs.dunk - 70) / 300 +
+      badgeLevel(p.cfg.badges, 'riseUp') * 0.06,
+  );
+  const made = rng.chance(chance);
+
+  const stats = state.stats[side];
+  stats.fga++;
+  if (contact) stats.contactDunks++;
+
+  state.events.push({
+    type: 'shotRelease',
+    side,
+    grade: made ? 'green' : 'good',
+    made,
+    value: 1,
+    timingError: 0,
+    shotType: p.shotType,
+  });
+  state.events.push(contact ? { type: 'contactDunk', side } : { type: 'dunk', side });
+
+  awardBadgeProgress(p.cfg.badges, p.cfg.attrs, 'dunkMake', 1);
+  if (contact) awardBadgeProgress(p.cfg.badges, p.cfg.attrs, 'contactDunk', 2);
+  if (defDist < 4) awardBadgeProgress(p.cfg.badges, p.cfg.attrs, 'contestedFinish', 1.5);
+  if (d.cfg.heightIn > p.cfg.heightIn) awardBadgeProgress(p.cfg.badges, p.cfg.attrs, 'finishOverTaller', 1.5);
+
+  launchBall(state, side, made, 1, 0, rng);
+  state.ball.flightDuration = 0.34;
+  state.ball.shotGrade = made ? 'green' : 'good';
+}
+
+// -------------------------------------------------------------------- blocks
+
+function tryBlock(state: MatchState, defSide: Side, offSide: Side, rng: Rng, atRim: boolean): boolean {
+  const d = state.players[defSide];
+  const p = state.players[offSide];
+  if (d.y < 0.35) return false;
+
+  const dx = p.x - d.x;
+  const dz = p.z - d.z;
+  const dist = Math.hypot(dx, dz);
+  const chaseReach = badgeLevel(d.cfg.badges, 'chaseDownArtist');
+  const maxReach = 3.6 + (d.cfg.wingspanIn - d.cfg.heightIn) / 12 + chaseReach * 1.6;
+  if (dist > maxReach) return false;
+
+  // Chase-down: defender is trailing from further out and closing hard.
+  const defToRim = distanceToRim(d.x, d.z);
+  const offToRim = distanceToRim(p.x, p.z);
+  const chaseDown = defToRim > offToRim + 1.5 && Math.hypot(d.vx, d.vz) > 8 && atRim;
+
+  const reachAdvantage = reachHeight(d) - reachHeight(p);
+  const blockPower =
+    d.cfg.attrs.block * 0.55 +
+    d.cfg.attrs.vertical * 0.25 +
+    (atRim ? d.cfg.attrs.interiorDefense : d.cfg.attrs.perimeterDefense) * 0.2 +
+    badgeLevel(d.cfg.badges, 'anchor') * 12 +
+    (chaseDown ? chaseReach * 26 : 0);
+  const escapePower = p.cfg.attrs.layup * 0.3 + p.cfg.attrs.dunk * 0.3 + p.cfg.attrs.strength * 0.4 + 42;
+
+  let chance = clamp01(
+    (blockPower / (blockPower + escapePower) - 0.34) * (atRim ? 1.25 : 0.55) * clamp01(1 - dist / maxReach) +
+      reachAdvantage * 0.05,
+  );
+  chance = clamp01(chance * (1 - d.stagger));
+
+  if (!rng.chance(chance)) return false;
+
+  const ball = state.ball;
+  ball.state = 'loose';
+  ball.owner = null;
+  ball.x = p.x;
+  ball.z = p.z;
+  ball.y = Math.max(6, reachHeight(d) * 0.85);
+  const away = normalize(rng.range(-1, 1), rng.range(-0.2, 1));
+  const power = chaseDown ? 22 : 14;
+  ball.vx = away.x * power;
+  ball.vz = away.z * power;
+  ball.vy = 6;
+
+  state.stats[defSide].blocks++;
+  state.stats[defSide].gradePoints += 0.8;
+  if (chaseDown) state.stats[defSide].chaseDownBlocks++;
+  state.events.push({ type: 'block', side: defSide, chaseDown });
+  awardBadgeProgress(d.cfg.badges, d.cfg.attrs, 'block', 1.5);
+  if (chaseDown) awardBadgeProgress(d.cfg.badges, d.cfg.attrs, 'chaseDownBlock', 3);
+  p.greenStreak = 0;
+  p.makeStreak = 0;
+  return true;
+}
+
+// -------------------------------------------------------------------- steals
+
+function attemptSteal(state: MatchState, defSide: Side, rng: Rng): void {
+  const d = state.players[defSide];
+  const p = state.players[other(defSide)];
+  if (state.ball.owner !== p.side) return;
+
+  const dist = Math.hypot(p.x - d.x, p.z - d.z);
+  d.stealCooldown = 0.85;
+  d.state = 'stealing';
+  d.stateTimer = 0.22;
+
+  const reach = 3.2 + (d.cfg.wingspanIn - d.cfg.heightIn) / 12;
+  if (dist > reach) return;
+
+  const pickPocket = badgeLevel(d.cfg.badges, 'pickPocket');
+  const unpluckable = badgeLevel(p.cfg.badges, 'unpluckable');
+  // Mid-animation handles are the most vulnerable.
+  const exposure = p.state === 'moveLock' ? 1.45 : p.state === 'shooting' ? 0.6 : 1;
+  const stealPower = d.cfg.attrs.steal * (1 + pickPocket * 0.3);
+  const holdPower = p.cfg.attrs.ballHandle * (1 + unpluckable * 0.35) + p.cfg.attrs.strength * 0.25;
+  const chance = clamp01(
+    (stealPower / (stealPower + holdPower) - 0.34) * 1.5 * exposure * clamp01(1 - dist / reach) * (1 - d.stagger),
+  );
+
+  if (rng.chance(chance)) {
+    state.ball.owner = defSide;
+    state.ball.state = 'held';
+    state.stats[defSide].steals++;
+    state.stats[defSide].gradePoints += 0.7;
+    state.stats[p.side].turnovers++;
+    state.stats[p.side].gradePoints -= 0.6;
+    state.events.push({ type: 'steal', side: defSide });
+    awardBadgeProgress(d.cfg.badges, d.cfg.attrs, 'steal', 2);
+    state.possession = defSide;
+    state.needsClear = true;
+    state.shotClock = state.config.shotClock;
+    p.greenStreak = 0;
+  } else {
+    // Reach-in leaves the defender out of position.
+    d.staggerTimer = 0.32;
+    d.stagger = 0.8;
+    d.stealCooldown = 1.25;
+    awardBadgeProgress(p.cfg.badges, p.cfg.attrs, 'stealDefended', 1);
+  }
+}
+
+// ---------------------------------------------------------------------- ball
+
+function updateBall(state: MatchState, dt: number, rng: Rng): void {
+  const ball = state.ball;
+
+  if (ball.state === 'held' && ball.owner !== null) {
+    const p = state.players[ball.owner];
+    const bob = p.state === 'dribble' ? Math.abs(Math.sin(state.time * 9)) * 2.2 + 1.4 : 3.2;
+    const side = Math.sin(p.facing + Math.PI / 2) * 0.9;
+    ball.x = p.x + side;
+    ball.z = p.z - Math.cos(p.facing + Math.PI / 2) * 0.9;
+    ball.y = p.state === 'shooting' || p.state === 'finishing' ? reachHeight(p) * 0.9 : bob;
+    ball.vx = ball.vy = ball.vz = 0;
+    return;
+  }
+
+  if (ball.state === 'shot') {
+    ball.flightTime += dt;
+    const t = clamp01(ball.flightTime / ball.flightDuration);
+    ball.x = lerp(ball.fromX, ball.toX, t);
+    ball.z = lerp(ball.fromZ, ball.toZ, t);
+    // Parabola through (0, fromY), apex at t=0.55, (1, toY).
+    const arc = 4 * (ball.apex - (ball.fromY + ball.toY) / 2) * t * (1 - t);
+    ball.y = lerp(ball.fromY, ball.toY, t) + arc;
+
+    if (t >= 1) {
+      if (ball.shotWillGoIn) {
+        scoreBasket(state, ball.shotBy as Side, ball.shotValue);
+      } else {
+        // Rim carom. Direction is derived from where the shot landed relative
+        // to the rim so long misses bounce long.
+        const off = normalize(ball.x - COURT.rimX + rng.range(-0.4, 0.4), ball.z - COURT.rimZ + rng.range(-0.4, 0.4));
+        ball.state = 'loose';
+        ball.x = COURT.rimX + off.x * 0.9;
+        ball.z = COURT.rimZ + off.z * 0.9;
+        ball.y = COURT.rimY - 0.4;
+        const power = rng.range(6, 13);
+        ball.vx = off.x * power;
+        ball.vz = off.z * power;
+        ball.vy = rng.range(2, 6);
+        state.events.push({ type: 'miss', side: ball.shotBy as Side });
+        const shooter = state.players[ball.shotBy as Side];
+        shooter.makeStreak = 0;
+      }
+    }
+    return;
+  }
+
+  if (ball.state === 'loose') {
+    ball.vy -= GRAVITY * dt;
+    ball.x += ball.vx * dt;
+    ball.z += ball.vz * dt;
+    ball.y += ball.vy * dt;
+    if (ball.y <= 0.4) {
+      ball.y = 0.4;
+      ball.vy = Math.abs(ball.vy) * 0.62;
+      ball.vx *= 0.82;
+      ball.vz *= 0.82;
+      if (Math.abs(ball.vy) < 1.6) ball.vy = 0;
+    }
+    // Walls keep the ball live in a 1v1 halfcourt.
+    if (Math.abs(ball.x) > COURT.halfWidth - 1) {
+      ball.x = Math.sign(ball.x) * (COURT.halfWidth - 1);
+      ball.vx *= -0.6;
+    }
+    if (ball.z < 0.8) {
+      ball.z = 0.8;
+      ball.vz *= -0.6;
+    }
+    if (ball.z > COURT.playDepth) {
+      ball.z = COURT.playDepth;
+      ball.vz *= -0.6;
+    }
+    tryCollect(state, rng);
+  }
+}
+
+function tryCollect(state: MatchState, rng: Rng): void {
+  const ball = state.ball;
+  const candidates: { side: Side; weight: number }[] = [];
+
+  for (const side of [0, 1] as Side[]) {
+    const p = state.players[side];
+    const dist = Math.hypot(ball.x - p.x, ball.z - p.z);
+    const boardBadge = badgeLevel(p.cfg.badges, 'reboundChaser');
+    const grabRadius = 2.0 + (p.cfg.attrs.rebounding / 99) * 1.4 + boardBadge * 0.9;
+    const reach = reachHeight(p) + 0.6;
+    if (dist <= grabRadius && ball.y <= reach && p.stagger < 0.7) {
+      const weight =
+        p.cfg.attrs.rebounding * 0.55 +
+        p.cfg.attrs.vertical * 0.2 +
+        p.cfg.attrs.strength * 0.15 +
+        (p.cfg.heightIn - 72) * 0.6 +
+        badgeLevel(p.cfg.badges, 'boxOut') * 18 +
+        (p.y > 0.4 ? 12 : 0);
+      candidates.push({ side, weight: Math.max(1, weight) });
+    }
+  }
+
+  if (candidates.length === 0) return;
+
+  let winner: Side;
+  if (candidates.length === 1) {
+    winner = candidates[0].side;
+  } else {
+    const total = candidates.reduce((s, c) => s + c.weight, 0);
+    winner = rng.next() * total < candidates[0].weight ? candidates[0].side : candidates[1].side;
+    const loser = state.players[other(winner)];
+    awardBadgeProgress(loser.cfg.badges, loser.cfg.attrs, 'boxOut', 0.5);
+  }
+
+  const p = state.players[winner];
+  const wasShooter = ball.shotBy;
+  const offensive = wasShooter === winner;
+
+  ball.state = 'held';
+  ball.owner = winner;
+  ball.shotBy = null;
+  ball.shotGrade = null;
+
+  state.stats[winner].rebounds++;
+  state.stats[winner].gradePoints += offensive ? 0.5 : 0.35;
+  state.events.push({ type: 'rebound', side: winner, offensive });
+  awardBadgeProgress(p.cfg.badges, p.cfg.attrs, 'rebound', 1);
+  if (offensive) awardBadgeProgress(p.cfg.badges, p.cfg.attrs, 'putback', 1);
+
+  if (state.possession !== winner) {
+    state.possession = winner;
+    state.needsClear = true;
+  } else {
+    // Offensive board: still has to clear in streetball rules.
+    state.needsClear = true;
+  }
+  state.shotClock = state.config.shotClock;
+}
+
+// ------------------------------------------------------------------- scoring
+
+function scoreBasket(state: MatchState, side: Side, value: 1 | 2): void {
+  const p = state.players[side];
+  state.score[side] += value;
+  const stats = state.stats[side];
+  stats.points += value;
+  stats.fgm++;
+  if (value === 2) stats.tpm++;
+  p.makeStreak++;
+  stats.bestStreak = Math.max(stats.bestStreak, p.makeStreak);
+  stats.gradePoints += value === 2 ? 0.9 : 0.6;
+  state.players[other(side)].makeStreak = 0;
+
+  state.events.push({ type: 'score', side, value, score: [state.score[0], state.score[1]] });
+
+  const ball = state.ball;
+  ball.state = 'dead';
+  ball.owner = null;
+  ball.shotBy = null;
+
+  const target = state.config.targetScore;
+  const opp = state.score[other(side)];
+  const won =
+    (state.score[side] >= target && state.score[side] - opp >= state.config.winBy) ||
+    state.score[side] >= state.config.maxScore;
+
+  if (won) {
+    finishGame(state, side);
+    return;
+  }
+
+  state.phase = 'deadball';
+  state.phaseTimer = 1.0;
+  state.possession = state.config.makeItTakeIt ? side : other(side);
+  state.events.push({ type: 'phase', phase: 'deadball' });
+}
+
+function turnover(state: MatchState, side: Side, reason: 'shotClock' | 'outOfBounds' | 'strip'): void {
+  state.stats[side].turnovers++;
+  state.stats[side].gradePoints -= 0.5;
+  state.events.push({ type: 'turnover', side, reason });
+  state.phase = 'deadball';
+  state.phaseTimer = 0.8;
+  state.possession = other(side);
+  state.ball.state = 'dead';
+  state.ball.owner = null;
+}
+
+function finishGame(state: MatchState, winner: Side): void {
+  state.phase = 'over';
+  state.winner = winner;
+  state.players[winner].state = 'celebrating';
+  state.events.push({ type: 'gameOver', winner, score: [state.score[0], state.score[1]] });
+}
+
+// ------------------------------------------------------------------- helpers
+
+/** Live shot meter data for the HUD. Returns null when no shot is running. */
+export function activeShotMeter(state: MatchState, side: Side): {
+  progress: number;
+  profile: ShotProfile;
+} | null {
+  const p = state.players[side];
+  if (p.state !== 'shooting' || !p.shotProfile) return null;
+  return {
+    progress: clamp(p.shotElapsed / p.shotProfile.meterDuration, 0, 1.4),
+    profile: p.shotProfile,
+  };
+}
+
+/** Current contest pressure on the ball handler, for HUD feedback. */
+export function currentContest(state: MatchState, side: Side): number {
+  const p = state.players[side];
+  const d = state.players[other(side)];
+  const dist = Math.hypot(d.x - p.x, d.z - p.z);
+  const toShooter = normalize(p.x - d.x, p.z - d.z);
+  const defFacing = Math.sin(d.facing) * toShooter.x + -Math.cos(d.facing) * toShooter.z;
+  return computeContest({
+    defenderDistance: dist,
+    defenderHandUp: d.handUp,
+    defenderAirborne: d.y > 0.3,
+    defenderFacing: defFacing,
+    defenderStagger: d.stagger,
+    shooterHeightAdv: p.cfg.heightIn - d.cfg.heightIn,
+    interiorShot: distanceToRim(p.x, p.z) < 9,
+    defenderAttrs: d.cfg.attrs,
+    defenderBadges: d.cfg.badges,
+  });
+}
+
+export function drainEvents(state: MatchState): SimEvent[] {
+  const events = state.events;
+  state.events = [];
+  return events;
+}
+
+export { other as otherSide };

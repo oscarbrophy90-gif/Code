@@ -1,0 +1,86 @@
+import type { ParkDef } from '../types.ts';
+
+export const PARKS: ParkDef[] = [
+  {
+    id: 'beach',
+    name: 'Beach Park',
+    tagline: 'Sea breeze, sand in your shoes, the sun in your eyes on the left wing.',
+    palette: {
+      sky: ['#7fd4ff', '#ffe8b0'],
+      floor: '#2f9e8f',
+      paint: '#1f7d72',
+      line: '#f5fbff',
+      accent: '#ffcc66',
+      ambient: '#fff3d6',
+    },
+    timeOfDay: 'day',
+    courts: 4,
+    unlockLevel: 1,
+  },
+  {
+    id: 'downtown',
+    name: 'Downtown',
+    tagline: 'Chain nets, cracked asphalt, and a crowd that never leaves.',
+    palette: {
+      sky: ['#3d5a80', '#98c1d9'],
+      floor: '#4a4f5c',
+      paint: '#33384a',
+      line: '#e8eef5',
+      accent: '#ee6c4d',
+      ambient: '#c9d6e3',
+    },
+    timeOfDay: 'day',
+    courts: 6,
+    unlockLevel: 1,
+  },
+  {
+    id: 'night',
+    name: 'Night Park',
+    tagline: 'Floodlights, cold air, and long shadows behind the arc.',
+    palette: {
+      sky: ['#0b1020', '#231a3d'],
+      floor: '#232a3b',
+      paint: '#171d2b',
+      line: '#7fe7ff',
+      accent: '#a06bff',
+      ambient: '#5a72a8',
+    },
+    timeOfDay: 'night',
+    courts: 5,
+    unlockLevel: 4,
+  },
+  {
+    id: 'rooftop',
+    name: 'Rooftop Park',
+    tagline: 'Twelve storeys up. Miss long and it is a long walk down.',
+    palette: {
+      sky: ['#ff8c5a', '#4a3a6b'],
+      floor: '#6b5a4a',
+      paint: '#4d4034',
+      line: '#ffeccf',
+      accent: '#ffb03b',
+      ambient: '#ffd0a0',
+    },
+    timeOfDay: 'dusk',
+    courts: 3,
+    unlockLevel: 8,
+  },
+  {
+    id: 'training',
+    name: 'Training Facility',
+    tagline: 'Polished hardwood, calibrated rims, zero excuses.',
+    palette: {
+      sky: ['#1a1d24', '#2a2f3a'],
+      floor: '#c08c4a',
+      paint: '#a06f36',
+      line: '#f8f4ec',
+      accent: '#4ad9a0',
+      ambient: '#e4e9f0',
+    },
+    timeOfDay: 'day',
+    courts: 4,
+    unlockLevel: 1,
+  },
+];
+
+export const PARK_BY_ID: Record<string, ParkDef> = Object.fromEntries(PARKS.map((p) => [p.id, p]));
