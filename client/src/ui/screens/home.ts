@@ -84,8 +84,11 @@ export function renderHome(): HTMLElement {
           modeTile('Play now', '1v1 vs CPU', 'Six difficulties from Rookie to Hall of Fame. Adaptive AI that learns how you play.', '#ff7a3d', true, () =>
             navigate('play'),
           ),
-          modeTile('Practice', 'Practice Gym', 'No defender, 60-second clock. Dial in your release.', '#3ef07a', false, () =>
-            navigate('play'),
+          modeTile('Practice', 'Practice Gym', 'Shoot around with nobody guarding you, or run a timed drill for Coins.', '#3ef07a', false, () =>
+            navigate('practice'),
+          ),
+          modeTile('Locker', 'Your Look', 'Equip your title, kit and animations. It all shows on the walkout.', '#ffc53d', false, () =>
+            navigate('locker'),
           ),
           modeTile('Records', 'Career Ladder', 'Track every difficulty you have cleared and your personal bests.', '#4aa3ff', false, () =>
             navigate('records'),

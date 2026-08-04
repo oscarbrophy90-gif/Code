@@ -209,6 +209,13 @@ function renderAttributes(): HTMLElement {
                   ),
             );
           }),
+          group.name === 'Defense'
+            ? el(
+                'div',
+                { class: 'hint', style: 'margin-top:10px;color:var(--amber)' },
+                'Under 1v1 rules a miss, block or strip is an instant turnover, so there are no live rebounds in a game. The two rebound ratings work in the practice gym and still count toward a big man’s Overall — spend on them last.',
+              )
+            : null,
           el(
             'div',
             { class: 'hint', style: 'margin-top:10px' },

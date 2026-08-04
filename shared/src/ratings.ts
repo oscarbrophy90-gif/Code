@@ -29,8 +29,8 @@ export const ATTRIBUTE_META: Record<AttributeKey, AttributeMeta> = {
   interiorDefense: { key: 'interiorDefense', label: 'Interior Defense', group: 'defense', blurb: 'Contesting finishes inside the paint.' },
   steal: { key: 'steal', label: 'Steal', group: 'defense', blurb: 'Pokes, digs and interception timing.' },
   block: { key: 'block', label: 'Block', group: 'defense', blurb: 'Swat timing and chase-down reach.' },
-  offensiveRebound: { key: 'offensiveRebound', label: 'Offensive Rebound', group: 'defense', blurb: 'Crashing your own miss for a second chance.' },
-  defensiveRebound: { key: 'defensiveRebound', label: 'Defensive Rebound', group: 'defense', blurb: 'Boxing out and closing the possession.' },
+  offensiveRebound: { key: 'offensiveRebound', label: 'Offensive Rebound', group: 'defense', blurb: 'Crashing your own miss. In 1v1 a miss is an automatic turnover, so this only works in the practice gym — it still counts toward a big man’s Overall.' },
+  defensiveRebound: { key: 'defensiveRebound', label: 'Defensive Rebound', group: 'defense', blurb: 'Closing out a possession off the glass. In 1v1 a miss is an automatic turnover, so this only works in the practice gym — it still counts toward a big man’s Overall.' },
 };
 
 export interface PositionRules {
