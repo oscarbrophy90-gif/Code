@@ -8,3 +8,5 @@ server/data/*.json
 .env
 .env.local
 *.tsbuildinfo
+
+client/standalone-build/

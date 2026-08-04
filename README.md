@@ -9,9 +9,17 @@ logos, likenesses or animations anywhere in the project — every team, court, c
 jump shot and dribble move was created for Hoops Elite and is drawn or synthesised at
 runtime.
 
+### Just play it
+
+Open **`dist-standalone/HoopsElite.html`** in any browser. It is a single self-contained
+file — no install, no terminal, no server. Progress saves to your browser.
+
+### Run from source
+
 ```
 npm install
-npm run dev          # play at http://localhost:5173
+npm run dev                # play at http://localhost:5173
+npm run build:standalone   # regenerate dist-standalone/HoopsElite.html
 ```
 
 Every game is against the CPU. The project is structured so online multiplayer can be
