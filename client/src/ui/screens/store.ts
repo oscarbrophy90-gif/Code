@@ -15,6 +15,7 @@ import { refresh, type RouteParams } from '../../main.ts';
 import { el, fmt, panel, tabs, toast } from '../dom.ts';
 
 const CATEGORIES: { id: StoreCategory; label: string }[] = [
+  { id: 'title', label: 'Titles' },
   { id: 'jersey', label: 'Jerseys' },
   { id: 'shoes', label: 'Shoes' },
   { id: 'clothing', label: 'Clothing' },
@@ -126,6 +127,8 @@ function isEquipped(item: StoreItem): boolean {
   const l = store.player.loadout;
   const b = store.player.body;
   switch (item.category) {
+    case 'title':
+      return l.titleId === item.id;
     case 'jersey':
       return l.jerseyId === item.id;
     case 'shoes':
@@ -155,6 +158,9 @@ function equip(item: StoreItem): void {
   store.update((p) => {
     const target = p.players[p.activeSlot];
     switch (item.category) {
+      case 'title':
+        target.loadout.titleId = item.id;
+        break;
       case 'jersey':
         target.loadout.jerseyId = item.id;
         break;

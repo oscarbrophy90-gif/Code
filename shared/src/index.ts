@@ -1,5 +1,6 @@
 export * from './types.ts';
 export * from './ratings.ts';
+export * from './scouting.ts';
 export * from './badges.ts';
 export * from './shooting.ts';
 export * from './rng.ts';
@@ -17,4 +18,6 @@ export { AiController, DIFFICULTY_PRESETS, type AiProfile } from './sim/ai.ts';
 export * from './data/teams.ts';
 export * from './data/parks.ts';
 export * from './data/cosmetics.ts';
+export * from './data/titles.ts';
+export * from './data/drills.ts';
 export * from './data/opponents.ts';

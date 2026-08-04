@@ -41,11 +41,13 @@ This is a playable game, not a prototype stub.
   release error ±34% down to ±4.5%, and the move pool widens from basic handles to
   signature combos. Measured against a constant reference opponent they produce a 93% →
   3% win-rate curve.
-- **Green-bar shooting.** A perfect release is a guaranteed make unless you are heavily
-  contested. Slightly early or late shots fall off to realistic percentages. Six jump
-  shots trade window size against release speed, and the window itself is computed from
-  your ratings, badges, stamina, drift and the defender's contest — you can watch it
-  shrink as a closeout arrives.
+- **Green-bar shooting.** A perfect release always goes in — no exceptions, no hidden
+  roll, however heavy the contest. Slightly early or late shots fall off to realistic
+  percentages. Contest attacks the *window* instead: a defender in your face shrinks the
+  green band by up to 68%, scaled by your shooting rating, so a great shooter keeps a
+  usable sliver under pressure and a poor one has almost nothing. Six jump shots trade
+  window size against release speed, and the window is recomputed every frame from your
+  ratings, badges, stamina, drift and the closeout — you can watch it shrink.
 - **Adaptive AI.** The CPU builds a scouting report as you play — how often you shoot
   threes, how often you attack the rim — and from All-Star upward it acts on it, closing
   out harder on a shooter and sagging off a driver. Adaptive difficulty also tracks the
@@ -57,8 +59,19 @@ This is a playable game, not a prototype stub.
 - **Progression.** 60 to 99 overall across nineteen attributes, forty badges in four
   categories levelling Bronze → Silver → Gold → Hall of Fame → Legend purely by using the
   related skill, and Coins earned only through play. Nothing competitive is purchasable.
+- **Walkout cutscene.** Every game opens with the announcement: the opponent walks out
+  first with their name, title, overall, position, height and a scouting report of what
+  they do well and badly, then you, wearing your equipped gear and title with your win
+  streak under your name.
+- **Practice gym.** A shoot-around with nobody guarding you and no clock, plus four timed
+  training drills — three-point, layup, blocking & stealing, defending — with bronze,
+  silver and gold rep tiers, a saved personal best on each, and a Coin payout per rep.
+- **Titles and a locker.** Twenty-three titles worn under your name on the walkout: two
+  starters, thirteen earned from what you actually did on court, two that only drop from
+  seasonal challenges, and six you can buy. The Locker groups everything you own into
+  Identity, Kit, Accessories, Animations and Flair with a live walkout preview.
 - **Meta.** A six-rung career ladder, 8-week seasons, a 40-tier battle pass,
-  daily/weekly/seasonal challenges generated deterministically from the calendar, five
+  daily/weekly/seasonal challenges that pay Coins, XP, cosmetics and titles, five
   parks you can walk around, a cosmetics store, and full career statistics.
 
 ## Repository layout

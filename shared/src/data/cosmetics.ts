@@ -1,4 +1,5 @@
 import { DUNK_PACKAGES } from '../sim/moves.ts';
+import { TITLES } from './titles.ts';
 import { JUMPSHOTS } from '../shooting.ts';
 import type { StoreItem } from '../economy.ts';
 
@@ -108,7 +109,21 @@ const animations: StoreItem[] = [
   { id: 'anim-dribble-idle', name: 'Idle Handle: Low Pound', category: 'animation', price: 2400, rarity: 'common', colors: ['#8a93a6', '#e8eef5'], description: 'How you hold the ball at the top.' },
 ];
 
+// Every title is a store item so the locker can list them all — the two
+// starters are free and ungated, so they land in DEFAULT_UNLOCKS.
+const titleItems: StoreItem[] = TITLES.map((t) => ({
+  id: t.id,
+  name: t.name,
+  category: 'title' as const,
+  price: t.price,
+  rarity: t.rarity,
+  colors: [t.color, '#101018'] as [string, string],
+  requirement: t.price === 0 ? t.earn : undefined,
+  description: t.description,
+}));
+
 export const STORE_ITEMS: StoreItem[] = [
+  ...titleItems,
   ...jerseys,
   ...shoes,
   ...clothing,

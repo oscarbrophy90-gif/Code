@@ -12,6 +12,11 @@ import {
   generateChallenges,
   levelForXp,
   levelProgress,
+  newlyEarnedTitles,
+  drillReward,
+  MEDAL_COLOR,
+  PARK_BY_ID,
+  type DrillDef,
   type BadgeState,
   type ChallengeMetric,
   type Difficulty,
@@ -25,6 +30,7 @@ import { audio } from '../engine/audio.ts';
 import { dismissFullscreen, navigate, showFullscreen } from '../main.ts';
 import { createMatchScreen, type MatchResult, type NetAdapter } from './match.ts';
 import { bar, el, fmt, overlay, ratio, toast } from './dom.ts';
+import { playWalkout } from './walkout.ts';
 
 export interface StartMatchOptions {
   opponent: SimPlayerConfig;
@@ -39,10 +45,28 @@ export interface StartMatchOptions {
   eventName?: string;
   /** practice gym runs pay nothing and do not touch the career ladder */
   practice?: boolean;
+  /** timed training drill instead of a game */
+  drill?: DrillDef | null;
 }
 
 export function startMatch(opts: StartMatchOptions): void {
   audio.unlock();
+  // Every game opens with the walkout. Practice and drills are not games, so
+  // they go straight to the floor.
+  if (opts.practice || opts.drill) {
+    launchMatch(opts);
+    return;
+  }
+  void playWalkout({
+    player: store.simConfig(),
+    opponent: opts.opponent,
+    difficulty: opts.difficulty,
+    venue: PARK_BY_ID[opts.parkId]?.name ?? 'Hoops Elite',
+    subtitle: opts.eventName ?? labelFor(opts.playlist),
+  }).then(() => launchMatch(opts));
+}
+
+function launchMatch(opts: StartMatchOptions): void {
   const node = createMatchScreen({
     opponent: opts.opponent,
     difficulty: opts.difficulty,
@@ -51,8 +75,13 @@ export function startMatch(opts: StartMatchOptions): void {
     net: opts.net,
     localSide: opts.localSide,
     seed: opts.seed,
+    drill: opts.drill,
     onFinish: (result) => {
       dismissFullscreen();
+      if (opts.drill) {
+        showDrillResults(result, opts.drill);
+        return;
+      }
       const summary = applyResult(result, opts);
       showResults(result, summary, opts);
     },
@@ -70,6 +99,7 @@ export interface RewardSummary {
   passTierBefore: number;
   passTierAfter: number;
   challengesCompleted: string[];
+  titlesEarned: { id: string; name: string; color: string }[];
 }
 
 /**
@@ -178,6 +208,16 @@ function applyResult(result: MatchResult, opts: StartMatchOptions): RewardSummar
     }
   });
 
+  // Titles are checked against the stats we just wrote, so a game that pushes
+  // you over the line hands you the title in the same results screen.
+  const earned = newlyEarnedTitles(store.player.stats, store.player.unlocked);
+  if (earned.length > 0) {
+    store.update((profile) => {
+      const p = profile.players[profile.activeSlot];
+      for (const t of earned) if (!p.unlocked.includes(t.id)) p.unlocked.push(t.id);
+    });
+  }
+
   const levelAfter = levelForXp(store.player.xp);
   if (levelAfter > levelBefore) audio.play('levelUp');
 
@@ -191,6 +231,7 @@ function applyResult(result: MatchResult, opts: StartMatchOptions): RewardSummar
     passTierBefore: passBefore,
     passTierAfter: store.profile.battlePass.tier,
     challengesCompleted,
+    titlesEarned: earned.map((t) => ({ id: t.id, name: t.name, color: t.color })),
   };
 }
 
@@ -346,6 +387,19 @@ function showResults(result: MatchResult, summary: RewardSummary, opts: StartMat
           ),
         ),
 
+      summary.titlesEarned.length > 0 &&
+        el(
+          'div',
+          { style: 'margin-bottom:16px' },
+          el('h3', { class: 'panel-title' }, summary.titlesEarned.length > 1 ? 'Titles unlocked' : 'Title unlocked'),
+          el(
+            'div',
+            { class: 'row' },
+            summary.titlesEarned.map((t) => el('span', { class: 'title-tag', style: `--tint:${t.color}` }, t.name)),
+          ),
+          el('div', { class: 'faint', style: 'font-size:11px;margin-top:6px' }, 'Equip it in the Locker to wear it on your walkout.'),
+        ),
+
       summary.challengesCompleted.length > 0 &&
         el(
           'div',
@@ -397,6 +451,106 @@ function showResults(result: MatchResult, summary: RewardSummary, opts: StartMat
   if (summary.challengesCompleted.length > 0) {
     toast(`${summary.challengesCompleted.length} challenge${summary.challengesCompleted.length > 1 ? 's' : ''} ready to claim`, 'good');
   }
+}
+
+// -------------------------------------------------------------- drill results
+
+/** Drills pay per rep, log a personal best, and never touch your win/loss. */
+function showDrillResults(result: MatchResult, drill: DrillDef): void {
+  // A shoot-around has no scoreboard and no payout — it just ends.
+  if (drill.freeplay) {
+    navigate('practice');
+    toast('Gym session over', 'info');
+    return;
+  }
+
+  const reps = result.drillReps;
+  const reward = drillReward(drill, reps);
+  const previousBest = store.player.drillBests[drill.id] ?? 0;
+  const newBest = reps > previousBest;
+
+  store.update((profile) => {
+    const p = profile.players[profile.activeSlot];
+    p.currency += reward.currency;
+    p.xp += reward.xp;
+    if (reps > (p.drillBests[drill.id] ?? 0)) p.drillBests[drill.id] = reps;
+  });
+  if (reward.medal !== 'none') audio.play('levelUp');
+
+  const medalLabel = reward.medal === 'none' ? 'No medal yet' : `${reward.medal[0].toUpperCase()}${reward.medal.slice(1)} medal`;
+
+  overlay((close) =>
+    el(
+      'div',
+      {},
+      el(
+        'div',
+        { style: 'text-align:center;margin-bottom:20px' },
+        el(
+          'div',
+          { style: `font-size:12px;font-weight:900;letter-spacing:.22em;text-transform:uppercase;color:${drill.color}` },
+          'Drill complete',
+        ),
+        el('div', { style: 'font-size:52px;font-weight:900;line-height:1.05' }, String(reps)),
+        el('div', { class: 'faint', style: 'font-size:12px' }, `${drill.name} · ${drill.goal.toLowerCase()}`),
+        el(
+          'div',
+          { style: `margin-top:10px;font-weight:900;letter-spacing:.16em;text-transform:uppercase;font-size:12px;color:${MEDAL_COLOR[reward.medal]}` },
+          medalLabel,
+        ),
+        newBest && reps > 0
+          ? el('div', { style: 'color:var(--green);font-weight:800;font-size:12px;margin-top:4px' }, `New personal best — previous ${previousBest}`)
+          : el('div', { class: 'faint', style: 'font-size:11px;margin-top:4px' }, `Personal best ${Math.max(previousBest, reps)}`),
+      ),
+
+      el(
+        'div',
+        { class: 'grid cols-3', style: 'margin-bottom:18px' },
+        statTile('BRONZE', drill.tiers[0]),
+        statTile('SILVER', drill.tiers[1]),
+        statTile('GOLD', drill.tiers[2]),
+      ),
+
+      el(
+        'div',
+        { class: 'kv', style: 'border-top:1px solid var(--line);padding-top:9px' },
+        el('span', { class: 'k', style: 'font-weight:800' }, 'Earned'),
+        el(
+          'span',
+          { class: 'v' },
+          el('span', { style: 'color:var(--amber)' }, `+${fmt(reward.currency)} ${CURRENCY_SHORT}  `),
+          el('span', { style: 'color:var(--green)' }, `+${fmt(reward.xp)} XP`),
+        ),
+      ),
+
+      el(
+        'div',
+        { class: 'row', style: 'margin-top:20px' },
+        el(
+          'button',
+          {
+            class: 'btn primary',
+            onclick: () => {
+              close();
+              navigate('practice');
+            },
+          },
+          'Back to the gym',
+        ),
+        el(
+          'button',
+          {
+            class: 'btn',
+            onclick: () => {
+              close();
+              navigate('myplayer');
+            },
+          },
+          'Upgrade player',
+        ),
+      ),
+    ),
+  );
 }
 
 function statTile(label: string, value: string | number): HTMLElement {

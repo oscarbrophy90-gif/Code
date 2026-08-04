@@ -116,7 +116,8 @@ export type StoreCategory =
   | 'emote'
   | 'jumpshot'
   | 'dunkPackage'
-  | 'court';
+  | 'court'
+  | 'title';
 
 export interface StoreItem {
   id: string;

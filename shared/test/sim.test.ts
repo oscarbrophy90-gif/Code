@@ -57,7 +57,7 @@ test('games produce the full range of gameplay events', () => {
   for (let seed = 1; seed <= 6; seed++) {
     for (const e of playGame(seed * 7717).seen) kinds.add(e.type);
   }
-  for (const expected of ['shotRelease', 'score', 'miss', 'rebound', 'move', 'phase', 'gameOver']) {
+  for (const expected of ['shotRelease', 'score', 'miss', 'move', 'phase', 'gameOver']) {
     assert.ok(kinds.has(expected), `expected a ${expected} event across sample games`);
   }
 });
@@ -87,7 +87,7 @@ test('perfect timing is an automatic make when open', () => {
   assert.equal(result.points, 2);
 });
 
-test('a heavy contest removes the guaranteed green', () => {
+test('a green release always scores, however heavy the contest', () => {
   const attrs = startingAttributes({ position: 'SG', jerseyNumber: 3, heightIn: 77, weightLb: 200, wingspanIn: 80 });
   attrs.threePoint = 90;
   const base = {
@@ -106,9 +106,46 @@ test('a heavy contest removes the guaranteed green', () => {
   };
   const open = computeShotProfile({ ...base, contest: 0 });
   const smothered = computeShotProfile({ ...base, contest: 1 });
+
+  // Contest makes green harder to HIT, never luckier to convert.
+  assert.equal(open.greenMakeChance, 1);
+  assert.equal(smothered.greenMakeChance, 1);
+  assert.ok(smothered.greenHalfWidth < open.greenHalfWidth * 0.45, 'a smothered window should collapse');
   assert.equal(smothered.heavilyContested, true);
-  assert.ok(smothered.greenMakeChance < 1);
-  assert.ok(smothered.greenHalfWidth < open.greenHalfWidth, 'contest should shrink the green window');
+
+  // Hitting the window scores every time, at any contest level.
+  for (const profile of [open, smothered]) {
+    for (const roll of [0, 0.5, 0.999]) {
+      const r = resolveShot(profile, profile.idealPoint, roll, true);
+      assert.equal(r.grade, 'green');
+      assert.equal(r.made, true, 'a green must never miss');
+    }
+  }
+});
+
+test('a miss, block or steal hands the ball to the other player', () => {
+  const state = createMatch(generateOpponent(80, 5), generateOpponent(80, 6), defaultMatchConfig(), 4242);
+  assert.equal(state.config.turnoverOnMiss, true);
+
+  const ai0 = new AiController(0, 'pro', 1, false);
+  const ai1 = new AiController(1, 'pro', 2, false);
+  let sawMissTurnover = false;
+  let frames = 0;
+
+  while (state.phase !== 'over' && frames < 120 * 60 * 8) {
+    const possessionBefore = state.possession;
+    stepMatch(state, [ai0.update(state, SIM_DT), ai1.update(state, SIM_DT)], SIM_DT);
+    for (const e of drainEvents(state)) {
+      if (e.type === 'miss') {
+        // The shooter must not retain the ball off their own miss.
+        assert.notEqual(state.possession, e.side, 'a miss should not stay with the shooter');
+        assert.equal(possessionBefore, e.side);
+        sawMissTurnover = true;
+      }
+    }
+    frames++;
+  }
+  assert.ok(sawMissTurnover, 'expected at least one missed shot to change possession');
 });
 
 test('a better rating produces a wider green window', () => {

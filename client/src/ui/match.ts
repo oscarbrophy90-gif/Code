@@ -4,13 +4,16 @@ import {
   GRADE_LABEL,
   PARK_BY_ID,
   SIM_DT,
+  COURT,
   createMatch,
   defaultMatchConfig,
   drainEvents,
   emptyInput,
+  forcePossession,
   isBeyondArc,
   stepMatch,
   type Difficulty,
+  type DrillDef,
   type MatchConfig,
   type MatchState,
   type PlayerInput,
@@ -40,6 +43,8 @@ export interface MatchResult {
   greenRate: number;
   quit: boolean;
   simBadges: SimPlayerConfig['badges'];
+  /** reps landed, when this was a training drill */
+  drillReps: number;
 }
 
 export interface NetAdapter {
@@ -61,6 +66,8 @@ export interface MatchOptions {
   localSide?: Side;
   net?: NetAdapter | null;
   seed?: number;
+  /** when set, the screen runs a timed training drill instead of a game */
+  drill?: DrillDef | null;
   onFinish: (result: MatchResult) => void;
 }
 
@@ -82,7 +89,11 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
   const seed = opts.seed ?? (Math.random() * 0xffffffff) >>> 0;
   const state = createMatch(configs[0], configs[1], matchConfig, seed);
 
-  const ai = opts.net ? null : new AiController(remoteSide, opts.difficulty, seed ^ 0x5bf03, true);
+  // Shooting and finishing drills have nobody guarding you, so the bot is
+  // parked out of the way and never given a controller.
+  const drill = opts.drill ?? null;
+  const parkedBot = !!drill && (drill.mode === 'shooting' || drill.mode === 'finishing');
+  const ai = opts.net || parkedBot ? null : new AiController(remoteSide, opts.difficulty, seed ^ 0x5bf03, true);
   const park = PARK_BY_ID[opts.parkId] ?? PARK_BY_ID['downtown'];
 
   const cam = new Camera();
@@ -103,6 +114,9 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
   let elapsedRealSeconds = 0;
   let localAttempts = 0;
   let localGreens = 0;
+  let drillReps = 0;
+  let drillTimeLeft = drill ? drill.durationSeconds : 0;
+  let drillRunning = false;
   const courtColor = courtColorFor(store.player.loadout.courtId);
 
   // ------------------------------------------------------------------ canvas
@@ -119,6 +133,28 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
   const resizeObserver = new ResizeObserver(resize);
   resizeObserver.observe(root);
   window.addEventListener('resize', resize);
+
+  // ------------------------------------------------------------- drill banner
+  let drillBanner: HTMLElement | null = null;
+  let drillClock: HTMLElement | null = null;
+  let drillCount: HTMLElement | null = null;
+  if (drill) {
+    drillClock = el('b', { class: 'drill-clock' }, '0:00');
+    drillCount = el('b', { class: 'drill-count' }, '0');
+    drillBanner = el(
+      'div',
+      { class: 'drill-bar', style: `--tint:${drill.color}` },
+      el('div', { class: 'drill-title' }, drill.name),
+      el('div', { class: 'drill-goal' }, drill.goal),
+      el(
+        'div',
+        { class: 'drill-meters' },
+        el('span', {}, drillClock, el('em', {}, drill.freeplay ? 'in the gym' : 'left')),
+        drill.freeplay ? null : el('span', {}, drillCount, el('em', {}, `reps · gold at ${drill.tiers[2]}`)),
+      ),
+    );
+    root.appendChild(drillBanner);
+  }
 
   // ------------------------------------------------------------------ pause
   const pauseHost = el('div', { style: 'position:absolute;inset:0;pointer-events:none' });
@@ -142,6 +178,7 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
       greenRate: localAttempts > 0 ? localGreens / localAttempts : 0,
       quit,
       simBadges: state.players[localSide].cfg.badges,
+      drillReps,
     });
   };
 
@@ -160,7 +197,15 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
           'div',
           { class: 'box', style: 'max-width:420px' },
           el('h2', { style: 'margin:0 0 4px;font-size:24px;font-weight:900' }, 'Paused'),
-          el('p', { class: 'dim', style: 'margin:0 0 20px' }, `${state.score[0]} – ${state.score[1]} · first to ${matchConfig.targetScore}`),
+          el(
+            'p',
+            { class: 'dim', style: 'margin:0 0 20px' },
+            drill
+              ? drill.freeplay
+                ? `${drill.name} · shoot as long as you like`
+                : `${drill.name} · ${drillReps} reps with ${Math.ceil(drillTimeLeft)}s left`
+              : `${state.score[0]} – ${state.score[1]} · first to ${matchConfig.targetScore}`,
+          ),
           el(
             'div',
             { style: 'display:grid;gap:8px' },
@@ -180,7 +225,7 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
               },
               `Shot meter: ${store.settings.shotMeterStyle}`,
             ),
-            el('button', { class: 'btn danger block', onclick: () => closeAndFinish(true) }, 'Forfeit match'),
+            el('button', { class: 'btn danger block', onclick: () => closeAndFinish(true) }, drill ? 'End drill' : 'Forfeit match'),
           ),
         ),
       ),
@@ -218,6 +263,69 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
 
     stepWorld(inputs, dt);
     opts.net?.reconcile(state);
+    if (drill) updateDrill(dt);
+  };
+
+  /**
+   * Drills borrow the match sim but not its rules: the clock is the drill's
+   * own, and the ball is put back where the drill needs it every time it
+   * changes hands.
+   */
+  const updateDrill = (dt: number) => {
+    if (!drill || finished) return;
+
+    if (parkedBot) {
+      // Stand the bot in the far corner so nothing contests and nothing
+      // wanders into a rebound.
+      const bot = state.players[remoteSide];
+      bot.x = -(COURT.halfWidth - 3);
+      bot.z = COURT.playDepth - 2;
+      bot.vx = 0;
+      bot.vz = 0;
+      bot.y = 0;
+      bot.vy = 0;
+    } else if (state.possession === localSide) {
+      // Defensive drills: you never get to keep the ball, they attack again.
+      forcePossession(state, remoteSide);
+    }
+
+    if (!drillRunning && state.phase === 'live') drillRunning = true;
+    if (!drillRunning) return;
+    drillTimeLeft -= dt;
+    if (drillTimeLeft <= 0) {
+      drillTimeLeft = 0;
+      audio.play('buzzer');
+      closeAndFinish(false);
+    }
+  };
+
+  const countDrillEvent = (e: SimEvent): void => {
+    if (!drill || !drillRunning) return;
+    switch (drill.mode) {
+      case 'shooting':
+        // Threes only, and a green counts double.
+        if (e.type === 'shotRelease' && e.side === localSide && e.made && e.value === 2) {
+          drillReps += e.grade === 'green' ? 2 : 1;
+        }
+        break;
+      case 'finishing':
+        // Anything finished inside the arc; dunks and greens count double.
+        if (e.type === 'shotRelease' && e.side === localSide && e.made && e.value === 1) {
+          const slam = e.shotType === 'dunk' || e.shotType === 'contactDunk';
+          drillReps += slam || e.grade === 'green' ? 2 : 1;
+        }
+        break;
+      case 'takeaway':
+        if ((e.type === 'block' || e.type === 'steal') && e.side === localSide) drillReps++;
+        break;
+      case 'stops':
+        if (e.type === 'miss' && e.side === remoteSide) drillReps++;
+        else if (e.type === 'turnover' && e.side === remoteSide) drillReps++;
+        else if ((e.type === 'block' || e.type === 'steal') && e.side === localSide) drillReps++;
+        break;
+      default:
+        break;
+    }
   };
 
   const stepWorld = (inputs: [PlayerInput, PlayerInput], dt: number) => {
@@ -232,6 +340,7 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
 
   const handleEvents = (events: SimEvent[]) => {
     for (const e of events) {
+      countDrillEvent(e);
       switch (e.type) {
         case 'shotRelease': {
           const p = state.players[e.side];
@@ -366,7 +475,12 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
     hud.drawShotMeter(ctx, cam, state, localSide, settings.shotMeterStyle, width, height);
     ctx.restore();
 
-    hud.drawScoreBug(ctx, state, width, localSide);
+    if (drill) {
+      if (drillClock) drillClock.textContent = formatClock(drill.freeplay ? drill.durationSeconds - drillTimeLeft : drillTimeLeft);
+      if (drillCount) drillCount.textContent = String(drillReps);
+    } else {
+      hud.drawScoreBug(ctx, state, width, localSide);
+    }
     hud.drawCallouts(ctx, state, localSide, width, height);
     drawFooter(ctx, width, height, loop.fps, opts.net?.latencyMs() ?? null, settings.touchControls);
 
@@ -388,6 +502,11 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
   loop.start();
 
   return root;
+}
+
+function formatClock(seconds: number): string {
+  const s = Math.max(0, Math.ceil(seconds));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
 function drawFooter(

@@ -82,6 +82,8 @@ export interface Loadout {
   celebrationId: string;
   emoteId: string;
   courtId: string;
+  /** shown under your name on the walkout */
+  titleId: string;
   shotMeterStyle: ShotMeterStyle;
 }
 
@@ -170,6 +172,8 @@ export interface MyPlayer {
   stats: CareerStats;
   rank: RankState;
   unlocked: string[];
+  /** best rep count per training drill, keyed by drill id */
+  drillBests: Record<string, number>;
 }
 
 export interface Profile {

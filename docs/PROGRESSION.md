@@ -162,6 +162,24 @@ match results.
 Three dailies (450–800 Coins), three weeklies (2,200–4,000 Coins) and four seasonal
 objectives (9,000–15,000 Coins).
 
+Weeklies and seasonals also pay an item on top of the Coins and XP. Weeklies pay a piece
+of kit — a headband, a shoe, a celebration — and seasonals pay a title or something you
+would otherwise have to save weeks for. The pools are plain id arrays in `seasons.ts` so
+the challenge generator never has to import the cosmetics catalogue, and the item is
+picked by calendar index, not at random, so the board stays deterministic. Claiming a
+reward you already own pays half its shop price in Coins instead, so a duplicate is never
+a dead reward. Two titles — **The Grinder** and **Collector** — exist only in the seasonal
+pool and cannot be bought at any price.
+
+## Training drills
+
+The practice gym pays separately from matches. Four timed drills — three-point, layup,
+blocking & stealing, defending — count reps against a clock and pay `reps × coinsPerRep`
+with a medal multiplier (1.1× bronze, 1.3× silver, 1.6× gold). A gold three-point run is
+about 830 Coins for 75 seconds of work, which beats a casual win per minute but requires
+you to actually be good at the thing. Drills never touch your win/loss record, the career
+ladder, or badge progress; the shoot-around pays nothing at all.
+
 ## Why this is not pay-to-win
 
 1. Attributes come only from `currency_ledger` rows whose reasons are gameplay events.

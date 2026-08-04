@@ -141,8 +141,8 @@ export function renderPlay(_params: RouteParams): HTMLElement {
           el(
             'div',
             { class: 'row', style: 'margin-top:14px' },
-            el('button', { class: 'btn primary xl', onclick: () => playAi(false) }, `Play ${DIFFICULTY_LABEL[difficulty]}`),
-            el('button', { class: 'btn', onclick: () => playAi(true) }, 'Practice gym'),
+            el('button', { class: 'btn primary xl', onclick: () => playAi() }, `Play ${DIFFICULTY_LABEL[difficulty]}`),
+            el('button', { class: 'btn', onclick: () => navigate('practice') }, 'Practice gym'),
             el('button', { class: 'btn', onclick: showControls }, 'Controls'),
           ),
         ),
@@ -250,30 +250,16 @@ export function renderPlay(_params: RouteParams): HTMLElement {
   );
 
   // ------------------------------------------------------------------ actions
-  function playAi(practice: boolean): void {
+  function playAi(): void {
     const overall = store.overall();
     // The CPU is built near your own level so the difficulty setting, not a
     // ratings gap, is what decides how hard the game feels.
-    const target = practice ? 60 : Math.max(60, Math.min(99, overall + difficultyOverallBump(difficulty)));
-    const opponent = generateOpponent(target, hashString(`ai-${difficulty}-${Date.now()}`));
-
-    if (practice) {
-      opponent.attrs.perimeterDefense = 25;
-      opponent.attrs.interiorDefense = 25;
-      opponent.attrs.steal = 25;
-      opponent.attrs.block = 25;
-      opponent.attrs.speed = 25;
-      opponent.name = 'Practice Dummy';
-    }
-
+    const target = Math.max(60, Math.min(99, overall + difficultyOverallBump(difficulty)));
     startMatch({
-      opponent,
-      difficulty: practice ? 'rookie' : difficulty,
+      opponent: generateOpponent(target, hashString(`ai-${difficulty}-${Date.now()}`)),
+      difficulty,
       parkId,
       playlist: 'casual',
-      config: practice ? { targetScore: 21, maxScore: 21, shotClock: 60, winBy: 1 } : undefined,
-      eventName: practice ? 'Practice Gym' : undefined,
-      practice,
     });
   }
 

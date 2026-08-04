@@ -1,45 +1,49 @@
 import {
   ATTRIBUTE_KEYS,
   ATTRIBUTE_META,
-  BUILD_TEMPLATES,
-  FACIAL_HAIR,
-  HEIGHT_RANGE,
   POSITIONS,
-  SKIN_TONES,
-  WEIGHT_RANGE,
+  POSITION_RULES,
+  clampHeightToPosition,
   computeCaps,
   computeOverall,
+  defaultBuildFor,
   formatHeight,
-  itemsInCategory,
+  heightRangeFor,
   startingAttributes,
-  wingspanRange,
+  weightRangeFor,
+  wingspanFor,
   type BuildSpec,
   type Position,
 } from '@hoops/shared';
 
 import { store, MAX_SLOTS } from '../../state/store.ts';
 import { navigate, refresh } from '../../main.ts';
-import { bar, confirmDialog, el, fmt, panel, segmented, slider, toast } from '../dom.ts';
+import { bar, confirmDialog, el, panel, segmented, slider, toast } from '../dom.ts';
 import { drawPortrait, portraitEl } from '../portrait.ts';
 import { radarEl } from '../radar.ts';
 
-let draft: BuildSpec = { position: 'SG', jerseyNumber: 23, heightIn: 77, weightLb: 200, wingspanIn: 80 };
+let draft: BuildSpec = defaultBuildFor('SG');
 let draftName = '';
 
 export function renderBuilder(): HTMLElement {
   const root = el('div', { class: 'wrap' });
+  const firstBuild = store.profile.players.length === 0;
 
   root.append(
-    el('h1', { class: 'page' }, 'MyPlayer'),
+    el('h1', { class: 'page' }, firstBuild ? 'Create your player' : 'MyPlayer'),
     el(
       'p',
       { class: 'page-sub' },
-      'Your body decides your ceiling. Height, weight and wingspan set an attribute cap for every skill, so a 6\'0" guard can max out handles and range while a 7\'1" centre owns the paint — and neither can do the other\'s job.',
+      firstBuild
+        ? 'Before you can play, you need a player. Pick a position, set your height and weight, choose a number and a name.'
+        : 'Pick a position, set your height and weight, choose a number and a name. Your position and height decide what you can become — a point guard will never rebound like a centre, and a centre will never handle like a guard.',
     ),
   );
 
-  root.appendChild(renderSlots());
-  root.appendChild(el('div', { style: 'height:14px' }));
+  if (!firstBuild) {
+    root.appendChild(renderSlots());
+    root.appendChild(el('div', { style: 'height:14px' }));
+  }
   root.appendChild(renderCreator());
   return root;
 }
@@ -57,10 +61,7 @@ function renderSlots(): HTMLElement {
         const active = i === store.profile.activeSlot;
         return el(
           'div',
-          {
-            class: 'panel',
-            style: `padding:12px;border-color:${active ? 'var(--accent)' : 'var(--line)'}`,
-          },
+          { class: 'panel', style: `padding:12px;border-color:${active ? 'var(--accent)' : 'var(--line)'}` },
           el(
             'div',
             { class: 'row', style: 'align-items:flex-start' },
@@ -69,7 +70,7 @@ function renderSlots(): HTMLElement {
               'div',
               { style: 'min-width:0;flex:1' },
               el('div', { style: 'font-weight:900;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis' }, p.name),
-              el('div', { class: 'faint', style: 'font-size:11px' }, `${p.build.position} · ${formatHeight(p.build.heightIn)}`),
+              el('div', { class: 'faint', style: 'font-size:11px' }, `${p.build.position} · #${p.build.jerseyNumber} · ${formatHeight(p.build.heightIn)}`),
               el('div', { style: 'font-size:16px;font-weight:900;color:var(--accent)' }, `${computeOverall(p.attributes, p.build.position)} OVR`),
             ),
           ),
@@ -114,6 +115,14 @@ function renderSlots(): HTMLElement {
 // ------------------------------------------------------------------ creator
 
 function renderCreator(): HTMLElement {
+  // Keep the draft legal whenever the position changed underneath it.
+  draft.heightIn = clampHeightToPosition(draft.position, draft.heightIn);
+  draft.wingspanIn = wingspanFor(draft.position, draft.heightIn);
+  const weightBand = weightRangeFor(draft.position, draft.heightIn);
+  draft.weightLb = Math.max(weightBand.min, Math.min(weightBand.max, draft.weightLb));
+
+  const rules = POSITION_RULES[draft.position];
+  const heightBand = heightRangeFor(draft.position);
   const caps = computeCaps(draft);
   const preview = startingAttributes(draft);
   const overall = computeOverall(preview, draft.position);
@@ -122,15 +131,7 @@ function renderCreator(): HTMLElement {
   const ceiling = computeOverall(maxed, draft.position);
 
   const host = el('div', { class: 'split' });
-
-  const rerenderCreator = () => {
-    const fresh = renderCreator();
-    host.replaceWith(fresh);
-  };
-
-  const wing = wingspanRange(draft.heightIn);
-  if (draft.wingspanIn < wing.min) draft.wingspanIn = wing.min;
-  if (draft.wingspanIn > wing.max) draft.wingspanIn = wing.max;
+  const rerender = () => host.replaceWith(renderCreator());
 
   const nameInput = el('input', {
     type: 'text',
@@ -143,7 +144,8 @@ function renderCreator(): HTMLElement {
   }) as HTMLInputElement;
 
   const portrait = el('canvas', {}) as HTMLCanvasElement;
-  drawPortrait(portrait, { ...store.player, build: draft }, 132);
+  const portraitSource = store.profile.players[store.profile.activeSlot];
+  drawPortrait(portrait, { ...(portraitSource ?? blankPlayerShape()), build: draft }, 132);
 
   host.append(
     // ---------------------------------------------------------- left column
@@ -151,37 +153,61 @@ function renderCreator(): HTMLElement {
       'div',
       { style: 'display:grid;gap:14px' },
       panel(
-        'Body',
-        el('div', { class: 'mb' }, el('div', { class: 'faint', style: 'font-size:11px;margin-bottom:6px' }, 'Position'),
+        'Position',
+        el(
+          'div',
+          { class: 'mb' },
           segmented(
             POSITIONS.map((p) => ({ value: p as Position, label: p })),
             draft.position,
             (v) => {
-              draft.position = v;
-              rerenderCreator();
+              // Snapping to the position's typical build keeps every switch legal.
+              draft = defaultBuildFor(v);
+              rerender();
             },
           ),
         ),
+        el('p', { class: 'dim', style: 'margin:0 0 12px;font-size:13px' }, rules.blurb),
+        el(
+          'div',
+          { class: 'grid cols-2' },
+          el(
+            'div',
+            {},
+            el('div', { style: 'font-size:10px;font-weight:900;letter-spacing:.14em;text-transform:uppercase;color:var(--green);margin-bottom:5px' }, 'Overall grows fastest from'),
+            el('ul', { style: 'margin:0;padding-left:16px;font-size:12px;color:var(--text-dim);line-height:1.6' }, ...rules.strengths.map((t) => el('li', {}, t))),
+          ),
+          el(
+            'div',
+            {},
+            el('div', { style: 'font-size:10px;font-weight:900;letter-spacing:.14em;text-transform:uppercase;color:var(--red);margin-bottom:5px' }, 'Weaknesses'),
+            el('ul', { style: 'margin:0;padding-left:16px;font-size:12px;color:var(--text-dim);line-height:1.6' }, ...rules.weaknesses.map((t) => el('li', {}, t))),
+          ),
+        ),
+      ),
+
+      panel(
+        'Body',
         slider({
-          label: 'Height',
+          label: `Height — ${draft.position} range ${formatHeight(heightBand.min)} to ${formatHeight(heightBand.max)}`,
           value: draft.heightIn,
-          min: HEIGHT_RANGE.min,
-          max: HEIGHT_RANGE.max,
+          min: heightBand.min,
+          max: heightBand.max,
           display: (v) => formatHeight(v),
           onInput: (v) => {
             draft.heightIn = v;
-            rerenderCreator();
+            rerender();
           },
         }),
         slider({
           label: 'Weight',
           value: draft.weightLb,
-          min: WEIGHT_RANGE.min,
-          max: WEIGHT_RANGE.max,
+          min: weightBand.min,
+          max: weightBand.max,
           display: (v) => `${v} lb`,
           onInput: (v) => {
             draft.weightLb = v;
-            rerenderCreator();
+            rerender();
           },
         }),
         slider({
@@ -192,150 +218,13 @@ function renderCreator(): HTMLElement {
           display: (v) => `#${v}`,
           onInput: (v) => {
             draft.jerseyNumber = v;
-            rerenderCreator();
-          },
-        }),
-        slider({
-          label: 'Wingspan',
-          value: draft.wingspanIn,
-          min: wing.min,
-          max: wing.max,
-          display: (v) => `${formatHeight(v)} (${v - draft.heightIn >= 0 ? '+' : ''}${v - draft.heightIn}")`,
-          onInput: (v) => {
-            draft.wingspanIn = v;
-            rerenderCreator();
+            rerender();
           },
         }),
         el(
           'div',
           { class: 'hint' },
-          'Wingspan buys defensive reach, blocks and rebounding without costing speed — but it does not raise your shooting caps.',
-        ),
-      ),
-
-      panel(
-        'Templates',
-        el(
-          'div',
-          { class: 'grid cols-3' },
-          ...BUILD_TEMPLATES.map((t) =>
-            el(
-              'button',
-              {
-                class: 'btn sm',
-                style: 'flex-direction:column;align-items:flex-start;text-align:left;padding:10px',
-                onclick: () => {
-                  draft = { position: t.position, jerseyNumber: draft.jerseyNumber, heightIn: t.heightIn, weightLb: t.weightLb, wingspanIn: t.wingspanIn };
-                  rerenderCreator();
-                },
-              },
-              el('b', { style: 'font-size:12px' }, t.name),
-              el('span', { class: 'faint', style: 'font-size:10px;text-transform:none;letter-spacing:0;font-weight:600' }, `${t.position} · ${formatHeight(t.heightIn)} · ${t.weightLb} lb`),
-            ),
-          ),
-        ),
-      ),
-
-      panel(
-        'Appearance',
-        el('div', { class: 'faint', style: 'font-size:11px;margin-bottom:6px' }, 'Skin tone'),
-        el(
-          'div',
-          { class: 'swatches mb' },
-          ...SKIN_TONES.map((c, i) =>
-            el('button', {
-              style: `background:${c}`,
-              class: store.player.body.skinTone === i ? 'on' : '',
-              'aria-label': `Skin tone ${i + 1}`,
-              onclick: () => {
-                store.update((p) => {
-                  p.players[p.activeSlot].body.skinTone = i;
-                });
-                rerenderCreator();
-              },
-            }),
-          ),
-        ),
-        el('div', { class: 'faint', style: 'font-size:11px;margin-bottom:6px' }, 'Hairstyle'),
-        el(
-          'div',
-          { class: 'seg mb' },
-          ...itemsInCategory('hairstyle').map((item) =>
-            el(
-              'button',
-              {
-                class: store.player.body.hairstyleId === item.id ? 'on' : '',
-                disabled: !store.owns(item.id),
-                title: store.owns(item.id) ? item.name : `Locked — ${fmt(item.price)} CC in the store`,
-                onclick: () => {
-                  store.update((p) => {
-                    p.players[p.activeSlot].body.hairstyleId = item.id;
-                  });
-                  rerenderCreator();
-                },
-              },
-              item.name,
-            ),
-          ),
-        ),
-        el('div', { class: 'faint', style: 'font-size:11px;margin-bottom:6px' }, 'Facial hair'),
-        el(
-          'div',
-          { class: 'seg mb' },
-          ...FACIAL_HAIR.map((f) =>
-            el(
-              'button',
-              {
-                class: store.player.body.facialHairId === f.id ? 'on' : '',
-                onclick: () => {
-                  store.update((p) => {
-                    p.players[p.activeSlot].body.facialHairId = f.id;
-                  });
-                  rerenderCreator();
-                },
-              },
-              f.name,
-            ),
-          ),
-        ),
-        el('div', { class: 'faint', style: 'font-size:11px;margin-bottom:6px' }, 'Body type'),
-        segmented(
-          [
-            { value: 'lean' as const, label: 'Lean' },
-            { value: 'athletic' as const, label: 'Athletic' },
-            { value: 'built' as const, label: 'Built' },
-            { value: 'heavy' as const, label: 'Heavy' },
-          ],
-          store.player.body.bodyType,
-          (v) => {
-            store.update((p) => {
-              p.players[p.activeSlot].body.bodyType = v;
-            });
-            rerenderCreator();
-          },
-        ),
-        el(
-          'div',
-          { class: 'row', style: 'margin-top:14px' },
-          el(
-            'button',
-            {
-              class: 'btn sm',
-              onclick: () => {
-                store.update((p) => {
-                  const body = p.players[p.activeSlot].body;
-                  body.faceScanId = body.faceScanId ? null : `scan-${Date.now().toString(36)}`;
-                });
-                toast(
-                  store.player.body.faceScanId
-                    ? 'Face scan slot filled with a placeholder. The production pipeline uploads a phone capture and returns a mesh + texture ID.'
-                    : 'Face scan cleared',
-                );
-                rerenderCreator();
-              },
-            },
-            store.player.body.faceScanId ? 'Clear face scan' : 'Face scan (placeholder)',
-          ),
+          `Wingspan is set by your position at ${formatHeight(draft.wingspanIn)}. Height is the big lever: every inch buys strength, rebounding, interior defense and blocks, and costs speed, acceleration, ball handle and stamina.`,
         ),
       ),
     ),
@@ -345,7 +234,7 @@ function renderCreator(): HTMLElement {
       'div',
       { style: 'display:grid;gap:14px' },
       panel(
-        'Preview',
+        'Your player',
         el(
           'div',
           { class: 'pcard' },
@@ -353,14 +242,14 @@ function renderCreator(): HTMLElement {
           el(
             'div',
             { class: 'meta' },
-            el('div', { class: 'pname' }, draftName || 'New Build'),
+            el('div', { class: 'pname' }, draftName || 'New Player'),
             el(
               'div',
               { class: 'pline' },
               el('span', {}, draft.position),
+              el('span', {}, `#${draft.jerseyNumber}`),
               el('span', {}, formatHeight(draft.heightIn)),
               el('span', {}, `${draft.weightLb} lb`),
-              el('span', {}, `#${draft.jerseyNumber}`),
             ),
             el('div', { class: 'faint', style: 'font-size:11px;margin-top:6px' }, `Starts at ${overall} OVR · ceiling ${ceiling} OVR`),
           ),
@@ -370,11 +259,16 @@ function renderCreator(): HTMLElement {
         el(
           'button',
           {
-            class: 'btn primary block',
+            class: 'btn primary block xl',
             style: 'margin-top:10px',
             disabled: store.profile.players.length >= MAX_SLOTS,
             onclick: () => {
-              const name = draftName.trim() || 'New Build';
+              const name = draftName.trim();
+              if (!name) {
+                toast('Give your player a name first', 'bad');
+                nameInput.focus();
+                return;
+              }
               const slot = store.addSlot(name, { ...draft });
               if (slot < 0) {
                 toast('All save slots are full', 'bad');
@@ -382,15 +276,15 @@ function renderCreator(): HTMLElement {
               }
               draftName = '';
               toast(`${name} created — go earn some Coins`, 'good');
-              navigate('myplayer');
+              navigate('play');
             },
           },
-          store.profile.players.length >= MAX_SLOTS ? 'All slots full' : 'Create build',
+          store.profile.players.length >= MAX_SLOTS ? 'All slots full' : 'Create player',
         ),
       ),
 
       panel(
-        'Attribute graph',
+        'Attribute ceiling',
         radarEl(preview, caps, 300),
         el(
           'div',
@@ -398,32 +292,20 @@ function renderCreator(): HTMLElement {
           el('span', { class: 'chip' }, el('span', { class: 'dot', style: 'background:#3ef07a' }), 'At creation'),
           el('span', { class: 'chip' }, el('span', { class: 'dot', style: 'background:#ff7a3d' }), 'Ceiling'),
         ),
-      ),
-
-      panel(
-        'Attribute caps',
-        el('div', { class: 'hint mb' }, 'Blue is where this build starts. The red marker is the hard ceiling your body allows — upgrades can never pass it.'),
-        ...ATTRIBUTE_KEYS.map((key) =>
-          el(
-            'div',
-            { class: 'attr' },
-            el('span', { class: 'aname' }, ATTRIBUTE_META[key].label),
-            el(
-              'span',
-              { class: 'track' },
-              el('i', { style: `width:${(preview[key] / 99) * 100}%` }),
-              el('u', { style: `left:${(caps[key] / 99) * 100}%` }),
-            ),
-            el('span', { class: 'aval' }, String(caps[key])),
-            el('span', { class: 'cost' }, 'cap'),
+        el(
+          'div',
+          { style: 'margin-top:14px' },
+          ...describeBuild(caps).map((line) =>
+            el('div', { class: 'kv' }, el('span', { class: 'k' }, line.label), el('span', { class: 'v', style: `color:${line.color}` }, line.grade)),
           ),
         ),
-      ),
-
-      panel(
-        'What this build does well',
-        ...describeBuild(caps).map((line) => el('div', { class: 'kv' }, el('span', { class: 'k' }, line.label), el('span', { class: 'v', style: `color:${line.color}` }, line.grade))),
-        el('div', { class: 'barrow', style: 'margin-top:12px' }, el('span', { class: 'lbl' }, 'Overall ceiling'), el('span', { class: 'val' }, `${ceiling}`), bar((ceiling - 60) / 39)),
+        el(
+          'div',
+          { class: 'barrow', style: 'margin-top:12px' },
+          el('span', { class: 'lbl' }, 'Overall ceiling'),
+          el('span', { class: 'val' }, String(ceiling)),
+          bar((ceiling - 60) / 39),
+        ),
       ),
     ),
   );
@@ -431,13 +313,22 @@ function renderCreator(): HTMLElement {
   return host;
 }
 
+/** Minimal shape for the portrait when no build exists yet. */
+function blankPlayerShape() {
+  return {
+    body: { skinTone: 3, hairstyleId: 'hair-fade', facialHairId: 'face-none', bodyType: 'athletic' as const, faceScanId: null, muscleDefinition: 0.5 },
+    loadout: { jerseyId: 'jersey-starter' },
+  } as never;
+}
+
 function describeBuild(caps: Record<string, number>): { label: string; grade: string; color: string }[] {
   const groups: [string, string[]][] = [
     ['Outside scoring', ['threePoint', 'midRange', 'freeThrow']],
-    ['Inside scoring', ['layup', 'dunk', 'closeShot']],
+    ['Inside scoring', ['closeShot', 'layup', 'dunk']],
     ['Playmaking', ['ballHandle', 'passAccuracy']],
     ['Perimeter defense', ['perimeterDefense', 'steal']],
-    ['Interior defense', ['interiorDefense', 'block', 'defensiveRebound']],
+    ['Interior defense', ['interiorDefense', 'block']],
+    ['Rebounding', ['offensiveRebound', 'defensiveRebound']],
     ['Athleticism', ['speed', 'acceleration', 'vertical']],
     ['Physicality', ['strength', 'stamina']],
   ];
@@ -449,3 +340,5 @@ function describeBuild(caps: Record<string, number>): { label: string; grade: st
     return { label, grade, color };
   });
 }
+
+export { ATTRIBUTE_META };

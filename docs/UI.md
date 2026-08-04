@@ -66,11 +66,13 @@ not fit on a radar legibly, so each axis averages a related group.
 | --- | --- |
 | **Home** | Player card, mode tiles, season banner, career ladder, live events, daily challenges, career summary. |
 | **Play** | The six-difficulty picker, each card showing its traits, a difficulty meter and your record on it; the selected level expands into what it actually does. Plus the practice gym, event list, court selection, career ladder and rules. |
+| **Practice Gym** | Two halves. *Shoot around* is an empty gym — no defender, no shot clock, no score, no payout. *Training Skills* is four timed drills (three-point, layup, blocking & stealing, defending) with bronze/silver/gold rep tiers, a saved personal best per drill, and a payout per rep. |
+| **Locker** | Everything you own grouped into Identity, Kit, Accessories, Animations and Flair, with a walkout preview at the top showing your equipped title and win-streak tag. One tap equips. |
 | **MyPlayer** | Three tabs. *Attributes* opens with a radar graph of your spread against your build ceiling, then all nineteen ratings with the cap marked in red and the exact upgrade price. *Badges* shows all forty with tier, progress and gating attribute. *Animations* covers jump shots, dunk packages and the equipped loadout. |
 | **Builder** | Save slots, body sliders with live cap recalculation, jersey number, appearance, accessories, templates, a live radar graph, and a "what this build does well" grading panel. |
 | **Parks** | Five parks with a walk-around top-down hub — WASD or drag to move, step onto a court ring to start a run. |
-| **Season** | Battle pass with both tracks and per-tier claiming, the challenge board, and end-of-season rewards. |
-| **Store** | Twelve cosmetic categories, rarity-coloured, with purchase and equip in one tap. |
+| **Season** | Battle pass with both tracks and per-tier claiming, the challenge board — weeklies pay a cosmetic and seasonals pay a title on top of coins and XP — and end-of-season rewards. |
+| **Store** | Thirteen cosmetic categories including titles, rarity-coloured, with purchase and equip in one tap. Earned-only items show what unlocks them instead of a price. |
 | **Stats** | Career totals with per-game averages, highlight counters, teammate grade, and a per-build comparison. |
 | **Records** | The six-rung career ladder with your record on each difficulty, highest level cleared, and personal bests. |
 | **Settings** | Shot meter style, display, audio, profile export/import and reset. |

@@ -7,11 +7,13 @@ import { clear, el, fmt } from './ui/dom.ts';
 
 import { renderHome } from './ui/screens/home.ts';
 import { renderPlay } from './ui/screens/play.ts';
+import { renderPractice } from './ui/screens/practice.ts';
 import { renderBuilder } from './ui/screens/builder.ts';
 import { renderMyPlayer } from './ui/screens/myplayer.ts';
 import { renderParks } from './ui/screens/parks.ts';
 import { renderSeason } from './ui/screens/season.ts';
 import { renderStore } from './ui/screens/store.ts';
+import { renderAccessories } from './ui/screens/accessories.ts';
 import { renderStats } from './ui/screens/stats.ts';
 import { renderRecords } from './ui/screens/records.ts';
 import { renderSettings } from './ui/screens/settings.ts';
@@ -19,11 +21,13 @@ import { renderSettings } from './ui/screens/settings.ts';
 export type Route =
   | 'home'
   | 'play'
+  | 'practice'
   | 'builder'
   | 'myplayer'
   | 'parks'
   | 'season'
   | 'store'
+  | 'locker'
   | 'stats'
   | 'records'
   | 'settings';
@@ -31,11 +35,13 @@ export type Route =
 const SCREENS: Record<Route, (params: RouteParams) => HTMLElement> = {
   home: renderHome,
   play: renderPlay,
+  practice: renderPractice,
   builder: renderBuilder,
   myplayer: renderMyPlayer,
   parks: renderParks,
   season: renderSeason,
   store: renderStore,
+  locker: renderAccessories,
   stats: renderStats,
   records: renderRecords,
   settings: renderSettings,
@@ -48,6 +54,7 @@ const NAV: { route: Route; label: string }[] = [
   { route: 'parks', label: 'Parks' },
   { route: 'season', label: 'Season' },
   { route: 'store', label: 'Store' },
+  { route: 'locker', label: 'Locker' },
   { route: 'stats', label: 'Stats' },
   { route: 'records', label: 'Records' },
   { route: 'settings', label: 'Settings' },
@@ -98,6 +105,21 @@ export function refresh(): void {
 
 function renderTopbar(): void {
   clear(topbar);
+  const locked = !store.hasPlayer;
+
+  if (locked) {
+    topbar.append(
+      el(
+        'div',
+        { class: 'brand' },
+        el('span', { class: 'mark' }),
+        el('span', {}, 'Hoops ', el('span', { class: 'elite' }, 'Elite')),
+      ),
+      el('nav', {}, el('span', { class: 'navbtn active' }, 'Create your player')),
+    );
+    return;
+  }
+
   const player = store.player;
   const lp = levelProgress(player.xp);
 
@@ -146,7 +168,15 @@ function renderTopbar(): void {
   );
 }
 
+/** Every route except the creator needs a build to exist. */
+const ROUTES_WITHOUT_PLAYER: Route[] = ['builder', 'settings'];
+
 function renderShell(): void {
+  // Nothing in the game works without a player, so a profile with no build is
+  // routed straight into the creator rather than into a half-empty screen.
+  if (!store.hasPlayer && !ROUTES_WITHOUT_PLAYER.includes(currentRoute)) {
+    currentRoute = 'builder';
+  }
   renderTopbar();
   clear(screenHost);
   const render = SCREENS[currentRoute] ?? renderHome;

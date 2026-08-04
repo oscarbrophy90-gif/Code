@@ -1,18 +1,21 @@
 import {
   BATTLE_PASS_TIERS,
   CURRENCY_SHORT,
+  RARITY_COLOR,
+  STORE_BY_ID,
   XP_PER_TIER,
   buildBattlePass,
   generateChallenges,
   seasonForTime,
   seasonTimeRemaining,
   tierForPassXp,
+  type ChallengeDef,
   type PassReward,
 } from '@hoops/shared';
 
 import { store } from '../../state/store.ts';
 import { audio } from '../../engine/audio.ts';
-import { refresh } from '../../main.ts';
+import { navigate, refresh } from '../../main.ts';
 import { bar, el, fmt, panel, tabs, toast } from '../dom.ts';
 
 type Tab = 'pass' | 'challenges' | 'rewards';
@@ -190,18 +193,31 @@ function renderChallenges(): HTMLElement {
     { key: 'seasonal', label: 'Seasonal' },
   ];
 
-  const claim = (id: string, currency: number, xp: number, name: string) => {
+  const claim = (def: ChallengeDef) => {
+    const item = def.itemReward ? STORE_BY_ID[def.itemReward] : undefined;
+    const alreadyOwned = item ? store.player.unlocked.includes(item.id) : false;
+
     store.update((p) => {
-      const state = p.challenges.find((c) => c.id === id);
+      const state = p.challenges.find((c) => c.id === def.id);
       if (!state || state.claimed) return;
       state.claimed = true;
-      p.players[p.activeSlot].currency += currency;
-      p.players[p.activeSlot].xp += xp;
-      p.battlePass.tierXp += xp;
+      const target = p.players[p.activeSlot];
+      target.currency += def.currency;
+      target.xp += def.xp;
+      // An item you already own is paid out as coins instead, so a reward is
+      // never wasted on a duplicate.
+      if (item && !target.unlocked.includes(item.id)) target.unlocked.push(item.id);
+      else if (item) target.currency += Math.round(item.price * 0.5);
+      p.battlePass.tierXp += def.xp;
       p.battlePass.tier = Math.min(BATTLE_PASS_TIERS, Math.floor(p.battlePass.tierXp / XP_PER_TIER) + 1);
     });
+
     audio.play('levelUp');
-    toast(`${name} claimed — +${fmt(currency)} ${CURRENCY_SHORT}, +${fmt(xp)} XP`, 'good');
+    if (item && !alreadyOwned) {
+      toast(`${def.name} claimed — ${item.name} unlocked, equip it in the Locker`, 'good');
+    } else {
+      toast(`${def.name} claimed — +${fmt(def.currency)} ${CURRENCY_SHORT}, +${fmt(def.xp)} XP`, 'good');
+    }
     refresh();
   };
 
@@ -218,11 +234,30 @@ function renderChallenges(): HTMLElement {
             const progress = state?.progress ?? 0;
             const complete = progress >= d.target;
             const claimed = state?.claimed ?? false;
+            const item = d.itemReward ? STORE_BY_ID[d.itemReward] : undefined;
             return el(
               'div',
               { style: 'padding:9px 0;border-bottom:1px solid rgba(42,51,70,.5)' },
               el('div', { style: 'font-size:13px;font-weight:800' }, d.name),
               el('div', { class: 'faint', style: 'font-size:11.5px;margin-bottom:6px' }, d.description),
+              item
+                ? el(
+                    'button',
+                    {
+                      class: 'challenge-prize',
+                      style: `--rarity:${RARITY_COLOR[item.rarity]};--c1:${item.colors[0]};--c2:${item.colors[1]}`,
+                      title: item.description,
+                      onclick: () => navigate('locker'),
+                    },
+                    el('span', { class: 'locker-swatch' }),
+                    el(
+                      'span',
+                      { style: 'min-width:0;text-align:left' },
+                      el('span', { class: 'locker-name' }, item.name),
+                      el('span', { class: 'locker-rarity' }, `${item.rarity} reward`),
+                    ),
+                  )
+                : null,
               el(
                 'div',
                 { class: 'barrow' },
@@ -231,11 +266,7 @@ function renderChallenges(): HTMLElement {
                 bar(Math.min(1, progress / d.target), complete ? 'green' : ''),
               ),
               complete && !claimed
-                ? el(
-                    'button',
-                    { class: 'btn sm block', style: 'margin-top:7px', onclick: () => claim(d.id, d.currency, d.xp, d.name) },
-                    'Claim',
-                  )
+                ? el('button', { class: 'btn sm block', style: 'margin-top:7px', onclick: () => claim(d) }, 'Claim')
                 : claimed
                   ? el('div', { style: 'margin-top:6px;font-size:11px;color:var(--green);font-weight:800' }, 'Claimed')
                   : null,

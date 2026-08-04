@@ -33,13 +33,133 @@ export const ATTRIBUTE_META: Record<AttributeKey, AttributeMeta> = {
   defensiveRebound: { key: 'defensiveRebound', label: 'Defensive Rebound', group: 'defense', blurb: 'Boxing out and closing the possession.' },
 };
 
+export interface PositionRules {
+  /** inclusive height range in inches */
+  minHeightIn: number;
+  maxHeightIn: number;
+  /** the height the position most commonly sits at */
+  typicalHeightIn: number;
+  /** typical playing weight at the middle of the height range */
+  typicalWeightLb: number;
+  /** wingspan advantage over height, in inches */
+  wingspanBonus: number;
+  /** what raises overall fastest here */
+  strengths: string[];
+  /** what this position gives up */
+  weaknesses: string[];
+  blurb: string;
+}
+
+/**
+ * Height is gated per position so you cannot build a 7-foot point guard who
+ * shoots like a guard and rebounds like a centre. Each position also grows its
+ * overall from a different set of attributes.
+ */
+export const POSITION_RULES: Record<Position, PositionRules> = {
+  PG: {
+    minHeightIn: 70, maxHeightIn: 77, typicalHeightIn: 74, typicalWeightLb: 185, wingspanBonus: 2,
+    strengths: ['Ball Handle', 'Pass Accuracy', 'Three Point', 'Speed', 'Acceleration'],
+    weaknesses: ['Low Strength', 'Poor Interior Defense', 'Poor Rebounding', 'Limited Shot Blocking'],
+    blurb: 'Runs the show. Fastest hands and feet on the floor, but gives up everything physical.',
+  },
+  SG: {
+    minHeightIn: 75, maxHeightIn: 79, typicalHeightIn: 77, typicalWeightLb: 205,
+    wingspanBonus: 3,
+    strengths: ['Three Point', 'Mid Range', 'Dunk', 'Layup', 'Ball Handle'],
+    weaknesses: ['Average Passing', 'Average Interior Defense', 'Limited Rebounding', 'Less physical than forwards'],
+    blurb: 'The scorer. Best pure shot-maker in the game, inside and out.',
+  },
+  SF: {
+    minHeightIn: 78, maxHeightIn: 82, typicalHeightIn: 80, typicalWeightLb: 220,
+    wingspanBonus: 4,
+    strengths: ['Balanced across shooting, finishing, defense, athleticism and playmaking'],
+    weaknesses: ['No single elite skill', 'Average Ball Handling', 'Slower than guards', 'Less dominant inside than bigs'],
+    blurb: 'The all-rounder. Does everything well and nothing best.',
+  },
+  PF: {
+    minHeightIn: 80, maxHeightIn: 84, typicalHeightIn: 82, typicalWeightLb: 240,
+    wingspanBonus: 5,
+    strengths: ['Interior Defense', 'Block', 'Offensive & Defensive Rebound', 'Strength', 'Dunk'],
+    weaknesses: ['Slower Speed', 'Lower Ball Handle', 'Average Three Point', 'Limited Playmaking'],
+    blurb: 'The enforcer. Owns the glass and the paint on both ends.',
+  },
+  C: {
+    minHeightIn: 82, maxHeightIn: 89, typicalHeightIn: 85, typicalWeightLb: 265,
+    wingspanBonus: 6,
+    strengths: ['Interior Defense', 'Block', 'Offensive & Defensive Rebound', 'Strength', 'Close Shot', 'Dunk'],
+    weaknesses: ['Slowest position', 'Weak Ball Handling', 'Poor Perimeter Defense', 'Low Three Point', 'Struggles with fast guards'],
+    blurb: 'The anchor. Nothing gets to the rim, but do not ask him to dribble.',
+  },
+};
+
+export function heightRangeFor(position: Position): { min: number; max: number } {
+  const r = POSITION_RULES[position];
+  return { min: r.minHeightIn, max: r.maxHeightIn };
+}
+
+export function clampHeightToPosition(position: Position, heightIn: number): number {
+  const { min, max } = heightRangeFor(position);
+  return Math.max(min, Math.min(max, Math.round(heightIn)));
+}
+
+/**
+ * Wingspan is derived rather than chosen. Asking a player to pick it added a
+ * slider without adding a decision — taller positions simply have longer arms.
+ */
+export function wingspanFor(position: Position, heightIn: number): number {
+  return heightIn + POSITION_RULES[position].wingspanBonus;
+}
+
+/** Sensible weight band for a height, so the slider cannot make a 7'5" 160lb. */
+export function weightRangeFor(position: Position, heightIn: number): { min: number; max: number } {
+  const base = POSITION_RULES[position].typicalWeightLb + (heightIn - POSITION_RULES[position].typicalHeightIn) * 6;
+  return { min: Math.round(base - 30), max: Math.round(base + 40) };
+}
+
+export function defaultBuildFor(position: Position): BuildSpec {
+  const r = POSITION_RULES[position];
+  return {
+    position,
+    jerseyNumber: 23,
+    heightIn: r.typicalHeightIn,
+    weightLb: r.typicalWeightLb,
+    wingspanIn: wingspanFor(position, r.typicalHeightIn),
+  };
+}
+
 /** Position weights used for the overall rating. */
 const POSITION_WEIGHTS: Record<Position, Partial<Record<AttributeKey, number>>> = {
-  PG: { ballHandle: 1.5, passAccuracy: 1.3, speed: 1.3, acceleration: 1.2, threePoint: 1.35, midRange: 1.05, layup: 1.05, steal: 1.15, perimeterDefense: 1.15, stamina: 1.05, freeThrow: 1.05, closeShot: 0.9, offensiveRebound: 0.7, defensiveRebound: 0.8 },
-  SG: { threePoint: 1.5, midRange: 1.25, ballHandle: 1.2, speed: 1.15, acceleration: 1.1, layup: 1.1, perimeterDefense: 1.2, steal: 1.05, dunk: 1.05, stamina: 1.05, freeThrow: 1.05, offensiveRebound: 0.8, defensiveRebound: 0.85 },
-  SF: { threePoint: 1.25, midRange: 1.15, layup: 1.2, dunk: 1.2, closeShot: 1.1, ballHandle: 1.05, perimeterDefense: 1.2, interiorDefense: 1.05, offensiveRebound: 1.05, defensiveRebound: 1.1, strength: 1.1, vertical: 1.1 },
-  PF: { dunk: 1.35, layup: 1.2, closeShot: 1.25, offensiveRebound: 1.3, defensiveRebound: 1.35, interiorDefense: 1.3, strength: 1.3, block: 1.2, vertical: 1.15, midRange: 1.05, threePoint: 0.95, ballHandle: 0.9 },
-  C: { dunk: 1.4, closeShot: 1.35, offensiveRebound: 1.45, defensiveRebound: 1.5, interiorDefense: 1.45, block: 1.4, strength: 1.4, layup: 1.15, vertical: 1.1, threePoint: 0.8, ballHandle: 0.8, speed: 0.85, freeThrow: 0.85 },
+  // Overall climbs fastest from handles, passing, range and burst.
+  PG: {
+    ballHandle: 1.75, passAccuracy: 1.6, threePoint: 1.6, speed: 1.5, acceleration: 1.45,
+    freeThrow: 1.1, midRange: 1.1, layup: 1.05, steal: 1.1, perimeterDefense: 1.05, stamina: 1.05,
+    strength: 0.5, interiorDefense: 0.45, offensiveRebound: 0.4, defensiveRebound: 0.5, block: 0.4, closeShot: 0.8, dunk: 0.7,
+  },
+  // A pure scorer: range, mid, and finishing at the rim.
+  SG: {
+    threePoint: 1.75, midRange: 1.55, dunk: 1.4, layup: 1.4, ballHandle: 1.35,
+    freeThrow: 1.15, speed: 1.15, acceleration: 1.1, perimeterDefense: 1.05, closeShot: 1.05,
+    passAccuracy: 0.75, interiorDefense: 0.6, offensiveRebound: 0.55, defensiveRebound: 0.6, strength: 0.7, block: 0.55,
+  },
+  // Deliberately flat: the most versatile position, elite at nothing.
+  SF: {
+    threePoint: 1.1, midRange: 1.1, closeShot: 1.1, layup: 1.1, dunk: 1.1,
+    ballHandle: 1.0, passAccuracy: 1.0, speed: 1.0, acceleration: 1.0, vertical: 1.1,
+    strength: 1.05, stamina: 1.05, perimeterDefense: 1.1, interiorDefense: 1.05,
+    steal: 1.05, block: 1.05, offensiveRebound: 1.05, defensiveRebound: 1.05, freeThrow: 1.0,
+  },
+  // Paint and glass.
+  PF: {
+    interiorDefense: 1.65, block: 1.55, offensiveRebound: 1.6, defensiveRebound: 1.65, strength: 1.5, dunk: 1.45,
+    closeShot: 1.25, layup: 1.15, vertical: 1.15,
+    speed: 0.6, ballHandle: 0.55, threePoint: 0.65, passAccuracy: 0.6, acceleration: 0.65,
+  },
+  // Same as PF but with close-range touch and even less perimeter value.
+  C: {
+    interiorDefense: 1.75, block: 1.7, offensiveRebound: 1.7, defensiveRebound: 1.75, strength: 1.6,
+    closeShot: 1.5, dunk: 1.45, vertical: 1.1, layup: 1.15,
+    speed: 0.5, ballHandle: 0.4, threePoint: 0.45, perimeterDefense: 0.5, passAccuracy: 0.55, acceleration: 0.5, freeThrow: 0.7,
+  },
 };
 
 export function emptyAttributes(value = MIN_ATTRIBUTE): Attributes {
@@ -74,14 +194,14 @@ export function computeCaps(build: BuildSpec): Attributes {
   set('midRange', 99 - h * 16 - Math.max(0, w) * 7);
   set('layup', 99 - Math.max(0, h) * 12 - Math.max(0, w) * 8);
   set('dunk', 72 + h * 22 + w * 12 + span * 6);
-  set('ballHandle', 99 - h * 30 - Math.max(0, w) * 14);
+  set('ballHandle', 99 - h * 34 - Math.max(0, w) * 16);
   set('passAccuracy', 99 - h * 16 - Math.max(0, w) * 6);
-  set('speed', 99 - h * 18 - Math.max(0, w) * 16);
-  set('acceleration', 99 - h * 17 - Math.max(0, w) * 18);
+  set('speed', 99 - h * 26 - Math.max(0, w) * 18);
+  set('acceleration', 99 - h * 25 - Math.max(0, w) * 20);
   set('strength', 66 + h * 16 + w * 26);
   set('vertical', 92 - Math.max(0, w) * 22 + Math.max(0, -h) * 6);
-  set('stamina', 96 - Math.max(0, h) * 8 - Math.max(0, w) * 12);
-  set('perimeterDefense', 99 - h * 20 - Math.max(0, w) * 12 + span * 5);
+  set('stamina', 96 - Math.max(0, h) * 18 - Math.max(0, w) * 14);
+  set('perimeterDefense', 99 - h * 24 - Math.max(0, w) * 12 + span * 5);
   set('interiorDefense', 66 + h * 24 + w * 14 + span * 6);
   set('offensiveRebound', 60 + h * 28 + w * 15 + span * 8);
   set('defensiveRebound', 64 + h * 27 + w * 13 + span * 8);
@@ -171,12 +291,9 @@ export function totalUpgradeCost(from: number, to: number, cap: number): number 
   return sum;
 }
 
-export const HEIGHT_RANGE = { min: 68, max: 90 } as const;
-export const WEIGHT_RANGE = { min: 160, max: 290 } as const;
-
-export function wingspanRange(heightIn: number): { min: number; max: number } {
-  return { min: heightIn - 4, max: heightIn + 9 };
-}
+/** Absolute limits across all positions; each position narrows them further. */
+export const HEIGHT_RANGE = { min: 70, max: 89 } as const;
+export const WEIGHT_RANGE = { min: 155, max: 330 } as const;
 
 export function formatHeight(inches: number): string {
   return `${Math.floor(inches / 12)}'${inches % 12}"`;

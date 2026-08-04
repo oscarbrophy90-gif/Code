@@ -132,6 +132,7 @@ export function defaultMatchConfig(overrides: Partial<MatchConfig> = {}): MatchC
     maxScore: 15,
     shotClock: 14,
     makeItTakeIt: true,
+    turnoverOnMiss: true,
     timeLimit: 0,
     parkId: 'downtown',
     playlist: 'casual',
@@ -918,17 +919,6 @@ function tryBlock(state: MatchState, defSide: Side, offSide: Side, rng: Rng, atR
   if (!rng.chance(chance)) return false;
 
   const ball = state.ball;
-  ball.state = 'loose';
-  ball.owner = null;
-  ball.x = p.x;
-  ball.z = p.z;
-  ball.y = Math.max(6, reachHeight(d) * 0.85);
-  const away = normalize(rng.range(-1, 1), rng.range(-0.2, 1));
-  const power = chaseDown ? 22 : 14;
-  ball.vx = away.x * power;
-  ball.vz = away.z * power;
-  ball.vy = 6;
-
   state.stats[defSide].blocks++;
   state.stats[defSide].gradePoints += 0.8;
   if (chaseDown) state.stats[defSide].chaseDownBlocks++;
@@ -937,7 +927,39 @@ function tryBlock(state: MatchState, defSide: Side, offSide: Side, rng: Rng, atR
   if (chaseDown) awardBadgeProgress(d.cfg.badges, d.cfg.attrs, 'chaseDownBlock', 3);
   p.greenStreak = 0;
   p.makeStreak = 0;
+
+  if (state.config.turnoverOnMiss) {
+    // A block is a stop: the ball goes to whoever swatted it.
+    changePossession(state, defSide, 'block');
+  } else {
+    ball.state = 'loose';
+    ball.owner = null;
+    ball.x = p.x;
+    ball.z = p.z;
+    ball.y = Math.max(6, reachHeight(d) * 0.85);
+    const away = normalize(rng.range(-1, 1), rng.range(-0.2, 1));
+    const power = chaseDown ? 22 : 14;
+    ball.vx = away.x * power;
+    ball.vz = away.z * power;
+    ball.vy = 6;
+  }
   return true;
+}
+
+/**
+ * Hands the ball to `to` and resets for a check-ball. Used by the possession
+ * ruleset for misses, blocks and strips.
+ */
+function changePossession(state: MatchState, to: Side, reason: 'miss' | 'block' | 'steal'): void {
+  void reason;
+  state.ball.state = 'dead';
+  state.ball.owner = null;
+  state.ball.shotBy = null;
+  state.ball.shotGrade = null;
+  state.phase = 'deadball';
+  state.phaseTimer = 0.85;
+  state.possession = to;
+  state.events.push({ type: 'phase', phase: 'deadball' });
 }
 
 // -------------------------------------------------------------------- steals
@@ -1015,6 +1037,12 @@ function updateBall(state: MatchState, dt: number, rng: Rng): void {
     if (t >= 1) {
       if (ball.shotWillGoIn) {
         scoreBasket(state, ball.shotBy as Side, ball.shotValue);
+      } else if (state.config.turnoverOnMiss) {
+        // Possession rules: you miss, they get the ball.
+        const shooter = state.players[ball.shotBy as Side];
+        shooter.makeStreak = 0;
+        state.events.push({ type: 'miss', side: ball.shotBy as Side });
+        changePossession(state, other(ball.shotBy as Side), 'miss');
       } else {
         // Rim carom. Direction is derived from where the shot landed relative
         // to the rim so long misses bounce long.
@@ -1324,6 +1352,8 @@ function updateFreeThrow(state: MatchState, inputs: [PlayerInput, PlayerInput], 
     state.phaseTimer = 0.9;
     state.possession = state.config.makeItTakeIt ? ft.side : other(ft.side);
     state.events.push({ type: 'phase', phase: 'deadball' });
+  } else if (state.config.turnoverOnMiss) {
+    changePossession(state, other(ft.side), 'miss');
   } else {
     state.phase = 'live';
     state.shotClock = state.config.shotClock;
@@ -1430,6 +1460,15 @@ export function currentContest(state: MatchState, side: Side): number {
     defenderAttrs: d.cfg.attrs,
     defenderBadges: d.cfg.badges,
   });
+}
+
+/**
+ * Hands the ball to one side and restarts from a check. Training drills use
+ * this to keep the ball where the drill needs it; the match rules never do.
+ */
+export function forcePossession(state: MatchState, side: Side): void {
+  if (state.phase === 'over') return;
+  setupCheckball(state, side);
 }
 
 export function drainEvents(state: MatchState): SimEvent[] {

@@ -1,6 +1,8 @@
 import {
+  clampHeightToPosition,
   computeCaps,
   computeOverall,
+  DEFAULT_TITLES,
   DEFAULT_UNLOCKS,
   freshBadges,
   freshRank,
@@ -8,7 +10,9 @@ import {
   levelForXp,
   seasonForTime,
   startingAttributes,
+  STORE_BY_ID,
   syncChallengeStates,
+  wingspanFor,
   type BuildSpec,
   type CareerStats,
   type GameSettings,
@@ -105,6 +109,7 @@ export function createPlayer(slot: number, name: string, build: BuildSpec): MyPl
       celebrationId: 'celeb-nod',
       emoteId: 'emote-wave',
       courtId: 'court-standard',
+      titleId: 'title-rookie',
       shotMeterStyle: 'arcBar',
     },
     attributes: startingAttributes(build),
@@ -114,26 +119,21 @@ export function createPlayer(slot: number, name: string, build: BuildSpec): MyPl
     currency: 2500,
     stats: emptyCareerStats(),
     rank: freshRank(),
-    unlocked: [...DEFAULT_UNLOCKS],
+    unlocked: [...new Set([...DEFAULT_UNLOCKS, ...DEFAULT_TITLES])],
+    drillBests: {},
   };
 }
 
 function createProfile(): Profile {
   const now = Date.now();
   const season = seasonForTime(now);
-  const player = createPlayer(0, 'Rookie', {
-    position: 'SG',
-    jerseyNumber: 23,
-    heightIn: 77,
-    weightLb: 200,
-    wingspanIn: 80,
-  });
+  // No default player: you cannot play anything until you build one.
   return {
     version: PROFILE_VERSION,
     userId: `local-${now.toString(36)}`,
     displayName: 'Rookie',
     region: 'na-east',
-    players: [player],
+    players: [],
     activeSlot: 0,
     seasonId: season.id,
     battlePass: { seasonId: season.id, tier: 1, tierXp: 0, premium: false, claimed: [] },
@@ -163,7 +163,7 @@ class Store {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return createProfile();
       const parsed = JSON.parse(raw) as Profile;
-      if (!parsed || parsed.version !== PROFILE_VERSION || !parsed.players?.length) return createProfile();
+      if (!parsed || parsed.version !== PROFILE_VERSION || !Array.isArray(parsed.players)) return createProfile();
       return parsed;
     } catch {
       return createProfile();
@@ -180,8 +180,25 @@ class Store {
       // ladder carry over — a cleared difficulty stays cleared.
       this.profile.battlePass = { seasonId: season.id, tier: 1, tierXp: 0, premium: false, claimed: [] };
     }
+    // Older saves can hold heights that the position no longer allows, so
+    // every build is pulled back inside its legal band on load.
+    for (const p of this.profile.players) {
+      const legalHeight = clampHeightToPosition(p.build.position, p.build.heightIn);
+      if (legalHeight !== p.build.heightIn) p.build.heightIn = legalHeight;
+      p.build.wingspanIn = wingspanFor(p.build.position, p.build.heightIn);
+      if (typeof p.build.jerseyNumber !== 'number') p.build.jerseyNumber = 23;
+      if (!p.loadout.titleId) p.loadout.titleId = 'title-rookie';
+      for (const t of DEFAULT_TITLES) if (!p.unlocked.includes(t)) p.unlocked.push(t);
+      if (!p.drillBests) p.drillBests = {};
+    }
+
     this.profile.challenges = syncChallengeStates(generateChallenges(now), this.profile.challenges);
     this.profile.settings = { ...defaultSettings(), ...this.profile.settings };
+  }
+
+  /** True once at least one build exists. Play is locked until then. */
+  get hasPlayer(): boolean {
+    return this.profile.players.length > 0;
   }
 
   get player(): MyPlayer {
@@ -208,8 +225,10 @@ class Store {
   /** Mutate the profile and persist. Batched so rapid edits stay cheap. */
   update(fn: (p: Profile) => void): void {
     fn(this.profile);
-    this.player.updatedAt = Date.now();
-    this.player.level = levelForXp(this.player.xp);
+    if (this.hasPlayer) {
+      this.player.updatedAt = Date.now();
+      this.player.level = levelForXp(this.player.xp);
+    }
     for (const l of this.listeners) l();
     this.scheduleSave();
   }
@@ -258,7 +277,7 @@ class Store {
   }
 
   deleteSlot(slot: number): void {
-    if (this.profile.players.length <= 1) return;
+    if (this.profile.players.length === 0) return;
     this.update((p) => {
       p.players.splice(slot, 1);
       p.players.forEach((pl, i) => (pl.slot = i));
@@ -293,8 +312,24 @@ class Store {
       jerseySecondary: jersey[1],
       skinTone: player.body.skinTone,
       isBot: false,
+      position: player.build.position,
+      titleId: player.loadout.titleId,
+      winStreak: player.stats.currentWinStreak,
+      gear: equippedGear(player),
     };
   }
+}
+
+/** The visible gear on the walkout card, in the order it reads best. */
+function equippedGear(player: MyPlayer): string[] {
+  const l = player.loadout;
+  const ids = [l.jerseyId, l.shoesId, l.clothingId, l.accessoryId, player.body.hairstyleId, l.celebrationId];
+  const names: string[] = [];
+  for (const id of ids) {
+    const item = id ? STORE_BY_ID[id] : undefined;
+    if (item && item.name !== 'None') names.push(item.name);
+  }
+  return names;
 }
 
 function jerseyColors(id: string): [string, string] {

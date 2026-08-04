@@ -33,14 +33,20 @@ motion rather than a stopwatch.
 
 | Band | Condition | Make chance |
 | --- | --- | --- |
-| **Green** | within the green half-width | 100%, unless heavily contested (>0.72), where it falls to 55–75% |
+| **Green** | within the green half-width | 100%. Always. There is no hidden roll and no contest that takes it away. |
 | **Excellent** | within green + 6% of the bar | interpolates from 80% of the green chance down to the base chance |
 | **Early / Late / Wild** | beyond that | falls off toward roughly 28% of the base chance |
 
 The base chance for a non-perfect shot comes from the governing rating (0.20 at 25 rated
 to 0.62 at 99), then contest, distance falloff beyond your range, stamina and the shot
-type all apply. A guaranteed green is the reward for perfect timing; everything else is a
-percentage.
+type all apply. A green is the reward for perfect timing and it is unconditional;
+everything else is a percentage.
+
+Contest does not touch a green's make chance — it attacks the window instead. A defender
+who leaves his feet without blocking the shot narrows the green half-width by up to 68%,
+scaled down by your Three Point / Mid Range rating, so a great shooter keeps a usable
+window under pressure and a poor one is left with almost nothing. That is the whole
+mechanic: contest makes greens *harder to hit*, never less likely to go in once hit.
 
 The signed timing error is preserved through to the ball's flight — an early release
 lands long off the back rim, a late one is short. You can read your mistake from the
@@ -156,6 +162,11 @@ Defense/Strength and Rim Protector. It knocks the defender back and finishes at 
 
 Half court, make-it-take-it, 14-second shot clock. Twos from behind the arc, ones inside.
 First to 11, win by 2, hard cap at 15.
+
+**Possession changes on every failure.** Miss a shot, get blocked, or get stripped and the
+ball goes straight to the other player — there is no scramble for the loose ball. Make a
+shot and you keep it. That is `turnoverOnMiss` in `MatchConfig`, and it routes through a
+single `changePossession()` so the three cases cannot drift apart.
 
 After a change of possession or an offensive rebound the ball must be taken back past the
 arc before it can be scored; the HUD calls this out and shots are suppressed until you

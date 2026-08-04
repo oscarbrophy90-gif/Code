@@ -129,8 +129,44 @@ export interface ChallengeDef {
   metric: ChallengeMetric;
   currency: number;
   xp: number;
+  /** store item or title granted on top of the coins and XP */
+  itemReward?: string;
   expiresAt: number;
 }
+
+/**
+ * Item rewards are held here as plain ids so the challenge generator stays
+ * free of the cosmetics catalogue. Weeklies pay a piece of kit, seasonals pay
+ * a title or something you would otherwise have to save up for.
+ */
+const WEEKLY_REWARDS = [
+  'acc-headband',
+  'acc-armsleeve',
+  'acc-goggles',
+  'acc-chain',
+  'shoes-lowrider',
+  'shoes-anvil',
+  'cloth-compression',
+  'cloth-hoodie',
+  'emote-clap',
+  'emote-bow',
+  'celeb-shrug',
+  'hair-waves',
+  'tat-sleeve-left',
+];
+
+const SEASONAL_REWARDS = [
+  'title-grinder',
+  'title-collector',
+  'title-bucket',
+  'title-cold',
+  'title-problem',
+  'title-him',
+  'shoes-flare',
+  'celeb-crown',
+  'court-hardwood',
+  'jersey-midnight',
+];
 
 export type ChallengeMetric =
   | 'wins'
@@ -217,6 +253,7 @@ export function generateChallenges(time: number): ChallengeDef[] {
       metric: t.metric,
       currency: 2200 + target * 40,
       xp: 2000 + target * 35,
+      itemReward: WEEKLY_REWARDS[(week + i * 5) % WEEKLY_REWARDS.length],
       expiresAt: weekEnd,
     });
   }
@@ -234,6 +271,7 @@ export function generateChallenges(time: number): ChallengeDef[] {
       metric: t.metric,
       currency: 9000 + target * 30,
       xp: 8000 + target * 28,
+      itemReward: SEASONAL_REWARDS[(hashString(season.id) + i * 3) % SEASONAL_REWARDS.length],
       expiresAt: season.endsAt,
     });
   }

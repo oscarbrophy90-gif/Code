@@ -1,5 +1,5 @@
 import type { ShotProfile, ShotType, ShotGrade } from '../shooting.ts';
-import type { Attributes, BadgeState } from '../types.ts';
+import type { Attributes, BadgeState, Position } from '../types.ts';
 import type { DribbleMoveId } from './moves.ts';
 
 export type Side = 0 | 1;
@@ -71,6 +71,17 @@ export interface SimPlayerConfig {
   jerseySecondary: string;
   skinTone: number;
   isBot: boolean;
+  // ---- presentation only. The simulation never reads these. ----
+  /** shown on the walkout card */
+  position?: Position;
+  /** equipped title id, shown under the name on the walkout */
+  titleId?: string;
+  /** current win streak, shown as a tag on the walkout */
+  winStreak?: number;
+  /** names of the gear this player is wearing, shown on the walkout */
+  gear?: string[];
+  /** archetype label for bots, e.g. "Paint Beast" */
+  archetype?: string;
 }
 
 export interface SimPlayer {
@@ -157,6 +168,11 @@ export interface MatchConfig {
   maxScore: number;
   shotClock: number;
   makeItTakeIt: boolean;
+  /**
+   * Streetball possession rules: a miss, block or steal hands the ball
+   * straight to the other player instead of going to a live rebound battle.
+   */
+  turnoverOnMiss: boolean;
   /** seconds; 0 = untimed, first to target */
   timeLimit: number;
   parkId: string;

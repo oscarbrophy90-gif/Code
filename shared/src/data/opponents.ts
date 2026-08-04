@@ -85,7 +85,28 @@ export function generateOpponent(targetOverall: number, seed: number): SimPlayer
     jerseySecondary: team.accent,
     skinTone: rng.int(0, 8),
     isBot: true,
+    position: build.position,
+    archetype: template.name,
+    titleId: botTitle(targetOverall, rng),
+    winStreak: rng.chance(0.45) ? rng.int(2, 9) : 0,
   };
+}
+
+/**
+ * Bots wear titles too, and the better the bot the better the title — walking
+ * out against "The Franchise" should tell you something before tip-off.
+ */
+const BOT_TITLE_LADDER: { minOverall: number; ids: string[] }[] = [
+  { minOverall: 92, ids: ['title-franchise', 'title-him', 'title-nightmare', 'title-hof'] },
+  { minOverall: 85, ids: ['title-problem', 'title-nightmare', 'title-unbeaten', 'title-superstar'] },
+  { minOverall: 78, ids: ['title-cold', 'title-sharpshooter', 'title-ankle-collector', 'title-all-star'] },
+  { minOverall: 70, ids: ['title-bucket', 'title-streaker', 'title-not-today', 'title-pro-slayer'] },
+  { minOverall: 0, ids: ['title-rookie', 'title-none', 'title-first-blood', 'title-bucket'] },
+];
+
+function botTitle(overall: number, rng: Rng): string {
+  const band = BOT_TITLE_LADDER.find((b) => overall >= b.minOverall) ?? BOT_TITLE_LADDER[BOT_TITLE_LADDER.length - 1];
+  return rng.pick(band.ids);
 }
 
 export function opponentForRank(rankPoints: number, salt = 'q'): SimPlayerConfig {

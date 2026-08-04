@@ -166,9 +166,11 @@ export function computeShotProfile(input: ShotInput): ShotProfile {
   const staminaDeficit = Math.max(0, 0.55 - input.stamina) / 0.55;
   const staminaMult = 1 - staminaDeficit * 0.45 * (1 - ironLungs * 0.6);
 
-  // Contest squeezes the window; Deadeye softens it.
+  // Contest squeezes the window; Deadeye softens it. This is now the *only*
+  // thing a contest does to a perfect release — hitting green always scores,
+  // so a hand in your face has to make green harder to hit, not luckier.
   const deadeye = badgeLevel(input.badges, 'deadeye');
-  const contestMult = 1 - input.contest * (0.5 * (1 - deadeye * 0.55));
+  const contestMult = 1 - input.contest * (0.68 * (1 - deadeye * 0.55));
 
   // Drift: standing still is best. Set Shooter rewards it, Free Spirit and a
   // low-drift animation forgive movement.
@@ -201,13 +203,14 @@ export function computeShotProfile(input: ShotInput): ShotProfile {
   const excellentHalfWidth = Math.min(0.35, greenHalfWidth + 0.06);
 
   // --- make chances -------------------------------------------------------
-  // Perfect timing is a guaranteed make unless heavily contested.
+  // A green release ALWAYS goes in. No exceptions, no hidden roll: if the
+  // player hit the window, the ball drops. Difficulty lives entirely in how
+  // hard that window is to hit, which is what contest, stamina, drift and
+  // ratings already control above.
+  const greenMakeChance = 1;
+  // Kept for the HUD: a smothered shot turns the band amber to warn that the
+  // window has collapsed, not that a green might miss.
   const heavilyContested = input.contest > 0.72;
-  let greenMakeChance = 1;
-  if (heavilyContested) {
-    const over = (input.contest - 0.72) / 0.28;
-    greenMakeChance = lerp(1, 0.55 + deadeye * 0.2, clamp01(over));
-  }
 
   // Distance falloff on non-green shots.
   const deepRange = badgeLevel(input.badges, 'deepRange');
@@ -253,8 +256,10 @@ export function resolveShot(profile: ShotProfile, releasePoint: number, roll: nu
     makeChance = profile.greenMakeChance;
   } else if (absError <= profile.excellentHalfWidth) {
     const t = (absError - profile.greenHalfWidth) / Math.max(1e-4, profile.excellentHalfWidth - profile.greenHalfWidth);
+    // Just outside the window is still a very good look; it decays toward the
+    // rating-driven base as the release gets further out.
     grade = 'excellent';
-    makeChance = lerp(profile.greenMakeChance * 0.8, profile.excellentMakeChance, Math.pow(t, profile.falloff));
+    makeChance = lerp(0.92, profile.excellentMakeChance, Math.pow(t, profile.falloff));
   } else {
     const t = clamp01((absError - profile.excellentHalfWidth) / 0.34);
     makeChance = lerp(profile.excellentMakeChance, profile.badMakeChance, Math.pow(t, profile.falloff));
