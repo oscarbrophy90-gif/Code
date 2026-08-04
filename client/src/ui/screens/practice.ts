@@ -56,7 +56,11 @@ export function renderPractice(_params: RouteParams): HTMLElement {
             { class: 'btn primary block xl', style: 'margin-top:14px', onclick: startShootAround },
             'Enter the gym',
           ),
-          el('div', { class: 'hint', style: 'margin-top:8px' }, 'Press Escape and choose End drill when you have had enough.'),
+          el(
+            'div',
+            { class: 'hint', style: 'margin-top:8px' },
+            'Leave whenever you like — Escape on a keyboard, the pause button top right on a touchscreen, then End drill.',
+          ),
         ),
 
         panel(

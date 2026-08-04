@@ -38,13 +38,20 @@ const STYLE = `
   font-size:9px; font-weight:800; letter-spacing:.09em; text-align:center; }
 .tc-swipe:active { border-color:rgba(62,240,122,.6); }
 @media (max-height: 520px) { .tc-swipe { display:none; } }
+/* Without this there is no way off a phone out of a match or a shoot-around,
+   which has no clock to run out. */
+.tc-pause { position:absolute; right:max(14px, env(safe-area-inset-right)); top:calc(12px + env(safe-area-inset-top));
+  width:44px; height:44px; border-radius:50%; background:rgba(20,25,36,.62); border:1px solid rgba(42,51,70,.95);
+  color:#eef2f8; pointer-events:auto; backdrop-filter:blur(6px); display:grid; place-items:center;
+  font-size:13px; font-weight:900; letter-spacing:.08em; }
+.tc-pause:active { transform:scale(.94); }
 `;
 
 /**
  * Mobile controls: a left thumbstick for movement, a right button cluster for
  * actions, and a swipe pad that maps flick direction onto dribble moves.
  */
-export function buildTouchControls(target: TouchTarget): HTMLElement {
+export function buildTouchControls(target: TouchTarget, onPause?: () => void): HTMLElement {
   const root = el('div', { class: 'tc' });
   root.appendChild(el('style', { html: STYLE }));
 
@@ -151,6 +158,16 @@ export function buildTouchControls(target: TouchTarget): HTMLElement {
     target.moveDirZ = dy / len;
     target.move = swipeToMove(dx, dy, len);
   });
+
+  // -------------------------------------------------------------- pause
+  if (onPause) {
+    const pauseBtn = el('button', { class: 'tc-pause', 'aria-label': 'Pause' }, 'II');
+    pauseBtn.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      onPause();
+    });
+    root.appendChild(pauseBtn);
+  }
 
   root.append(stick, pad, swipe);
   return root;

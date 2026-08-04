@@ -1654,6 +1654,7 @@ input[type='text']:focus {
   transform: translateX(-50%);
   z-index: 4;
   min-width: min(420px, calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
   padding: 10px 16px;
   border-radius: 8px;
   border: 1px solid color-mix(in srgb, var(--tint) 40%, transparent);
@@ -1703,6 +1704,23 @@ input[type='text']:focus {
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--text-faint);
+}
+
+/* On a phone the touch pause button owns the top-right corner, so the banner
+   drops below it rather than sitting underneath it. */
+@media (max-width: 720px) {
+  .drill-bar {
+    top: 66px;
+    padding: 8px 12px;
+  }
+
+  .drill-goal {
+    font-size: 11px;
+  }
+
+  .drill-meters {
+    gap: 18px;
+  }
 }
 
 .challenge-prize {

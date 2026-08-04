@@ -241,7 +241,7 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
 
   // ----------------------------------------------------------- touch controls
   if (settings.touchControls) {
-    root.appendChild(buildTouchControls(input.touch));
+    root.appendChild(buildTouchControls(input.touch, () => togglePause(!paused)));
   }
 
   // -------------------------------------------------------------------- step
