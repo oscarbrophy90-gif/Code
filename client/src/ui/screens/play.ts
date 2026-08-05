@@ -14,9 +14,8 @@ import {
 
 import { store } from '../../state/store.ts';
 import { navigate, type RouteParams } from '../../main.ts';
-import { el, fmt, overlay, panel } from '../dom.ts';
+import { el, fmt, panel } from '../dom.ts';
 import { startMatch } from '../session.ts';
-import { CONTROL_SHEET } from '../../engine/input.ts';
 
 /** How each level actually plays, in the player's language rather than stats. */
 export const DIFFICULTY_BLURB: Record<Difficulty, { tag: string; traits: string[]; color: string }> = {
@@ -162,7 +161,7 @@ export function renderPlay(_params: RouteParams): HTMLElement {
             { class: 'row', style: 'margin-top:14px' },
             el('button', { class: 'btn primary xl', onclick: () => playAi() }, `Play ${DIFFICULTY_LABEL[difficulty]}`),
             el('button', { class: 'btn', onclick: () => navigate('practice') }, 'Practice gym'),
-            el('button', { class: 'btn', onclick: showControls }, 'Controls'),
+            el('button', { class: 'btn', onclick: () => navigate('controls') }, 'Controls'),
           ),
         ),
 
@@ -314,33 +313,6 @@ function describeDifficulty(d: Difficulty): string {
   const moves = p.moveTier === 0 ? 'basic handles only' : p.moveTier === 1 ? 'advanced handles' : 'signature combos';
   const reads = p.tendencyRead > 0 ? `, adapts to your shot selection` : '';
   return `Reaction ${Math.round(p.reactionTime * 1000)}ms · on-ball distance ${p.standoff.toFixed(1)} ft · release error ±${(p.releaseError * 100).toFixed(1)}% · ${moves}, chains up to ${p.comboLength}${reads}. Build ${difficultyOverallBump(d) >= 0 ? '+' : ''}${difficultyOverallBump(d)} OVR versus yours.`;
-}
-
-function showControls(): void {
-  overlay(() =>
-    el(
-      'div',
-      {},
-      el('h2', { style: 'margin:0 0 6px;font-size:20px;font-weight:900' }, 'Controls'),
-      el(
-        'p',
-        { class: 'dim', style: 'margin:0 0 16px' },
-        'Keyboard shown. A gamepad maps movement to the left stick, dribble moves to right-stick flicks, and shoot to the bottom face button.',
-      ),
-      el(
-        'div',
-        { style: 'display:grid;gap:7px' },
-        ...CONTROL_SHEET.map((c) =>
-          el(
-            'div',
-            { style: 'display:grid;grid-template-columns:120px 1fr;gap:10px;align-items:baseline' },
-            el('div', {}, ...c.keys.map((k) => el('span', { class: 'keycap', style: 'margin-right:3px' }, k))),
-            el('div', {}, el('b', { style: 'font-size:13px' }, c.label), el('div', { class: 'faint', style: 'font-size:11px' }, c.action)),
-          ),
-        ),
-      ),
-    ),
-  );
 }
 
 export { fmt };

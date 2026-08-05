@@ -75,6 +75,7 @@ not fit on a radar legibly, so each axis averages a related group.
 | **Store** | Thirteen cosmetic categories including titles, rarity-coloured, with purchase and equip in one tap. Earned-only items show what unlocks them instead of a price. |
 | **Stats** | Career totals with per-game averages, highlight counters, teammate grade, and a per-build comparison. |
 | **Records** | The six-rung career ladder with your record on each difficulty, highest level cleared, and personal bests. |
+| **Controls** | Every input grouped by what you are doing — moving, with the ball, on defence — with the keyboard key, the gamepad button and the touch control side by side. All twelve dribble moves list their key, their swipe, what the move does to you and to the defender, how long it lasts, and the rating gate; a move you cannot throw yet is greyed out and shows what it needs against what you have. Jump shots and dunk packages are listed with their release times and requirements. Readable before you have built a player. |
 | **Settings** | Shot meter style, display, audio, profile export/import and reset. |
 
 ## The match HUD

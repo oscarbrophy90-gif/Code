@@ -8,6 +8,7 @@ import { clear, el, fmt } from './ui/dom.ts';
 import { renderHome } from './ui/screens/home.ts';
 import { renderPlay } from './ui/screens/play.ts';
 import { renderPractice } from './ui/screens/practice.ts';
+import { renderControls } from './ui/screens/controls.ts';
 import { renderBuilder } from './ui/screens/builder.ts';
 import { renderMyPlayer } from './ui/screens/myplayer.ts';
 import { renderParks } from './ui/screens/parks.ts';
@@ -22,6 +23,7 @@ export type Route =
   | 'home'
   | 'play'
   | 'practice'
+  | 'controls'
   | 'builder'
   | 'myplayer'
   | 'parks'
@@ -36,6 +38,7 @@ const SCREENS: Record<Route, (params: RouteParams) => HTMLElement> = {
   home: renderHome,
   play: renderPlay,
   practice: renderPractice,
+  controls: renderControls,
   builder: renderBuilder,
   myplayer: renderMyPlayer,
   parks: renderParks,
@@ -57,6 +60,7 @@ const NAV: { route: Route; label: string }[] = [
   { route: 'locker', label: 'Locker' },
   { route: 'stats', label: 'Stats' },
   { route: 'records', label: 'Records' },
+  { route: 'controls', label: 'Controls' },
   { route: 'settings', label: 'Settings' },
 ];
 
@@ -115,7 +119,28 @@ function renderTopbar(): void {
         el('span', { class: 'mark' }),
         el('span', {}, 'Hoops ', el('span', { class: 'elite' }, 'Elite')),
       ),
-      el('nav', {}, el('span', { class: 'navbtn active' }, 'Create your player')),
+      el(
+        'nav',
+        {},
+        el(
+          'button',
+          {
+            class: `navbtn ${currentRoute === 'builder' ? 'active' : ''}`,
+            onclick: () => navigate('builder'),
+          },
+          'Create your player',
+        ),
+        // Readable before you build anything — you should be able to see what
+        // the game asks of you before you commit to a body type.
+        el(
+          'button',
+          {
+            class: `navbtn ${currentRoute === 'controls' ? 'active' : ''}`,
+            onclick: () => navigate('controls'),
+          },
+          'Controls',
+        ),
+      ),
     );
     return;
   }
@@ -169,7 +194,7 @@ function renderTopbar(): void {
 }
 
 /** Every route except the creator needs a build to exist. */
-const ROUTES_WITHOUT_PLAYER: Route[] = ['builder', 'settings'];
+const ROUTES_WITHOUT_PLAYER: Route[] = ['builder', 'settings', 'controls'];
 
 function renderShell(): void {
   // Nothing in the game works without a player, so a profile with no build is
@@ -187,8 +212,18 @@ store.subscribe(() => {
   if (!fullscreenNode) renderTopbar();
 });
 
-const hash = location.hash.replace('#', '') as Route;
-navigate(SCREENS[hash] ? hash : 'home');
+function routeFromHash(): Route {
+  const hash = location.hash.replace('#', '') as Route;
+  return SCREENS[hash] ? hash : 'home';
+}
+
+navigate(routeFromHash());
+
+// Back and forward should move through the app, not out of it.
+window.addEventListener('hashchange', () => {
+  const route = routeFromHash();
+  if (route !== currentRoute) navigate(route);
+});
 
 window.addEventListener('beforeunload', () => store.saveNow());
 document.addEventListener('visibilitychange', () => {

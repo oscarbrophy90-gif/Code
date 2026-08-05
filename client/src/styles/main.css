@@ -1834,3 +1834,57 @@ input[type='text']:focus {
   padding: 10px 0;
   font-size: 16px;
 }
+
+/* --------------------------------------------------------------- controls */
+
+.ctrl-row {
+  display: grid;
+  grid-template-columns: 108px 1fr;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid rgba(42, 51, 70, 0.5);
+}
+
+.ctrl-row:last-child {
+  border-bottom: none;
+}
+
+.ctrl-row.locked {
+  opacity: 0.55;
+}
+
+.ctrl-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-content: start;
+}
+
+.ctrl-label {
+  font-size: 13.5px;
+  font-weight: 800;
+}
+
+.ctrl-action {
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.55;
+  margin-top: 2px;
+}
+
+.ctrl-alt {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 4px;
+  font-size: 10.5px;
+  color: var(--text-faint);
+  font-weight: 700;
+}
+
+@media (max-width: 560px) {
+  .ctrl-row {
+    grid-template-columns: 1fr;
+    gap: 5px;
+  }
+}
