@@ -124,6 +124,8 @@ export interface SimPlayer {
   makeStreak: number;
   /** feet of ground covered this game, feeds the stamina model */
   distanceRun: number;
+  /** true once this move has had its fumble roll */
+  fumbleChecked: boolean;
   /** chained-move counter for Tight Handles */
   comboCount: number;
   comboTimer: number;
@@ -268,6 +270,8 @@ export interface MatchState {
   /** a side that was holding shoot when it checked in; its shoot is ignored
    *  until released, so checking in never launches a shot */
   checkGuard: [boolean, boolean];
+  /** the check-in ceremony: the ball is passed out and passed back */
+  check: { stage: 'wait' | 'out' | 'back'; timer: number; from: Side; to: Side } | null;
   events: SimEvent[];
   config: MatchConfig;
   winner: Side | null;

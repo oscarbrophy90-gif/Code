@@ -7,7 +7,40 @@ import { hexA, mix } from './court.ts';
  * limb angles are driven by the sim state, so animation always matches what
  * the simulation actually did.
  */
+interface Gait {
+  phase: number;
+  amplitude: number;
+}
+
 export class PlayerRenderer {
+  /** Per-player stride state, so the walk cycle is continuous across frames. */
+  private gaits = new Map<number, Gait & { at: number }>();
+
+  /**
+   * Advances the walk cycle. Frequency rises with speed but the *phase* only
+   * ever moves forward by frequency × dt, so changing speed bends the cycle
+   * instead of teleporting it.
+   */
+  private gait(p: SimPlayer, time: number, speed: number): Gait {
+    const prev = this.gaits.get(p.side);
+    const dt = prev ? Math.max(0, Math.min(0.1, time - prev.at)) : 0;
+
+    // A real stride is roughly 5.5 ft, so steps per second is speed / 5.5, and
+    // a full cycle is two steps. Plus a slow idle shuffle so a standing player
+    // is not frozen solid.
+    const stepsPerSecond = speed / 5.5;
+    const frequency = (1.1 + stepsPerSecond) * Math.PI;
+    const target = Math.min(1, speed / 7);
+
+    const phase = (prev ? prev.phase : p.side * 2) + frequency * dt;
+    // Ease the amplitude so starting and stopping does not snap the legs.
+    const amplitude = prev ? prev.amplitude + (target - prev.amplitude) * Math.min(1, dt * 9) : target;
+
+    const next = { phase: phase % (Math.PI * 2), amplitude, at: time };
+    this.gaits.set(p.side, next);
+    return next;
+  }
+
   drawShadow(ctx: CanvasRenderingContext2D, cam: Camera, x: number, z: number, y: number, radius: number): void {
     const p = cam.project(x, 0.01, z);
     if (p.depth <= 0) return;
@@ -42,7 +75,12 @@ export class PlayerRenderer {
     const trim = p.cfg.jerseySecondary;
 
     const speed = Math.hypot(p.vx, p.vz);
-    const stride = Math.sin(time * (6 + speed * 0.7) + p.side * 2) * Math.min(1, speed / 9);
+    // Stride phase is accumulated, never derived from time * frequency: with a
+    // frequency that changes as you accelerate, phase = t * f jumps by tens of
+    // radians in a frame and the legs snap to a new position. That was the
+    // twitching. Amplitude is eased too so a stop settles instead of popping.
+    const gait = this.gait(p, time, speed);
+    const stride = Math.sin(gait.phase) * gait.amplitude;
     const lean = Math.max(-0.5, Math.min(0.5, (p.vx * Math.cos(p.facing) - p.vz * Math.sin(p.facing)) / 22));
 
     // Pose selection straight off the sim state.
@@ -72,10 +110,26 @@ export class PlayerRenderer {
         armLift = 0.55;
         spread = 1.35;
         break;
-      case 'moveLock':
+      case 'moveLock': {
         crouch = 0.34;
         spread = 1.2;
+        const t = p.moveDuration > 0 ? Math.min(1, p.moveTimer / p.moveDuration) : 0;
+        const swell = Math.sin(t * Math.PI);
+        if (p.moveId === 'betweenLegs') {
+          // Feet split wide so the ball has somewhere to go through.
+          spread = 1.2 + swell * 1.5;
+          crouch = 0.34 + swell * 0.24;
+        } else if (p.moveId === 'hesitation') {
+          // Sells the jumper: up on the toes with the arms rising.
+          armLift = swell * 1.15;
+          crouch = 0.34 * (1 - swell);
+        } else if (p.moveId === 'crossover' || p.moveId === 'doubleCross') {
+          spread = 1.2 + swell * 0.7;
+        } else if (p.moveId === 'spin') {
+          spread = 1.1;
+        }
         break;
+      }
       case 'celebrating':
         armLift = 1.3 + Math.sin(time * 6) * 0.2;
         break;
@@ -103,24 +157,30 @@ export class PlayerRenderer {
     ctx.strokeStyle = mix(skin, '#000000', 0.18);
     ctx.lineWidth = lineW * 0.92;
     const footSpread = 0.42 * spread;
+    // The forward-swinging foot leaves the floor. Without the lift the legs
+    // scissor without ever stepping, which reads as sliding rather than running.
+    const footAt = (sign: number) => {
+      const swing = sign * stride * 0.78;
+      const lift = Math.max(0, swing) * 0.55;
+      return { swing, lift, node: at(0.06 + lift, sign * footSpread + swing, swing * 0.6) };
+    };
+
     for (const sign of [-1, 1]) {
-      const swing = sign * stride * 0.55;
-      const knee = at(hipY * 0.5, sign * footSpread * 0.6 + swing * 0.4, swing * 0.3);
-      const foot = at(0.06, sign * footSpread + swing, swing * 0.6);
+      const { swing, lift, node } = footAt(sign);
+      const knee = at(hipY * 0.5 + lift * 0.4, sign * footSpread * 0.6 + swing * 0.45, swing * 0.3);
       ctx.beginPath();
       ctx.moveTo(hip.x, hip.y);
       ctx.lineTo(knee.x, knee.y);
-      ctx.lineTo(foot.x, foot.y);
+      ctx.lineTo(node.x, node.y);
       ctx.stroke();
     }
 
     // Shoes.
     ctx.fillStyle = trim;
     for (const sign of [-1, 1]) {
-      const swing = sign * stride * 0.55;
-      const foot = at(0.06, sign * footSpread + swing, swing * 0.6);
+      const { node } = footAt(sign);
       ctx.beginPath();
-      ctx.ellipse(foot.x, foot.y, s * 0.3, s * 0.15, 0, 0, Math.PI * 2);
+      ctx.ellipse(node.x, node.y, s * 0.3, s * 0.15, 0, 0, Math.PI * 2);
       ctx.fill();
     }
 

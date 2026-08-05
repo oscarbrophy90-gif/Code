@@ -375,6 +375,16 @@ export class AiController {
       if (this.rng.chance(this.profile.bitesOnFakes * dt * 9)) input.contest = true;
     }
 
+    // A hesitation sells the same lie as a pump fake — ball over the head,
+    // hands up — so a bot that bites on fakes bites on this too, and a Hall of
+    // Fame bot almost never does. Only during the rise, and only sometimes.
+    if (opp.state === 'moveLock' && opp.moveId === 'hesitation' && realDist < 7 && me.y === 0) {
+      const t = opp.moveDuration > 0 ? opp.moveTimer / opp.moveDuration : 0;
+      if (t > 0.25 && t < 0.7 && this.rng.chance(this.profile.bitesOnFakes * 0.8 * dt * 9)) {
+        input.contest = true;
+      }
+    }
+
     // Contest a live jumper. Bots with low IQ jump late or not at all.
     if (opp.state === 'shooting' && opp.shotProfile) {
       const progress = opp.shotElapsed / opp.shotProfile.meterDuration;

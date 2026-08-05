@@ -512,12 +512,21 @@ export class Hud {
         // You check it in yourself. Whether you have the ball or you are
         // checking it back, it is the same button.
         const mine = state.possession === side;
+        const passing = state.check !== null && state.check.stage !== 'wait';
         ctx.font = '900 15px Inter, system-ui, sans-serif';
         ctx.fillStyle = '#ffc53d';
-        ctx.fillText(this.touch ? 'Tap shoot to check' : 'Press space bar to check', w / 2, h / 2 - 14);
+        ctx.fillText(
+          passing ? 'Checking…' : this.touch ? 'Tap shoot to check' : 'Press space bar to check',
+          w / 2,
+          h / 2 - 14,
+        );
         ctx.font = '700 11px Inter, system-ui, sans-serif';
         ctx.fillStyle = '#97a2b8';
-        ctx.fillText(mine ? 'Your ball' : 'Check it back to start', w / 2, h / 2 + 4);
+        ctx.fillText(
+          passing ? 'Ball out and back, then play' : mine ? 'Your ball' : 'Check it back to start',
+          w / 2,
+          h / 2 + 4,
+        );
       }
     }
 

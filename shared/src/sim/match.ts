@@ -8,7 +8,7 @@ import {
   type ShotType,
 } from '../shooting.ts';
 import { COURT, clampToCourt, distanceToRim, isBeyondArc, shotValue } from './court.ts';
-import { MOVE_BY_ID, DUNK_PACKAGE_BY_ID, type DribbleMoveId } from './moves.ts';
+import { MOVE_BY_ID, DUNK_PACKAGE_BY_ID, type DribbleMoveDef, type DribbleMoveId } from './moves.ts';
 import {
   emptyStats,
   type Ball,
@@ -93,6 +93,7 @@ function makePlayer(side: Side, cfg: SimPlayerConfig): SimPlayer {
     greenStreak: 0,
     makeStreak: 0,
     distanceRun: 0,
+    fumbleChecked: false,
     comboCount: 0,
     comboTimer: 0,
   };
@@ -164,6 +165,7 @@ export function createMatch(
     stats: [emptyStats(), emptyStats()],
     freeThrow: null,
     checkGuard: [false, false],
+    check: null,
     events: [],
     config,
     winner: null,
@@ -207,6 +209,10 @@ function setupCheckball(state: MatchState, offense: Side): void {
   ball.settled = false;
   ball.shotBy = null;
   ball.shotGrade = null;
+  ball.vx = ball.vy = ball.vz = 0;
+  state.check = state.config.manualCheck
+    ? { stage: 'wait', timer: 0, from: offense, to: other(offense) }
+    : null;
   state.events.push({ type: 'phase', phase: 'checkball' });
 }
 
@@ -223,18 +229,8 @@ export function stepMatch(state: MatchState, inputs: [PlayerInput, PlayerInput],
     state.phaseTimer -= dt;
     if (state.phase === 'deadball') {
       if (state.phaseTimer <= 0) setupCheckball(state, state.possession);
-    } else if (state.config.manualCheck) {
-      // You check the ball in yourself. Either player can do it — you check it
-      // when you have it, you check it back when you do not.
-      const ready = state.phaseTimer <= 0;
-      const checked = inputs[0].shoot || inputs[1].shoot;
-      if (ready && checked) {
-        // Whoever is still holding the button does not get to fire a shot with
-        // the same press, so checking in never costs you a possession.
-        state.checkGuard = [inputs[0].shoot, inputs[1].shoot];
-        state.phase = 'live';
-        state.events.push({ type: 'phase', phase: 'live' });
-      }
+    } else if (state.config.manualCheck && state.check) {
+      updateCheck(state, inputs, dt);
     } else if (state.phaseTimer <= 0) {
       state.phase = 'live';
       state.events.push({ type: 'phase', phase: 'live' });
@@ -253,10 +249,15 @@ export function stepMatch(state: MatchState, inputs: [PlayerInput, PlayerInput],
     if (state.config.timeLimit > 0) state.clock = Math.max(0, state.clock - dt);
   }
 
+  const checking = state.phase === 'checkball' && !!state.check;
   for (const side of [0, 1] as Side[]) {
-    let input = live ? inputs[side] : neutral(inputs[side]);
+    let input = live ? inputs[side] : checking ? frozen(inputs[side]) : neutral(inputs[side]);
+    // The guard reads the RAW button, not the neutralised one: during the check
+    // ceremony shoot is already forced false, so testing the processed input
+    // would clear the guard immediately and let the held button fire a shot the
+    // moment play went live.
     if (state.checkGuard[side]) {
-      if (input.shoot) input = { ...input, shoot: false };
+      if (inputs[side].shoot) input = { ...input, shoot: false };
       else state.checkGuard[side] = false;
     }
     updatePlayer(state, side, input, dt, rng);
@@ -282,6 +283,71 @@ export function stepMatch(state: MatchState, inputs: [PlayerInput, PlayerInput],
 /** During dead ball phases we honour movement but suppress actions. */
 function neutral(input: PlayerInput): PlayerInput {
   return { ...input, shoot: false, drive: false, move: null, steal: false, contest: false, fake: false };
+}
+
+/** Nobody moves during a check. You stand there and check the ball. */
+function frozen(input: PlayerInput): PlayerInput {
+  return { ...neutral(input), mx: 0, mz: 0, sprint: false };
+}
+
+
+// -------------------------------------------------------------- checking in
+
+const CHECK_PASS_TIME = 0.42;
+
+/**
+ * The check-in ceremony. You press once; the ball is bounce-passed to the other
+ * player and passed straight back, and only then does the clock start. Nothing
+ * either player presses during it does anything else, so checking in can never
+ * turn into a jump or a shot.
+ */
+function updateCheck(state: MatchState, inputs: [PlayerInput, PlayerInput], dt: number): void {
+  const check = state.check;
+  if (!check) return;
+  const ball = state.ball;
+
+  if (check.stage === 'wait') {
+    // A short beat so the ball is visibly in hand before you can check it.
+    if (state.phaseTimer > 0) return;
+    if (!inputs[0].shoot && !inputs[1].shoot) return;
+    state.checkGuard = [inputs[0].shoot, inputs[1].shoot];
+    check.stage = 'out';
+    check.timer = 0;
+    ball.state = 'dead';
+    ball.owner = null;
+    return;
+  }
+
+  check.timer += dt;
+  const t = clamp01(check.timer / CHECK_PASS_TIME);
+  const outbound = check.stage === 'out';
+  const a = state.players[outbound ? check.from : check.to];
+  const b = state.players[outbound ? check.to : check.from];
+
+  // A bounce pass, swung out to one side so it is not hidden behind a body —
+  // the players stand nose to nose at the check and the camera looks straight
+  // down that line.
+  const swing = Math.sin(t * Math.PI) * 2.6;
+  ball.x = lerp(a.x, b.x, t) + swing;
+  ball.z = lerp(a.z, b.z, t);
+  const chest = 3.4;
+  ball.y = chest - Math.sin(t * Math.PI) * (chest - 0.7);
+
+  if (t < 1) return;
+
+  if (outbound) {
+    check.stage = 'back';
+    check.timer = 0;
+    return;
+  }
+
+  // Back in the offence's hands: play on.
+  ball.state = 'held';
+  ball.owner = check.from;
+  state.possession = check.from;
+  state.check = null;
+  state.phase = 'live';
+  state.events.push({ type: 'phase', phase: 'live' });
 }
 
 // ------------------------------------------------------------------- players
@@ -364,6 +430,12 @@ function updatePlayer(state: MatchState, side: Side, input: PlayerInput, dt: num
     if (canCancel && input.drive && distanceToRim(p.x, p.z) < 12) {
       startFinish(state, side, rng);
       return;
+    }
+    // Fumble check, once, at the point the ball is most exposed. Poor handles
+    // lose it through the legs or across the body and the defender can pounce.
+    if (!p.fumbleChecked && progress >= 0.45 && hasBall) {
+      p.fumbleChecked = true;
+      if (tryFumble(state, side, def, rng)) return;
     }
     if (p.moveTimer >= p.moveDuration) {
       p.state = hasBall ? 'dribble' : 'idle';
@@ -570,6 +642,55 @@ function resolveBodies(state: MatchState, dt: number): void {
 
 // ------------------------------------------------------------- dribble moves
 
+
+/**
+ * A move you do not have the handle for gets away from you. The ball squirts
+ * loose in the direction it was travelling, so the defender has a real chance
+ * at it — which is what makes spamming moves on a low Ball Handle build a bad
+ * idea rather than a free animation.
+ */
+function tryFumble(state: MatchState, side: Side, def: DribbleMoveDef, rng: Rng): boolean {
+  const p = state.players[side];
+  const handle = p.cfg.attrs.ballHandle;
+
+  // 99 handle is clean. It climbs steeply below about 70, and chaining moves
+  // makes each one riskier than the last.
+  const skill = clamp01((handle - 30) / 69);
+  let chance = (1 - skill) ** 2 * 0.16;
+  chance *= def.signature ? 1.6 : def.requires > 0 ? 1.25 : 1;
+  chance *= 1 + Math.min(4, p.comboCount - 1) * 0.22;
+  chance *= 1 - badgeLevel(p.cfg.badges, 'tightHandles') * 0.3;
+  chance *= 1 - badgeLevel(p.cfg.badges, 'handlesForDays') * 0.25;
+  // Pressure matters: a defender in your chest turns a wobble into a turnover.
+  const d = state.players[other(side)];
+  const pressure = clamp01(1 - Math.hypot(d.x - p.x, d.z - p.z) / 7);
+  chance *= 1 + pressure * 0.8;
+  chance *= 1 - clamp01(p.stamina) * 0.15;
+
+  if (!rng.chance(clamp01(chance))) return false;
+
+  const ball = state.ball;
+  const away = normalize(p.moveDirX || rng.range(-1, 1), p.moveDirZ || rng.range(-1, 1));
+  ball.state = 'loose';
+  ball.owner = null;
+  ball.shotBy = null;
+  const power = rng.range(7, 13);
+  ball.vx = away.x * power;
+  ball.vz = away.z * power;
+  ball.vy = rng.range(1.5, 4);
+  ball.y = Math.max(1, ball.y);
+
+  p.state = 'staggered';
+  p.stagger = Math.max(p.stagger, 0.5);
+  p.staggerTimer = 0.3;
+  p.moveId = null;
+  p.comboCount = 0;
+  state.stats[side].turnovers++;
+  state.stats[side].gradePoints -= 0.4;
+  state.events.push({ type: 'turnover', side, reason: 'strip' });
+  return true;
+}
+
 function tryDribbleMove(state: MatchState, side: Side, moveId: DribbleMoveId, input: PlayerInput, rng: Rng): void {
   const p = state.players[side];
   const def = MOVE_BY_ID[moveId];
@@ -581,6 +702,7 @@ function tryDribbleMove(state: MatchState, side: Side, moveId: DribbleMoveId, in
   p.state = 'moveLock';
   p.moveId = moveId;
   p.moveTimer = 0;
+  p.fumbleChecked = false;
   const tightHandles = badgeLevel(p.cfg.badges, 'tightHandles');
   p.moveDuration = def.duration * (1 - tightHandles * 0.16);
   p.moveDirX = dir.x;
@@ -1034,11 +1156,7 @@ function updateBall(state: MatchState, dt: number, rng: Rng): void {
 
   if (ball.state === 'held' && ball.owner !== null) {
     const p = state.players[ball.owner];
-    const bob = p.state === 'dribble' ? Math.abs(Math.sin(state.time * 9)) * 2.2 + 1.4 : 3.2;
-    const side = Math.sin(p.facing + Math.PI / 2) * 0.9;
-    ball.x = p.x + side;
-    ball.z = p.z - Math.cos(p.facing + Math.PI / 2) * 0.9;
-    ball.y = p.state === 'shooting' || p.state === 'finishing' ? reachHeight(p) * 0.9 : bob;
+    placeHeldBall(state, p, ball);
     ball.vx = ball.vy = ball.vz = 0;
     return;
   }
@@ -1115,6 +1233,88 @@ function updateBall(state: MatchState, dt: number, rng: Rng): void {
     }
     tryCollect(state, rng);
   }
+}
+
+
+/**
+ * Where the ball sits in the handler's hands. Dribble moves drive it explicitly
+ * so a between-the-legs actually goes between the legs and a crossover really
+ * whips across — the animation is the move, not a decoration on top of it.
+ */
+function placeHeldBall(state: MatchState, p: SimPlayer, ball: Ball): void {
+  const rightX = Math.sin(p.facing + Math.PI / 2);
+  const rightZ = -Math.cos(p.facing + Math.PI / 2);
+  const fwdX = -Math.sin(p.facing);
+  const fwdZ = Math.cos(p.facing);
+
+  if (p.state === 'shooting' || p.state === 'finishing') {
+    ball.x = p.x + rightX * 0.35;
+    ball.z = p.z + rightZ * 0.35;
+    ball.y = reachHeight(p) * 0.9;
+    return;
+  }
+
+  if (p.state === 'moveLock' && p.moveId) {
+    const t = clamp01(p.moveTimer / Math.max(0.001, p.moveDuration));
+    const arc = Math.sin(t * Math.PI);
+    switch (p.moveId) {
+      case 'betweenLegs': {
+        // Through the legs: it starts on one side, drops to the floor between
+        // the feet at the halfway point, and comes up on the other side.
+        const lateral = Math.cos(t * Math.PI) * 0.95;
+        ball.x = p.x + rightX * lateral + fwdX * 0.15;
+        ball.z = p.z + rightZ * lateral + fwdZ * 0.15;
+        // Two bounces: down through the legs, back up to the hand.
+        ball.y = 0.45 + Math.abs(Math.cos(t * Math.PI)) * 1.9;
+        return;
+      }
+      case 'crossover':
+      case 'doubleCross': {
+        // Whips across in front, low and fast, in the direction you aimed.
+        const swings = p.moveId === 'doubleCross' ? 2 : 1;
+        const lateral = Math.cos(t * Math.PI * swings) * 1.35;
+        const aim = p.moveDirX * rightX + p.moveDirZ * rightZ >= 0 ? 1 : -1;
+        ball.x = p.x + rightX * lateral * aim + fwdX * 0.75;
+        ball.z = p.z + rightZ * lateral * aim + fwdZ * 0.75;
+        ball.y = 0.5 + Math.abs(Math.sin(t * Math.PI * swings)) * 1.5;
+        return;
+      }
+      case 'hesitation': {
+        // Ball comes up over the head with the shooting motion — that is the
+        // whole point of a hesi, and it is what the defender has to read.
+        ball.x = p.x + rightX * 0.2;
+        ball.z = p.z + rightZ * 0.2;
+        ball.y = 1.6 + arc * (reachHeight(p) * 0.95 - 1.6);
+        return;
+      }
+      case 'behindBack': {
+        const lateral = Math.cos(t * Math.PI) * 1.1;
+        ball.x = p.x + rightX * lateral - fwdX * 0.9;
+        ball.z = p.z + rightZ * lateral - fwdZ * 0.9;
+        ball.y = 1.1 + arc * 1.1;
+        return;
+      }
+      case 'spin': {
+        const around = t * Math.PI * 2;
+        ball.x = p.x + Math.sin(p.facing + around) * 1.0;
+        ball.z = p.z - Math.cos(p.facing + around) * 1.0;
+        ball.y = 2.2 + arc * 0.5;
+        return;
+      }
+      default: {
+        const lateral = Math.cos(t * Math.PI * 2) * 0.8;
+        ball.x = p.x + rightX * lateral;
+        ball.z = p.z + rightZ * lateral;
+        ball.y = 1.0 + Math.abs(Math.sin(t * Math.PI * 3)) * 1.6;
+        return;
+      }
+    }
+  }
+
+  const bob = p.state === 'dribble' ? Math.abs(Math.sin(state.time * 9)) * 2.2 + 1.4 : 3.2;
+  ball.x = p.x + rightX * 0.9;
+  ball.z = p.z + rightZ * 0.9;
+  ball.y = bob;
 }
 
 function tryCollect(state: MatchState, rng: Rng): void {

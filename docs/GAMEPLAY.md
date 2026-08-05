@@ -102,6 +102,22 @@ to shoot.
 
 ## Dribbling
 
+The ball's position during a move is driven by the sim, not decorated by the renderer, so
+what you see is the move: a between-the-legs drops the ball to the floor and back up while
+the feet split wide, a crossover whips it across the body in the direction you aimed, a
+hesitation lifts it over the head with the arms rising, a behind-the-back takes it round
+the waist and a spin carries it all the way around. `placeHeldBall()` owns this.
+
+**Fumbles.** Halfway through a move — the moment the ball is most exposed — a handle
+check runs. It is roughly `(1 − skill)² × 0.16` against Ball Handle, multiplied up by
+signature moves, by each move already in the chain, and by up to 1.8× for a defender in
+your chest; Tight Handles and Handles For Days pull it back down. Lose it and the ball
+squirts loose in the direction it was travelling with you staggered, so the defender has a
+real shot at it. A 30 Ball Handle build spamming crossovers under pressure coughs it up
+several times a game; a 95 build is effectively clean. That is what stops move-spam being
+free.
+
+
 Twelve moves, each defined by duration, cancel point, burst, lateral displacement,
 retreat, stamina cost, ankle-breaker base rate and a "misdirection" factor.
 
@@ -178,11 +194,13 @@ After a change of possession or an offensive rebound the ball must be taken back
 arc before it can be scored; the HUD calls this out and shots are suppressed until you
 clear. A shot already in the air beats the shot-clock buzzer.
 
-**Checking in.** A game does not start until you check the ball — the HUD says *Press
-space bar to check*, and it is the same button whether it is your ball or you are
-checking it back. Nothing runs on a timer: the CPU never checks in for you, so the clock
-starts when you say it does. Whichever button press checks the ball in is swallowed, so
-holding it never launches a shot on the first live frame (`checkGuard` in `MatchState`).
+**Checking in.** A game does not start until you check the ball. Both players stand still
+— movement is zeroed, not just actions — and the HUD says *Press space bar to check*. One
+press runs the whole ceremony: a bounce pass out to the other player, a bounce pass back,
+then the clock starts. The pass swings wide of the line between the two so it is not
+hidden behind a body. Nothing either player presses during the ceremony does anything
+else, and the press that started it is swallowed until released (`checkGuard`), so
+checking in can never turn into a jump or a shot. The CPU never checks in for you.
 
 **Practice is not a game.** The gym and the training drills set `manualCheck: false` and
 `instantInbound: true`: there is nothing to check in, and the ball is back in your hands

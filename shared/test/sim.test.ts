@@ -728,18 +728,42 @@ test('a game will not start until somebody checks the ball', () => {
   // Either player can check it in — here it is the defence checking it back.
   const check = { ...emptyInput(), shoot: true };
   stepMatch(state, [emptyInput(), check], SIM_DT);
+  assert.equal(state.phase, 'checkball', 'the ball is passed out and back first');
+  assert.equal(state.check?.stage, 'out');
+
+  // The ceremony: bounce pass out, bounce pass back, then play.
+  for (let i = 0; i < 120 * 2 && (state.phase as string) !== 'live'; i++) {
+    stepMatch(state, [emptyInput(), emptyInput()], SIM_DT);
+  }
   assert.equal(state.phase, 'live');
+  assert.equal(state.check, null);
+  assert.equal(state.ball.owner, state.possession, 'the offence ends up with it');
+});
+
+test('nobody can move or act during the check', () => {
+  const state = createMatch(generateOpponent(75, 5), generateOpponent(75, 6), defaultMatchConfig(), 99);
+  const x0 = state.players[0].x;
+  const z0 = state.players[0].z;
+
+  // Sprint in a direction for a full second while the check is pending.
+  const running = { ...emptyInput(), mx: 1, mz: 1, sprint: true, shoot: false };
+  for (let i = 0; i < 120; i++) stepMatch(state, [running, running], SIM_DT);
+  assert.equal(state.players[0].x, x0, 'you stand still to check');
+  assert.equal(state.players[0].z, z0);
+  assert.equal(state.phase, 'checkball');
 });
 
 test('checking in never launches a shot from the same button press', () => {
   const state = createMatch(generateOpponent(75, 5), generateOpponent(75, 6), defaultMatchConfig(), 99);
   for (let i = 0; i < 120; i++) stepMatch(state, [emptyInput(), emptyInput()], SIM_DT);
 
-  // Hold shoot to check in, and keep holding it.
+  // Hold shoot to check in, and keep holding it through the whole ceremony.
   const held = { ...emptyInput(), shoot: true };
-  for (let i = 0; i < 40; i++) stepMatch(state, [held, emptyInput()], SIM_DT);
+  for (let i = 0; i < 240 && state.phase !== 'live'; i++) stepMatch(state, [held, emptyInput()], SIM_DT);
+  stepMatch(state, [held, emptyInput()], SIM_DT);
   assert.equal(state.phase, 'live');
   assert.notEqual(state.players[0].state, 'shooting', 'the check press must not become a shot');
+  assert.notEqual(state.players[1].state, 'contesting', 'and never a jump from the other side');
   assert.equal(state.checkGuard[0], true);
 
   // Release, then press again: now it shoots.
@@ -802,4 +826,80 @@ test('a real game still goes to a dead ball and a check after a basket', () => {
   const before = state.phase;
   void before;
   assert.equal(state.config.manualCheck, true);
+});
+
+// -------------------------------------------------------------- ball handling
+
+test('a poor handle fumbles moves away; a great one does not', () => {
+  const run = (ballHandle: number) => {
+    let fumbles = 0;
+    let moves = 0;
+    for (let seed = 1; seed <= 40; seed++) {
+      const a = generateOpponent(75, seed);
+      const b = generateOpponent(75, seed + 500);
+      a.attrs.ballHandle = ballHandle;
+      const state = createMatch(a, b, defaultMatchConfig({ manualCheck: false }), seed * 31 + 7);
+      // Get to live play, then spam crossovers with a defender in your chest.
+      for (let i = 0; i < 200; i++) stepMatch(state, [emptyInput(), emptyInput()], SIM_DT);
+      for (let i = 0; i < 120 * 8; i++) {
+        const mine = state.ball.owner === 0 && state.ball.state === 'held';
+        const input =
+          mine && state.players[0].state === 'dribble'
+            ? { ...emptyInput(), move: 'crossover' as const, moveDirX: 1, moveDirZ: 0 }
+            : emptyInput();
+        stepMatch(state, [input, emptyInput()], SIM_DT);
+        for (const e of drainEvents(state)) {
+          if (e.type === 'move' && e.side === 0) moves++;
+          if (e.type === 'turnover' && e.side === 0 && e.reason === 'strip') fumbles++;
+        }
+      }
+    }
+    return { fumbles, moves, rate: moves ? fumbles / moves : 0 };
+  };
+
+  const bad = run(30);
+  const good = run(95);
+  assert.ok(bad.moves > 20 && good.moves > 20, 'both builds should get moves off');
+  assert.ok(bad.fumbles > 0, 'a 30 Ball Handle build must lose it sometimes');
+  assert.ok(
+    bad.rate > good.rate * 3,
+    `poor handles should fumble far more (${(bad.rate * 100).toFixed(1)}% vs ${(good.rate * 100).toFixed(1)}%)`,
+  );
+  assert.ok(good.rate < 0.03, `95 Ball Handle should be near-clean, got ${(good.rate * 100).toFixed(1)}%`);
+});
+
+test('the ball actually travels through the legs and across the body', () => {
+  const state = createMatch(generateOpponent(80, 3), generateOpponent(80, 4), defaultMatchConfig({ manualCheck: false }), 77);
+  for (let i = 0; i < 200; i++) stepMatch(state, [emptyInput(), emptyInput()], SIM_DT);
+
+  const sample = (move: 'betweenLegs' | 'crossover' | 'hesitation') => {
+    const lows: number[] = [];
+    const highs: number[] = [];
+    const offsets: number[] = [];
+    const p = state.players[0];
+    p.state = 'dribble';
+    p.moveCooldown = 0;
+    p.moveId = null;
+    p.stamina = 1;
+    state.ball.owner = 0;
+    state.ball.state = 'held';
+    const input = { ...emptyInput(), move, moveDirX: 1, moveDirZ: 0 };
+    stepMatch(state, [input, emptyInput()], SIM_DT);
+    for (let i = 0; i < 90 && state.players[0].state === 'moveLock'; i++) {
+      stepMatch(state, [emptyInput(), emptyInput()], SIM_DT);
+      lows.push(state.ball.y);
+      highs.push(state.ball.y);
+      offsets.push(Math.hypot(state.ball.x - state.players[0].x, state.ball.z - state.players[0].z));
+    }
+    return { min: Math.min(...lows), max: Math.max(...highs), widest: Math.max(...offsets) };
+  };
+
+  const legs = sample('betweenLegs');
+  assert.ok(legs.min < 0.9, `the ball should drop to the floor between the legs, lowest was ${legs.min.toFixed(2)}ft`);
+
+  const cross = sample('crossover');
+  assert.ok(cross.widest > 1.2, `a crossover should swing the ball wide, widest was ${cross.widest.toFixed(2)}ft`);
+
+  const hesi = sample('hesitation');
+  assert.ok(hesi.max > 5.5, `a hesitation should lift the ball overhead, highest was ${hesi.max.toFixed(2)}ft`);
 });
