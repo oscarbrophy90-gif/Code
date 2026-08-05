@@ -11,6 +11,7 @@ export const ATTRIBUTE_KEYS = [
   'layup',
   'dunk',
   'ballHandle',
+  'speedWithBall',
   'passAccuracy',
   'speed',
   'acceleration',

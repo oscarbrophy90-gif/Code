@@ -87,6 +87,18 @@ Nothing is contested beyond 8 feet. A defender with a hand down contests at 55% 
 A broken-down defender contests at almost nothing, which is what makes an ankle breaker
 worth chasing.
 
+## Speed With Ball
+
+Raw **Speed** is your open-floor speed. **Speed With Ball** is what you keep of it while
+dribbling, and it also sets how fast you can throw moves: 0.66× top speed with a 300 ms
+cooldown and a 1.25× slower animation at 25 rated, up to full speed with a 50 ms cooldown
+and a 0.72× animation at 99. A guard can put the ball through his legs three times in the
+time a centre labours through one, which is what makes chained through-the-legs into an
+ankle breaker a guard's move.
+
+It deliberately pulls against **Ball Handle**: Speed With Ball buys you more moves, and
+every move is another fumble check. Fast hands with no control is a liability, not a build.
+
 ## Movement and stamina
 
 Top speed runs 13.5–21.5 ft/s from Speed, with a weight drag term. Acceleration governs
@@ -107,6 +119,12 @@ what you see is the move: a between-the-legs drops the ball to the floor and bac
 the feet split wide, a crossover whips it across the body in the direction you aimed, a
 hesitation lifts it over the head with the arms rising, a behind-the-back takes it round
 the waist and a spin carries it all the way around. `placeHeldBall()` owns this.
+
+**Hands.** The ball lives in one hand and moves change which. A crossover and a
+behind-the-back put it on the side you aimed at, so J finishes right and L finishes left;
+through-the-legs simply alternates, so pressing it again sends the ball back the other
+way. A crossover is drawn as the lie it is — the ball goes to the fake side first and then
+whips across.
 
 **Fumbles.** Halfway through a move — the moment the ball is most exposed — a handle
 check runs. It is roughly `(1 − skill)² × 0.16` against Ball Handle, multiplied up by
@@ -185,10 +203,16 @@ Defense/Strength and Rim Protector. It knocks the defender back and finishes at 
 Half court, make-it-take-it, 14-second shot clock. Twos from behind the arc, ones inside.
 First to 11, win by 2, hard cap at 15.
 
-**Possession changes on every failure.** Miss a shot, get blocked, or get stripped and the
-ball goes straight to the other player — there is no scramble for the loose ball. Make a
-shot and you keep it. That is `turnoverOnMiss` in `MatchConfig`, and it routes through a
-single `changePossession()` so the three cases cannot drift apart.
+**A takeaway ends the possession; a miss goes to the glass.** Get blocked or get stripped
+and the ball is the defender's outright — you have to earn those, so they are not a
+scramble the shooter can win back. A *miss* caroms off the iron and hangs high, and both
+players can go up and take it out of the air. Make a shot and you keep it.
+
+Winning the board is two checks. First proximity and reach decide who gets a hand on it,
+weighted by Offensive or Defensive Rebound, Vertical, Strength, height and whether you
+left the floor. Then a *secure* roll decides whether you come down with it: about 42% at
+25 rated up to 92% at 99, plus Box Out, Strength and a bonus for being in the air. Fail it
+and you tip the ball away and it stays live. A weak board man really does bobble them.
 
 After a change of possession or an offensive rebound the ball must be taken back past the
 arc before it can be scored; the HUD calls this out and shots are suppressed until you

@@ -37,6 +37,30 @@ function sprintSpeed(p: SimPlayer): number {
   return base * weightDrag;
 }
 
+/**
+ * How much of your open-floor speed you keep while dribbling. A guard with the
+ * ball on a string barely slows down; a centre drops to a shuffle.
+ */
+function ballSpeedMult(p: SimPlayer): number {
+  return lerp(0.66, 1.0, clamp01((p.cfg.attrs.speedWithBall - 25) / 74));
+}
+
+/** Seconds you have to wait before chaining the next dribble move. */
+function moveCooldownFor(p: SimPlayer): number {
+  // 0.30 s at 25 rated down to 0.05 s at 99: high enough and you can chain
+  // through-the-legs almost continuously.
+  return lerp(0.3, 0.05, clamp01((p.cfg.attrs.speedWithBall - 25) / 74));
+}
+
+/**
+ * How fast the move itself is thrown. Together with the cooldown this is the
+ * difference between a big man labouring through one crossover and a guard
+ * putting the ball through his legs three times in a second.
+ */
+function moveTempo(p: SimPlayer): number {
+  return lerp(1.25, 0.72, clamp01((p.cfg.attrs.speedWithBall - 25) / 74));
+}
+
 function accelRate(p: SimPlayer): number {
   return lerp(30, 68, clamp01((p.cfg.attrs.acceleration - 25) / 74));
 }
@@ -94,6 +118,7 @@ function makePlayer(side: Side, cfg: SimPlayerConfig): SimPlayer {
     makeStreak: 0,
     distanceRun: 0,
     fumbleChecked: false,
+    dribbleHand: 1,
     comboCount: 0,
     comboTimer: 0,
   };
@@ -133,7 +158,7 @@ export function defaultMatchConfig(overrides: Partial<MatchConfig> = {}): MatchC
     maxScore: 15,
     shotClock: 14,
     makeItTakeIt: true,
-    turnoverOnMiss: true,
+    turnoverOnMiss: false,
     manualCheck: true,
     instantInbound: false,
     timeLimit: 0,
@@ -442,7 +467,7 @@ function updatePlayer(state: MatchState, side: Side, input: PlayerInput, dt: num
       p.vx += p.moveDirX * def.burst * 0.6;
       p.vz += p.moveDirZ * def.burst * 0.6;
       p.moveId = null;
-      p.moveCooldown = 0.08;
+      p.moveCooldown = moveCooldownFor(p);
     }
     applyMovement(state, p, input, dt, 0.45);
     return;
@@ -533,7 +558,9 @@ function applyMovement(state: MatchState, p: SimPlayer, input: PlayerInput, dt: 
   const quickFirst = badgeLevel(p.cfg.badges, 'quickFirstStep');
 
   let top = sprintSpeed(p) * (wantsSprint ? 1 : 0.62);
-  if (hasBall) top *= 0.94 + speedBooster * 0.07;
+  // With the ball your top speed is Speed With Ball, not raw Speed. A big man
+  // who cannot dribble genuinely cannot get anywhere with it.
+  if (hasBall) top *= ballSpeedMult(p) * (1 + speedBooster * 0.07);
   // Low stamina bites into top speed.
   top *= lerp(0.72, 1, clamp01(p.stamina * 1.6));
 
@@ -653,8 +680,9 @@ function tryFumble(state: MatchState, side: Side, def: DribbleMoveDef, rng: Rng)
   const p = state.players[side];
   const handle = p.cfg.attrs.ballHandle;
 
-  // 99 handle is clean. It climbs steeply below about 70, and chaining moves
-  // makes each one riskier than the last.
+  // Ball Handle alone decides this. Speed With Ball lets you throw more moves,
+  // which means more chances to fumble — the two ratings pull against each
+  // other on purpose, so a fast handle with no control is a liability.
   const skill = clamp01((handle - 30) / 69);
   let chance = (1 - skill) ** 2 * 0.16;
   chance *= def.signature ? 1.6 : def.requires > 0 ? 1.25 : 1;
@@ -699,12 +727,25 @@ function tryDribbleMove(state: MatchState, side: Side, moveId: DribbleMoveId, in
   if (p.stamina < def.staminaCost * 1.5) return;
 
   const dir = normalize(input.moveDirX || p.vx || 1, input.moveDirZ || p.vz || 0);
+
+  // Which side the ball ends up on. A crossover and a behind-the-back go to the
+  // side you aimed at; through-the-legs simply alternates, so repeated presses
+  // send it back and forth.
+  const rightX = Math.sin(p.facing + Math.PI / 2);
+  const rightZ = -Math.cos(p.facing + Math.PI / 2);
+  const aimedRight = dir.x * rightX + dir.z * rightZ >= 0 ? 1 : -1;
+  if (moveId === 'crossover' || moveId === 'doubleCross' || moveId === 'behindBack') {
+    p.dribbleHand = aimedRight as -1 | 1;
+  } else if (moveId === 'betweenLegs') {
+    p.dribbleHand = -p.dribbleHand as -1 | 1;
+  }
+
   p.state = 'moveLock';
   p.moveId = moveId;
   p.moveTimer = 0;
   p.fumbleChecked = false;
   const tightHandles = badgeLevel(p.cfg.badges, 'tightHandles');
-  p.moveDuration = def.duration * (1 - tightHandles * 0.16);
+  p.moveDuration = def.duration * (1 - tightHandles * 0.16) * moveTempo(p);
   p.moveDirX = dir.x;
   p.moveDirZ = dir.z;
   p.comboCount++;
@@ -1068,8 +1109,10 @@ function tryBlock(state: MatchState, defSide: Side, offSide: Side, rng: Rng, atR
   p.greenStreak = 0;
   p.makeStreak = 0;
 
-  if (state.config.turnoverOnMiss) {
-    // A block is a stop: the ball goes to whoever swatted it.
+  if (!state.config.instantInbound) {
+    // A block is a stop, always: the ball goes to whoever swatted it. Only a
+    // miss goes to the glass — you have to earn a block, so it should not turn
+    // into a scramble the shooter can win back.
     changePossession(state, defSide, 'block');
   } else {
     ball.state = 'loose';
@@ -1194,10 +1237,13 @@ function updateBall(state: MatchState, dt: number, rng: Rng): void {
         ball.x = COURT.rimX + off.x * 0.9;
         ball.z = COURT.rimZ + off.z * 0.9;
         ball.y = COURT.rimY - 0.4;
-        const power = rng.range(6, 13);
+        // Off the iron and up. A long miss caroms out, a short one sits up over
+        // the rim — either way it hangs high enough that going up and taking it
+        // out of the air is a real option.
+        const power = rng.range(4, 9);
         ball.vx = off.x * power;
         ball.vz = off.z * power;
-        ball.vy = rng.range(2, 6);
+        ball.vy = rng.range(7, 12);
         state.events.push({ type: 'miss', side: ball.shotBy as Side });
         const shooter = state.players[ball.shotBy as Side];
         shooter.makeStreak = 0;
@@ -1259,23 +1305,25 @@ function placeHeldBall(state: MatchState, p: SimPlayer, ball: Ball): void {
     const arc = Math.sin(t * Math.PI);
     switch (p.moveId) {
       case 'betweenLegs': {
-        // Through the legs: it starts on one side, drops to the floor between
-        // the feet at the halfway point, and comes up on the other side.
-        const lateral = Math.cos(t * Math.PI) * 0.95;
+        // Through the legs, hand to hand: it starts where the ball actually is
+        // and finishes in the other hand, so pressing it again sends it back.
+        const from = -p.dribbleHand;
+        const lateral = Math.cos(t * Math.PI) * 0.95 * from;
         ball.x = p.x + rightX * lateral + fwdX * 0.15;
         ball.z = p.z + rightZ * lateral + fwdZ * 0.15;
-        // Two bounces: down through the legs, back up to the hand.
-        ball.y = 0.45 + Math.abs(Math.cos(t * Math.PI)) * 1.9;
+        // Down through the legs at the midpoint, back up to the hand.
+        ball.y = 0.4 + Math.abs(Math.cos(t * Math.PI)) * 1.9;
         return;
       }
       case 'crossover':
       case 'doubleCross': {
-        // Whips across in front, low and fast, in the direction you aimed.
+        // A crossover is a lie: the ball goes to the fake side first and then
+        // whips across, low and fast, to the side you are actually going.
         const swings = p.moveId === 'doubleCross' ? 2 : 1;
-        const lateral = Math.cos(t * Math.PI * swings) * 1.35;
-        const aim = p.moveDirX * rightX + p.moveDirZ * rightZ >= 0 ? 1 : -1;
-        ball.x = p.x + rightX * lateral * aim + fwdX * 0.75;
-        ball.z = p.z + rightZ * lateral * aim + fwdZ * 0.75;
+        const go = p.dribbleHand; // set to the go-side when the move started
+        const lateral = -Math.cos(t * Math.PI * swings) * 1.35 * go;
+        ball.x = p.x + rightX * lateral + fwdX * 0.75;
+        ball.z = p.z + rightZ * lateral + fwdZ * 0.75;
         ball.y = 0.5 + Math.abs(Math.sin(t * Math.PI * swings)) * 1.5;
         return;
       }
@@ -1288,7 +1336,7 @@ function placeHeldBall(state: MatchState, p: SimPlayer, ball: Ball): void {
         return;
       }
       case 'behindBack': {
-        const lateral = Math.cos(t * Math.PI) * 1.1;
+        const lateral = Math.cos(t * Math.PI) * 1.1 * -p.dribbleHand;
         ball.x = p.x + rightX * lateral - fwdX * 0.9;
         ball.z = p.z + rightZ * lateral - fwdZ * 0.9;
         ball.y = 1.1 + arc * 1.1;
@@ -1311,9 +1359,12 @@ function placeHeldBall(state: MatchState, p: SimPlayer, ball: Ball): void {
     }
   }
 
-  const bob = p.state === 'dribble' ? Math.abs(Math.sin(state.time * 9)) * 2.2 + 1.4 : 3.2;
-  ball.x = p.x + rightX * 0.9;
-  ball.z = p.z + rightZ * 0.9;
+  // Resting dribble, in whichever hand the last move left it. The bob is tied
+  // to how fast you can actually handle it, so a slow handle pounds it slowly.
+  const tempo = 6.5 + (p.cfg.attrs.speedWithBall / 99) * 6;
+  const bob = p.state === 'dribble' ? Math.abs(Math.sin(state.time * tempo)) * 2.2 + 1.4 : 3.2;
+  ball.x = p.x + rightX * 0.9 * p.dribbleHand;
+  ball.z = p.z + rightZ * 0.9 * p.dribbleHand;
   ball.y = bob;
 }
 
@@ -1357,6 +1408,25 @@ function tryCollect(state: MatchState, rng: Rng): void {
   const wasShooter = ball.shotBy;
   const offensive = wasShooter === winner;
 
+  // Getting a hand on it is not the same as coming down with it. A weak board
+  // man tips it away and has to go again; a strong one snatches it clean.
+  const grabRating = offensive ? p.cfg.attrs.offensiveRebound : p.cfg.attrs.defensiveRebound;
+  const secure =
+    0.42 +
+    clamp01((grabRating - 25) / 74) * 0.5 +
+    badgeLevel(p.cfg.badges, 'boxOut') * 0.06 +
+    (p.y > 0.4 ? 0.08 : 0) +
+    clamp01((p.cfg.attrs.strength - 25) / 74) * 0.08;
+  if (!rng.chance(clamp01(secure))) {
+    // Bobbled. It squirts away and stays live.
+    const away = normalize(ball.x - p.x + rng.range(-1, 1), ball.z - p.z + rng.range(-1, 1));
+    ball.vx = away.x * rng.range(5, 9);
+    ball.vz = away.z * rng.range(5, 9);
+    ball.vy = rng.range(3, 6);
+    ball.y = Math.max(ball.y, 2.5);
+    return;
+  }
+
   ball.state = 'held';
   ball.owner = winner;
   ball.shotBy = null;
@@ -1368,13 +1438,11 @@ function tryCollect(state: MatchState, rng: Rng): void {
   awardBadgeProgress(p.cfg.badges, p.cfg.attrs, 'rebound', 1);
   if (offensive) awardBadgeProgress(p.cfg.badges, p.cfg.attrs, 'putback', 1);
 
-  if (state.possession !== winner) {
-    state.possession = winner;
-    state.needsClear = true;
-  } else {
-    // Offensive board: still has to clear in streetball rules.
-    state.needsClear = true;
-  }
+  state.possession = winner;
+  // Streetball: any board has to be taken back past the arc. Practice modes
+  // have no scoring rules to protect, so they never ask for a clear — that was
+  // the stray CLEAR THE BALL prompt in the gym after a fumble.
+  state.needsClear = !state.config.instantInbound;
   state.shotClock = state.config.shotClock;
 }
 

@@ -18,7 +18,8 @@ export const ATTRIBUTE_META: Record<AttributeKey, AttributeMeta> = {
   midRange: { key: 'midRange', label: 'Mid Range', group: 'shooting', blurb: 'Green window and make rate inside the arc.' },
   threePoint: { key: 'threePoint', label: 'Three Point', group: 'shooting', blurb: 'Green window and make rate beyond the arc.' },
   freeThrow: { key: 'freeThrow', label: 'Free Throw', group: 'shooting', blurb: 'Green window at the stripe after a shooting foul.' },
-  ballHandle: { key: 'ballHandle', label: 'Ball Handle', group: 'playmaking', blurb: 'Dribble speed, combo chaining, ankle-breaker odds.' },
+  ballHandle: { key: 'ballHandle', label: 'Ball Handle', group: 'playmaking', blurb: 'How clean your handle is: how rarely you fumble a move, and how badly a move shakes the defender.' },
+  speedWithBall: { key: 'speedWithBall', label: 'Speed With Ball', group: 'playmaking', blurb: 'How fast you move and how quickly you can chain moves. High enough and you can spam through-the-legs into ankle breakers.' },
   passAccuracy: { key: 'passAccuracy', label: 'Pass Accuracy', group: 'playmaking', blurb: 'Pass speed and accuracy. Reserved for team modes.' },
   speed: { key: 'speed', label: 'Speed', group: 'physicals', blurb: 'Top movement speed with and without the ball.' },
   acceleration: { key: 'acceleration', label: 'Acceleration', group: 'physicals', blurb: 'Burst out of a stop or a change of direction.' },
@@ -29,8 +30,8 @@ export const ATTRIBUTE_META: Record<AttributeKey, AttributeMeta> = {
   interiorDefense: { key: 'interiorDefense', label: 'Interior Defense', group: 'defense', blurb: 'Contesting finishes inside the paint.' },
   steal: { key: 'steal', label: 'Steal', group: 'defense', blurb: 'Pokes, digs and interception timing.' },
   block: { key: 'block', label: 'Block', group: 'defense', blurb: 'Swat timing and chase-down reach.' },
-  offensiveRebound: { key: 'offensiveRebound', label: 'Offensive Rebound', group: 'defense', blurb: 'Crashing your own miss. In 1v1 a miss is an automatic turnover, so this only works in the practice gym — it still counts toward a big man’s Overall.' },
-  defensiveRebound: { key: 'defensiveRebound', label: 'Defensive Rebound', group: 'defense', blurb: 'Closing out a possession off the glass. In 1v1 a miss is an automatic turnover, so this only works in the practice gym — it still counts toward a big man’s Overall.' },
+  offensiveRebound: { key: 'offensiveRebound', label: 'Offensive Rebound', group: 'defense', blurb: 'Chasing your own miss off the rim. A high rating both wins the ball and holds on to it.' },
+  defensiveRebound: { key: 'defensiveRebound', label: 'Defensive Rebound', group: 'defense', blurb: 'Closing out a possession off the glass. Low ratings tip it away and have to go again.' },
 };
 
 export interface PositionRules {
@@ -131,20 +132,20 @@ export function defaultBuildFor(position: Position): BuildSpec {
 const POSITION_WEIGHTS: Record<Position, Partial<Record<AttributeKey, number>>> = {
   // Overall climbs fastest from handles, passing, range and burst.
   PG: {
-    ballHandle: 1.75, passAccuracy: 1.6, threePoint: 1.6, speed: 1.5, acceleration: 1.45,
+    ballHandle: 1.75, speedWithBall: 1.7, passAccuracy: 1.6, threePoint: 1.6, speed: 1.5, acceleration: 1.45,
     freeThrow: 1.1, midRange: 1.1, layup: 1.05, steal: 1.1, perimeterDefense: 1.05, stamina: 1.05,
     strength: 0.5, interiorDefense: 0.45, offensiveRebound: 0.4, defensiveRebound: 0.5, block: 0.4, closeShot: 0.8, dunk: 0.7,
   },
   // A pure scorer: range, mid, and finishing at the rim.
   SG: {
-    threePoint: 1.75, midRange: 1.55, dunk: 1.4, layup: 1.4, ballHandle: 1.35,
+    threePoint: 1.75, midRange: 1.55, dunk: 1.4, layup: 1.4, ballHandle: 1.35, speedWithBall: 1.3,
     freeThrow: 1.15, speed: 1.15, acceleration: 1.1, perimeterDefense: 1.05, closeShot: 1.05,
     passAccuracy: 0.75, interiorDefense: 0.6, offensiveRebound: 0.55, defensiveRebound: 0.6, strength: 0.7, block: 0.55,
   },
   // Deliberately flat: the most versatile position, elite at nothing.
   SF: {
     threePoint: 1.1, midRange: 1.1, closeShot: 1.1, layup: 1.1, dunk: 1.1,
-    ballHandle: 1.0, passAccuracy: 1.0, speed: 1.0, acceleration: 1.0, vertical: 1.1,
+    ballHandle: 1.0, speedWithBall: 1.0, passAccuracy: 1.0, speed: 1.0, acceleration: 1.0, vertical: 1.1,
     strength: 1.05, stamina: 1.05, perimeterDefense: 1.1, interiorDefense: 1.05,
     steal: 1.05, block: 1.05, offensiveRebound: 1.05, defensiveRebound: 1.05, freeThrow: 1.0,
   },
@@ -152,13 +153,13 @@ const POSITION_WEIGHTS: Record<Position, Partial<Record<AttributeKey, number>>> 
   PF: {
     interiorDefense: 1.65, block: 1.55, offensiveRebound: 1.6, defensiveRebound: 1.65, strength: 1.5, dunk: 1.45,
     closeShot: 1.25, layup: 1.15, vertical: 1.15,
-    speed: 0.6, ballHandle: 0.55, threePoint: 0.65, passAccuracy: 0.6, acceleration: 0.65,
+    speed: 0.6, ballHandle: 0.55, speedWithBall: 0.5, threePoint: 0.65, passAccuracy: 0.6, acceleration: 0.65,
   },
   // Same as PF but with close-range touch and even less perimeter value.
   C: {
     interiorDefense: 1.75, block: 1.7, offensiveRebound: 1.7, defensiveRebound: 1.75, strength: 1.6,
     closeShot: 1.5, dunk: 1.45, vertical: 1.1, layup: 1.15,
-    speed: 0.5, ballHandle: 0.4, threePoint: 0.45, perimeterDefense: 0.5, passAccuracy: 0.55, acceleration: 0.5, freeThrow: 0.7,
+    speed: 0.5, ballHandle: 0.4, speedWithBall: 0.35, threePoint: 0.45, perimeterDefense: 0.5, passAccuracy: 0.55, acceleration: 0.5, freeThrow: 0.7,
   },
 };
 
@@ -195,6 +196,7 @@ export function computeCaps(build: BuildSpec): Attributes {
   set('layup', 99 - Math.max(0, h) * 12 - Math.max(0, w) * 8);
   set('dunk', 72 + h * 22 + w * 12 + span * 6);
   set('ballHandle', 99 - h * 34 - Math.max(0, w) * 16);
+  set('speedWithBall', 99 - h * 30 - Math.max(0, w) * 20);
   set('passAccuracy', 99 - h * 16 - Math.max(0, w) * 6);
   set('speed', 99 - h * 26 - Math.max(0, w) * 18);
   set('acceleration', 99 - h * 25 - Math.max(0, w) * 20);
@@ -211,11 +213,11 @@ export function computeCaps(build: BuildSpec): Attributes {
   // Position bias: a build's declared position nudges a few caps so position
   // choice matters without letting one position dominate.
   const bias: Record<Position, Partial<Record<AttributeKey, number>>> = {
-    PG: { ballHandle: 5, passAccuracy: 5, speed: 3, freeThrow: 3, offensiveRebound: -7, defensiveRebound: -5, interiorDefense: -5 },
+    PG: { ballHandle: 5, speedWithBall: 5, passAccuracy: 5, speed: 3, freeThrow: 3, offensiveRebound: -7, defensiveRebound: -5, interiorDefense: -5 },
     SG: { threePoint: 4, midRange: 3, freeThrow: 3, steal: 2, offensiveRebound: -5, defensiveRebound: -3, strength: -3 },
     SF: { layup: 3, perimeterDefense: 3, dunk: 2, closeShot: 2 },
-    PF: { offensiveRebound: 4, defensiveRebound: 4, closeShot: 3, interiorDefense: 4, strength: 3, ballHandle: -4, threePoint: -3 },
-    C: { block: 6, offensiveRebound: 5, defensiveRebound: 5, closeShot: 4, interiorDefense: 5, ballHandle: -8, speed: -4, threePoint: -6, freeThrow: -4 },
+    PF: { offensiveRebound: 4, defensiveRebound: 4, closeShot: 3, interiorDefense: 4, strength: 3, ballHandle: -4, speedWithBall: -4, threePoint: -3 },
+    C: { block: 6, offensiveRebound: 5, defensiveRebound: 5, closeShot: 4, interiorDefense: 5, ballHandle: -8, speedWithBall: -8, speed: -4, threePoint: -6, freeThrow: -4 },
   };
   for (const [key, delta] of Object.entries(bias[build.position]) as [AttributeKey, number][]) {
     caps[key] = clamp(caps[key] + delta, 55, 99);

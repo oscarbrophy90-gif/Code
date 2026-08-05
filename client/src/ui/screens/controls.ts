@@ -249,6 +249,13 @@ function moveRow(move: DribbleMoveDef, rating: number | null): HTMLElement {
   );
 }
 
+/** Extra notes for the moves whose two keys mean different things. */
+const MOVE_NOTE: Record<string, string> = {
+  crossover: 'J fakes left and bursts right, L fakes right and bursts left.',
+  betweenLegs: 'Alternates hands — press it again and the ball goes back the other way.',
+  hesitation: 'Sells the jumper. A CPU that bites on pump fakes bites on this.',
+};
+
 /** A move described by what it does to you and to the defender. */
 function describeMove(move: DribbleMoveDef): string {
   const bits: string[] = [];
@@ -261,5 +268,6 @@ function describeMove(move: DribbleMoveDef): string {
   if (move.followUp === 'hopJumper') bits.push('hops into a shot');
   if (move.ankleBase >= 0.045) bits.push('best ankle-breaker odds in the game');
   else if (move.ankleBase >= 0.03) bits.push('good ankle-breaker odds');
-  return `${bits.join(', ')}. ${Math.round(move.duration * 1000)} ms long.`;
+  const note = MOVE_NOTE[move.id];
+  return `${bits.join(', ')}. ${Math.round(move.duration * 1000)} ms long.${note ? ` ${note}` : ''}`;
 }

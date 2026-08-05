@@ -1,4 +1,5 @@
 import {
+  ATTRIBUTE_KEYS,
   clampHeightToPosition,
   computeCaps,
   computeOverall,
@@ -190,6 +191,14 @@ class Store {
       if (!p.loadout.titleId) p.loadout.titleId = 'title-rookie';
       for (const t of DEFAULT_TITLES) if (!p.unlocked.includes(t)) p.unlocked.push(t);
       if (!p.drillBests) p.drillBests = {};
+      // Saves made before Speed With Ball existed have no value for it. Seed it
+      // from Ball Handle so an old build plays like it always did rather than
+      // suddenly moving like it is stuck in mud.
+      for (const key of ATTRIBUTE_KEYS) {
+        if (typeof p.attributes[key] !== 'number') {
+          p.attributes[key] = key === 'speedWithBall' ? p.attributes.ballHandle ?? 25 : 25;
+        }
+      }
     }
 
     this.profile.challenges = syncChallengeStates(generateChallenges(now), this.profile.challenges);

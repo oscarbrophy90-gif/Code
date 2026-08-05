@@ -148,29 +148,54 @@ test('a green release always scores, however heavy the contest', () => {
   }
 });
 
-test('a miss, block or steal hands the ball to the other player', () => {
+test('a block or a steal hands the ball over; a miss is a live rebound', () => {
   const state = createMatch(generateOpponent(80, 5), generateOpponent(80, 6), defaultMatchConfig(), 4242);
-  assert.equal(state.config.turnoverOnMiss, true);
+  assert.equal(state.config.turnoverOnMiss, false, 'misses go to the glass, not straight over');
 
   const ai0 = new AiController(0, 'pro', 1, false);
   const ai1 = new AiController(1, 'pro', 2, false);
-  let sawMissTurnover = false;
+  let sawLooseBallOffMiss = false;
+  let sawTakeaway = false;
+  let rebounds = 0;
   let frames = 0;
 
   while (state.phase !== 'over' && frames < 120 * 60 * 8) {
-    const possessionBefore = state.possession;
     stepMatch(state, [ai0.update(state, SIM_DT), ai1.update(state, SIM_DT)], SIM_DT);
     for (const e of drainEvents(state)) {
-      if (e.type === 'miss') {
-        // The shooter must not retain the ball off their own miss.
-        assert.notEqual(state.possession, e.side, 'a miss should not stay with the shooter');
-        assert.equal(possessionBefore, e.side);
-        sawMissTurnover = true;
+      if (e.type === 'miss' && state.ball.state === 'loose') sawLooseBallOffMiss = true;
+      if (e.type === 'rebound') rebounds++;
+      if (e.type === 'block' || e.type === 'steal') {
+        // A takeaway still ends the possession outright: the ball is the
+        // taker's, with no scramble for it.
+        assert.equal(state.possession, e.side, 'a block or steal gives the ball to whoever made it');
+        sawTakeaway = true;
       }
     }
     frames++;
   }
-  assert.ok(sawMissTurnover, 'expected at least one missed shot to change possession');
+  assert.ok(sawLooseBallOffMiss, 'a miss should leave the ball live off the rim');
+  assert.ok(rebounds > 0, 'expected rebounds to be contested and won');
+  assert.ok(sawTakeaway, 'expected at least one block or steal');
+});
+
+test('a missed shot goes up off the rim high enough to go and get', () => {
+  const state = createMatch(generateOpponent(80, 5), generateOpponent(80, 6), defaultMatchConfig({ manualCheck: false }), 909);
+  const ai0 = new AiController(0, 'pro', 1, false);
+  const ai1 = new AiController(1, 'pro', 2, false);
+
+  let peak = 0;
+  let sawMiss = false;
+  for (let f = 0; f < 120 * 60 * 3 && !sawMiss; f++) {
+    stepMatch(state, [ai0.update(state, SIM_DT), ai1.update(state, SIM_DT)], SIM_DT);
+    for (const e of drainEvents(state)) if (e.type === 'miss') sawMiss = true;
+  }
+  assert.ok(sawMiss, 'expected a miss');
+  // Follow the carom and record how high it gets.
+  for (let f = 0; f < 120 * 3 && state.ball.state === 'loose'; f++) {
+    stepMatch(state, [ai0.update(state, SIM_DT), ai1.update(state, SIM_DT)], SIM_DT);
+    peak = Math.max(peak, state.ball.y);
+  }
+  assert.ok(peak > 8, `the carom should hang above the rim area, peaked at ${peak.toFixed(1)}ft`);
 });
 
 test('a better rating produces a wider green window', () => {
@@ -340,13 +365,13 @@ test('inputs survive a pack/unpack round trip', () => {
 
 // ------------------------------------------------------- 19-attribute system
 
-test('the attribute set matches the 19-attribute spec', () => {
-  assert.equal(ATTRIBUTE_KEYS.length, 19);
+test('the attribute set matches the 20-attribute spec', () => {
+  assert.equal(ATTRIBUTE_KEYS.length, 20);
   for (const key of [
     'closeShot', 'midRange', 'threePoint', 'freeThrow', 'layup', 'dunk',
-    'ballHandle', 'passAccuracy', 'speed', 'acceleration', 'strength',
-    'vertical', 'stamina', 'perimeterDefense', 'interiorDefense', 'steal',
-    'block', 'offensiveRebound', 'defensiveRebound',
+    'ballHandle', 'speedWithBall', 'passAccuracy', 'speed', 'acceleration',
+    'strength', 'vertical', 'stamina', 'perimeterDefense', 'interiorDefense',
+    'steal', 'block', 'offensiveRebound', 'defensiveRebound',
   ]) {
     assert.ok(ATTRIBUTE_KEYS.includes(key as never), `missing attribute ${key}`);
   }
@@ -902,4 +927,111 @@ test('the ball actually travels through the legs and across the body', () => {
 
   const hesi = sample('hesitation');
   assert.ok(hesi.max > 5.5, `a hesitation should lift the ball overhead, highest was ${hesi.max.toFixed(2)}ft`);
+});
+
+// --------------------------------------------------------- speed with ball
+
+test('Speed With Ball sets how fast you move and how often you can move', () => {
+  const spamRate = (speedWithBall: number, spam = true) => {
+    const a = generateOpponent(75, 11);
+    const b = generateOpponent(75, 12);
+    a.attrs.speedWithBall = speedWithBall;
+    a.attrs.ballHandle = 99; // isolate the variable: never fumble
+    a.attrs.speed = 80; // same legs on both builds, so only the handle differs
+    a.attrs.acceleration = 80;
+    a.attrs.stamina = 99;
+    const state = createMatch(a, b, defaultMatchConfig({ manualCheck: false }), 4321);
+    for (let i = 0; i < 200; i++) stepMatch(state, [emptyInput(), emptyInput()], SIM_DT);
+
+    let moves = 0;
+    let topSpeed = 0;
+    for (let i = 0; i < 120 * 10; i++) {
+      const p = state.players[0];
+      const mine = state.ball.owner === 0 && state.ball.state === 'held';
+      // Run a lap rather than into the sideline, so the wall never caps it.
+      // Up and down the floor, which is the long axis, so the wall never caps it.
+      const dir = Math.floor(i / 150) % 2 === 0 ? 1 : -1;
+      const input = mine
+        ? { ...emptyInput(), mz: dir, sprint: true, move: spam ? ('betweenLegs' as const) : null, moveDirX: 1, moveDirZ: 0 }
+        : emptyInput();
+      stepMatch(state, [input, emptyInput()], SIM_DT);
+      for (const e of drainEvents(state)) if (e.type === 'move' && e.side === 0) moves++;
+      if (state.ball.owner === 0 && state.players[0].state === 'dribble') {
+        topSpeed = Math.max(topSpeed, Math.hypot(state.players[0].vx, state.players[0].vz));
+      }
+    }
+    return { moves, topSpeed };
+  };
+
+  const slow = spamRate(30);
+  const quick = spamRate(95);
+  assert.ok(quick.moves > slow.moves * 1.4, `a high handle should chain far more moves (${slow.moves} -> ${quick.moves})`);
+
+  // Top speed is measured without spamming, since a move locks your movement.
+  const slowRun = spamRate(30, false);
+  const quickRun = spamRate(95, false);
+  assert.ok(
+    quickRun.topSpeed > slowRun.topSpeed * 1.2,
+    `and move faster with the ball (${slowRun.topSpeed.toFixed(1)} -> ${quickRun.topSpeed.toFixed(1)} ft/s)`,
+  );
+});
+
+test('a centre cannot handle it like a guard', () => {
+  const guard = computeCaps(defaultBuildFor('PG'));
+  const big = computeCaps(defaultBuildFor('C'));
+  assert.ok(guard.speedWithBall > big.speedWithBall + 15, 'the cap gap should be obvious');
+  assert.ok(guard.ballHandle > big.ballHandle + 15);
+});
+
+test('a crossover finishes on the side you aimed, and the legs alternate', () => {
+  const state = createMatch(generateOpponent(85, 3), generateOpponent(85, 4), defaultMatchConfig({ manualCheck: false }), 5150);
+  for (let i = 0; i < 200; i++) stepMatch(state, [emptyInput(), emptyInput()], SIM_DT);
+
+  /**
+   * Runs one move and reports where the ball finished, measured along the
+   * direction you aimed and along the player's own right hand — the player
+   * turns into the move, so world x is not the axis that means anything.
+   */
+  const run = (move: 'crossover' | 'betweenLegs', dirX: number, dirZ = 0) => {
+    const p = state.players[0];
+    p.state = 'dribble';
+    p.moveCooldown = 0;
+    p.moveId = null;
+    p.stamina = 1;
+    state.ball.owner = 0;
+    state.ball.state = 'held';
+    stepMatch(state, [{ ...emptyInput(), move, moveDirX: dirX, moveDirZ: dirZ }, emptyInput()], SIM_DT);
+
+    let alongAim = 0;
+    let alongRight = 0;
+    for (let i = 0; i < 120 && state.players[0].state === 'moveLock'; i++) {
+      stepMatch(state, [emptyInput(), emptyInput()], SIM_DT);
+      const q = state.players[0];
+      const dx = state.ball.x - q.x;
+      const dz = state.ball.z - q.z;
+      alongAim = dx * dirX + dz * dirZ;
+      alongRight = dx * Math.sin(q.facing + Math.PI / 2) + dz * -Math.cos(q.facing + Math.PI / 2);
+    }
+    return { alongAim, alongRight };
+  };
+
+  // The two keys finish on opposite sides of your body. The player turns into
+  // the move, so the axis that means anything is your own left and right.
+  const left = run('crossover', -1);
+  const right = run('crossover', 1);
+  assert.ok(Math.abs(left.alongRight) > 0.5, `an L crossover should finish clearly to one side, got ${left.alongRight.toFixed(2)}`);
+  assert.ok(Math.abs(right.alongRight) > 0.5, `a J crossover should finish clearly to one side, got ${right.alongRight.toFixed(2)}`);
+  assert.ok(
+    left.alongRight * right.alongRight < 0,
+    `L and J must finish on opposite sides (${left.alongRight.toFixed(2)} vs ${right.alongRight.toFixed(2)})`,
+  );
+  void left.alongAim;
+
+  // Through the legs alternates hands: two presses put it back where it began.
+  const handAfter = () => state.players[0].dribbleHand;
+  run('betweenLegs', 1);
+  const first = handAfter();
+  run('betweenLegs', 1);
+  const second = handAfter();
+  assert.equal(first, -second, `through the legs should alternate hands (${first} then ${second})`);
 });

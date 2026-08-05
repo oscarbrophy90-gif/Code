@@ -11,8 +11,9 @@ export interface ControlBinding {
  * split a controller uses, so muscle memory transfers.
  */
 export const KEY_MOVES: Record<string, { move: DribbleMoveId; dir: [number, number] }> = {
-  KeyJ: { move: 'crossover', dir: [-1, -0.25] },
-  KeyL: { move: 'crossover', dir: [1, -0.25] },
+  // J fakes left and goes right; L fakes right and goes left.
+  KeyJ: { move: 'crossover', dir: [1, -0.25] },
+  KeyL: { move: 'crossover', dir: [-1, -0.25] },
   KeyU: { move: 'behindBack', dir: [-1, -0.3] },
   KeyO: { move: 'spin', dir: [1, -0.4] },
   KeyI: { move: 'hesitation', dir: [0, -1] },
@@ -33,7 +34,7 @@ export const CONTROL_SHEET: ControlBinding[] = [
   { keys: ['E'], label: 'Drive & Finish', action: 'Attack the rim for a layup, dunk or contact dunk' },
   { keys: ['F'], label: 'Steal', action: 'Reach in — a miss leaves you out of position' },
   { keys: ['R'], label: 'Pump Fake', action: 'Sell the shot and get the defender in the air' },
-  { keys: ['J', 'L'], label: 'Crossover', action: 'Left / right crossover' },
+  { keys: ['J', 'L'], label: 'Crossover', action: 'J fakes left and goes right, L fakes right and goes left' },
   { keys: ['G'], label: 'Between the Legs', action: 'Tight change of direction' },
   { keys: ['U'], label: 'Behind the Back', action: 'Wide escape dribble' },
   { keys: ['O'], label: 'Spin', action: 'Spin off the defender' },

@@ -126,6 +126,8 @@ export interface SimPlayer {
   distanceRun: number;
   /** true once this move has had its fumble roll */
   fumbleChecked: boolean;
+  /** which hand the ball is in: -1 left, +1 right. Moves swap it. */
+  dribbleHand: -1 | 1;
   /** chained-move counter for Tight Handles */
   comboCount: number;
   comboTimer: number;

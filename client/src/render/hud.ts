@@ -473,7 +473,7 @@ export class Hud {
     // Big centre callouts.
     ctx.save();
     ctx.textAlign = 'center';
-    if (state.needsClear && state.ball.owner === side) {
+    if (state.needsClear && state.ball.owner === side && state.phase === 'live') {
       ctx.font = '900 18px Inter, system-ui, sans-serif';
       ctx.fillStyle = '#ffc53d';
       ctx.fillText('CLEAR THE BALL', w / 2, h - 74);
