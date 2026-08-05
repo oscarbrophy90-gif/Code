@@ -100,7 +100,7 @@ export function drawDunkFrame(
   const accent = opts.dunker.jerseySecondary;
   const floorY = h * 0.86;
   const rimX = w * 0.68;
-  const rimY = h * 0.34;
+  const rimY = h * 0.24;
 
   // Backdrop.
   const sky = ctx.createLinearGradient(0, 0, 0, h);
@@ -124,38 +124,60 @@ export function drawDunkFrame(
   ctx.fillStyle = 'rgba(255,255,255,0.05)';
   ctx.fillRect(0, floorY, w, h - floorY);
 
-  // Backboard, rim and net, all sized off the frame so the composition holds
-  // at any canvas size — the locker preview is a third the height of the
-  // in-game cutaway.
-  const u = h / 360; // one unit, relative to the reference height
+  // One unit, relative to a reference height, so the furniture scales with the
+  // canvas — the locker preview is a third the height of the in-game cutaway.
+  const u = h / 360;
+  const flush = Math.max(0, (t - 0.62) / 0.2);
+
+  // Backboard.
   ctx.strokeStyle = 'rgba(238,242,248,0.8)';
   ctx.lineWidth = 3 * u;
   ctx.strokeRect(rimX + 26 * u, rimY - 54 * u, 76 * u, 66 * u);
+
+  // Where the dunker is: run-up, gather, rise, then hanging off the rim.
+  const approach = Math.min(1, t / 0.42);
+  const rise = t < 0.42 ? 0 : Math.min(1, (t - 0.42) / 0.24);
+  const hang = t < 0.66 ? 0 : Math.min(1, (t - 0.66) / 0.34);
+
+  // The reach: 0.74 up the body plus the arm, which is where drawFigure puts
+  // the grabbing hand. Solving for the feet puts that hand exactly on the rim.
+  const reachUp = 0.35 + rise * 1.1;
+  const bodyH = h * FIGURE_H;
+  const handAbove = bodyH * (0.74 + reachUp * 0.42);
+
+  // Hanging: one hand on the iron, body swinging under it, letting go at the
+  // very end. This is the bit that makes a dunk feel like a dunk.
+  const swing = hang > 0 ? Math.sin(hang * Math.PI * 2.2) * (1 - hang) * 0.5 : 0;
+  const release = Math.max(0, (hang - 0.75) / 0.25);
+  const gripX = rimX - 4 * u;
+
+  const runX = w * 0.1 + (gripX - 26 * u - w * 0.1) * easeOut(approach);
+  const px = hang > 0 ? gripX - 20 * u + swing * 26 * u : runX;
+  const py =
+    hang > 0
+      ? rimY + handAbove + release * (floorY - rimY - handAbove) * 0.9
+      : floorY - Math.sin(rise * Math.PI * 0.5) * (floorY - rimY - handAbove);
+
+  // The rim bends under the weight and springs back as he lets go.
+  const rimFlex = hang > 0 ? Math.sin(Math.min(1, hang * 1.6) * Math.PI * 0.7) * (1 - release) * 9 * u : 0;
+
+  // Rim and net, bent by whoever is hanging off them.
+  const rimYNow = rimY + rimFlex;
   ctx.strokeStyle = '#ff7a3d';
   ctx.lineWidth = 5 * u;
   ctx.beginPath();
-  ctx.moveTo(rimX - 22 * u, rimY);
+  ctx.moveTo(rimX - 22 * u, rimYNow);
   ctx.lineTo(rimX + 26 * u, rimY);
   ctx.stroke();
-  // The net whips when the ball goes through.
-  const flush = Math.max(0, (t - 0.62) / 0.2);
   ctx.strokeStyle = `rgba(238,242,248,${0.55 + flush * 0.35})`;
   ctx.lineWidth = 1.4 * u;
   for (let i = 0; i <= 5; i++) {
     const nx = rimX - 22 * u + (i / 5) * 48 * u;
     ctx.beginPath();
-    ctx.moveTo(nx, rimY);
-    ctx.lineTo(rimX + 2 * u + (nx - rimX) * 0.4, rimY + (26 + Math.min(1, flush) * 12) * u);
+    ctx.moveTo(nx, rimYNow + rimFlex * 0.4);
+    ctx.lineTo(rimX + 2 * u + (nx - rimX) * 0.4, rimYNow + (26 + Math.min(1, flush) * 12) * u + rimFlex);
     ctx.stroke();
   }
-
-  // Where the dunker is: run-up, gather, rise, hang.
-  const approach = Math.min(1, t / 0.42);
-  const rise = t < 0.42 ? 0 : Math.min(1, (t - 0.42) / 0.28);
-  const hang = t < 0.7 ? 0 : Math.min(1, (t - 0.7) / 0.3);
-  const px = w * 0.1 + (rimX - 58 * (h / 360) - w * 0.1) * easeOut(approach);
-  const lift = Math.sin(Math.min(1, rise + hang * 0.35) * Math.PI * 0.72) * (floorY - rimY - h * 0.05);
-  const py = floorY - lift;
 
   // The victim, planted under the rim and going down.
   if (opts.posterized && opts.victim) {
@@ -167,21 +189,22 @@ export function drawDunkFrame(
     });
   }
 
-  drawFigure(ctx, px, py, h, primary, accent, {
-    armsUp: 0.35 + rise * 1.1,
-    lean: -0.25 - rise * 0.35,
+  drawFigure(ctx, px, py + (hang > 0 ? rimFlex : 0), h, primary, accent, {
+    armsUp: reachUp,
+    lean: hang > 0 ? swing * 0.9 : -0.25 - rise * 0.35,
     scale: 1,
+    tuck: hang > 0 ? (1 - release) * 0.8 : 0,
   });
 
   // The ball: in the hand, then through the rim.
   const ballR = h * 0.036;
   ctx.fillStyle = '#e0762c';
   ctx.beginPath();
-  if (t < 0.66) {
-    ctx.arc(px + h * 0.05, py - h * 0.26 - lift * 0.08, ballR, 0, Math.PI * 2);
+  if (t < 0.62) {
+    ctx.arc(px + bodyH * 0.2, py - bodyH * 0.72, ballR, 0, Math.PI * 2);
   } else {
-    const drop = (t - 0.66) / 0.34;
-    ctx.arc(rimX + 2, rimY + drop * (floorY - rimY) * 0.9, ballR, 0, Math.PI * 2);
+    const drop = Math.min(1, (t - 0.62) / 0.3);
+    ctx.arc(rimX + 2 * u, rimYNow + drop * (floorY - rimYNow) * 0.92, ballR, 0, Math.PI * 2);
   }
   ctx.fill();
 
@@ -191,6 +214,14 @@ export function drawDunkFrame(
     ctx.fillRect(0, 0, w, h);
   }
 }
+
+/**
+ * Figure height as a fraction of the frame. Small enough that the rim sits
+ * clearly above a standing player, so hanging off it actually lifts him — at
+ * the first size he could touch the rim flat-footed and the hang read as
+ * standing with an arm up.
+ */
+const FIGURE_H = 0.33;
 
 function easeOut(t: number): number {
   return 1 - (1 - t) ** 3;
@@ -204,24 +235,27 @@ function drawFigure(
   h: number,
   jersey: string,
   accent: string,
-  pose: { armsUp: number; lean: number; scale: number },
+  pose: { armsUp: number; lean: number; scale: number; tuck?: number },
 ): void {
   // The figure stands a little under half the frame, so the rim, the ball and
   // the caption all still read. The first cut of this was ten times too big.
-  const bodyH = h * 0.4 * pose.scale;
+  const bodyH = h * FIGURE_H * pose.scale;
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(pose.lean * 0.18);
 
-  // Legs.
+  // Legs. Hanging off the rim they tuck up rather than dangling straight.
+  const tuck = pose.tuck ?? 0;
   ctx.strokeStyle = 'rgba(180,120,80,1)';
   ctx.lineWidth = bodyH * 0.075;
   ctx.lineCap = 'round';
   for (const dir of [-1, 1]) {
+    const kneeY = -bodyH * (0.22 + tuck * 0.12);
+    const footY = -bodyH * tuck * 0.34;
     ctx.beginPath();
     ctx.moveTo(0, -bodyH * 0.46);
-    ctx.lineTo(dir * bodyH * 0.1, -bodyH * 0.22);
-    ctx.lineTo(dir * bodyH * 0.16 - bodyH * 0.06, 0);
+    ctx.lineTo(dir * bodyH * (0.1 + tuck * 0.08), kneeY);
+    ctx.lineTo(dir * bodyH * 0.16 - bodyH * (0.06 - tuck * 0.16), footY);
     ctx.stroke();
   }
 

@@ -1971,8 +1971,11 @@ input[type='text']:focus {
 
 /* locker preview */
 .dunk-preview {
-  width: 100%;
-  height: 190px;
+  /* Keep roughly the cutaway's aspect so the composition reads the same here
+     as it does in game — a full-width letterbox squashed it. */
+  width: min(100%, 460px);
+  aspect-ratio: 16 / 9;
+  height: auto;
   border-radius: var(--radius);
   border: 1px solid var(--line);
   background: #080b12;
