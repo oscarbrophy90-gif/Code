@@ -26,6 +26,8 @@ export class Hud {
   popups: FeedbackPopup[] = [];
   private lastGrade: ShotGrade | null = null;
   private gradeFlash = 0;
+  /** true when the touch controls are up, so prompts name the right button */
+  touch = false;
   /** the meter as it stood at the moment of release, replayed as the flood */
   private lastMeter: { profile: ShotProfile; progress: number; x: number; z: number; y: number } | null = null;
 
@@ -497,9 +499,26 @@ export class Hud {
     }
 
     if (state.phase === 'checkball') {
+      // A backdrop so the prompt reads over a bright skyline or a pale court.
+      const panelH = state.config.manualCheck ? 96 : 46;
+      ctx.fillStyle = 'rgba(8,10,16,0.72)';
+      roundRect(ctx, w / 2 - 190, h / 2 - 68, 380, panelH, 6);
+      ctx.fill();
+
       ctx.font = '900 26px Inter, system-ui, sans-serif';
       ctx.fillStyle = '#eef2f8';
       ctx.fillText('CHECK BALL', w / 2, h / 2 - 40);
+      if (state.config.manualCheck) {
+        // You check it in yourself. Whether you have the ball or you are
+        // checking it back, it is the same button.
+        const mine = state.possession === side;
+        ctx.font = '900 15px Inter, system-ui, sans-serif';
+        ctx.fillStyle = '#ffc53d';
+        ctx.fillText(this.touch ? 'Tap shoot to check' : 'Press space bar to check', w / 2, h / 2 - 14);
+        ctx.font = '700 11px Inter, system-ui, sans-serif';
+        ctx.fillStyle = '#97a2b8';
+        ctx.fillText(mine ? 'Your ball' : 'Check it back to start', w / 2, h / 2 + 4);
+      }
     }
 
     if (this.gradeFlash > 0 && this.lastGrade) {

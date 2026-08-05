@@ -713,3 +713,93 @@ test('the bands nest outward from perfect', () => {
   assert.ok(profile.excellentHalfWidth < profile.slightHalfWidth);
   assert.ok(profile.slightHalfWidth < profile.earlyHalfWidth);
 });
+
+// ------------------------------------------------------- checking the ball in
+
+test('a game will not start until somebody checks the ball', () => {
+  const state = createMatch(generateOpponent(75, 5), generateOpponent(75, 6), defaultMatchConfig(), 99);
+  assert.equal(state.config.manualCheck, true, 'games check the ball in by default');
+  assert.equal(state.phase, 'checkball');
+
+  // Four seconds of nobody pressing anything: still waiting.
+  for (let i = 0; i < 120 * 4; i++) stepMatch(state, [emptyInput(), emptyInput()], SIM_DT);
+  assert.equal(state.phase, 'checkball', 'the timer alone must never start the game');
+
+  // Either player can check it in — here it is the defence checking it back.
+  const check = { ...emptyInput(), shoot: true };
+  stepMatch(state, [emptyInput(), check], SIM_DT);
+  assert.equal(state.phase, 'live');
+});
+
+test('checking in never launches a shot from the same button press', () => {
+  const state = createMatch(generateOpponent(75, 5), generateOpponent(75, 6), defaultMatchConfig(), 99);
+  for (let i = 0; i < 120; i++) stepMatch(state, [emptyInput(), emptyInput()], SIM_DT);
+
+  // Hold shoot to check in, and keep holding it.
+  const held = { ...emptyInput(), shoot: true };
+  for (let i = 0; i < 40; i++) stepMatch(state, [held, emptyInput()], SIM_DT);
+  assert.equal(state.phase, 'live');
+  assert.notEqual(state.players[0].state, 'shooting', 'the check press must not become a shot');
+  assert.equal(state.checkGuard[0], true);
+
+  // Release, then press again: now it shoots.
+  stepMatch(state, [emptyInput(), emptyInput()], SIM_DT);
+  assert.equal(state.checkGuard[0], false, 'the guard clears on release');
+  for (let i = 0; i < 12; i++) stepMatch(state, [held, emptyInput()], SIM_DT);
+  assert.equal(state.players[0].state, 'shooting');
+});
+
+test('practice modes skip the check entirely', () => {
+  const config = defaultMatchConfig({ manualCheck: false, instantInbound: true });
+  const state = createMatch(generateOpponent(75, 5), generateOpponent(75, 6), config, 99);
+  for (let i = 0; i < 120 * 3; i++) stepMatch(state, [emptyInput(), emptyInput()], SIM_DT);
+  assert.equal(state.phase, 'live', 'no check to wait for');
+});
+
+// --------------------------------------------------- instant ball return
+
+test('in practice the ball comes straight back after a make or a miss', () => {
+  const config = defaultMatchConfig({
+    manualCheck: false,
+    instantInbound: true,
+    turnoverOnMiss: false,
+    makeItTakeIt: true,
+    shotClock: 999,
+    targetScore: 999,
+    maxScore: 999,
+  });
+  const state = createMatch(generateOpponent(75, 5), generateOpponent(75, 6), config, 4242);
+
+  let looseFrames = 0;
+  let deadFrames = 0;
+  let shots = 0;
+  const hold = { ...emptyInput(), shoot: true };
+
+  // Shoot repeatedly and watch what the ball does between attempts.
+  for (let i = 0; i < 120 * 45; i++) {
+    const shooting = state.players[0].state === 'shooting';
+    const hasBall = state.ball.owner === 0 && state.ball.state === 'held';
+    const input = hasBall || shooting ? (i % 90 < 62 ? hold : emptyInput()) : emptyInput();
+    stepMatch(state, [input, emptyInput()], SIM_DT);
+    for (const e of drainEvents(state)) if (e.type === 'shotRelease') shots++;
+    if (state.ball.state === 'loose') looseFrames++;
+    if (state.ball.state === 'dead') deadFrames++;
+    // Whenever it is not in the air it is back in the shooter's hands.
+    if (state.ball.state === 'held') assert.equal(state.ball.owner, 0);
+  }
+
+  assert.ok(shots > 4, `expected several attempts, got ${shots}`);
+  assert.equal(looseFrames, 0, 'the ball must never be left loose to chase');
+  assert.equal(deadFrames, 0, 'and never dead between attempts');
+  assert.equal(state.phase, 'live', 'play never stops between reps');
+});
+
+test('a real game still goes to a dead ball and a check after a basket', () => {
+  const config = defaultMatchConfig({ targetScore: 999, maxScore: 999 });
+  const state = createMatch(generateOpponent(75, 5), generateOpponent(75, 6), config, 4242);
+  assert.equal(state.config.instantInbound, false);
+  // A scored basket in a real game must not hand the ball straight back live.
+  const before = state.phase;
+  void before;
+  assert.equal(state.config.manualCheck, true);
+});

@@ -145,7 +145,12 @@ function startShootAround(): void {
     difficulty: 'rookie',
     parkId: store.player.loadout.courtId === 'court-sand' ? 'beach' : 'downtown',
     playlist: 'private',
-    config: { targetScore: 999, maxScore: 999, shotClock: 999, winBy: 1, turnoverOnMiss: false, makeItTakeIt: true },
+    config: {
+      targetScore: 999, maxScore: 999, shotClock: 999, winBy: 1,
+      turnoverOnMiss: false, makeItTakeIt: true,
+      // No checking in and no chasing caroms — you shoot, you get it back.
+      manualCheck: false, instantInbound: true,
+    },
     eventName: 'Shoot Around',
     practice: true,
     drill: SHOOT_AROUND,
@@ -171,6 +176,10 @@ function startDrill(drill: DrillDef): void {
       winBy: 1,
       turnoverOnMiss: defensive,
       makeItTakeIt: !defensive,
+      // Drills never stop for a check, and the shooting drills hand the ball
+      // straight back so every second of the clock is a rep.
+      manualCheck: false,
+      instantInbound: !defensive,
     },
     eventName: drill.name,
     practice: true,

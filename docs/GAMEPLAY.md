@@ -178,6 +178,18 @@ After a change of possession or an offensive rebound the ball must be taken back
 arc before it can be scored; the HUD calls this out and shots are suppressed until you
 clear. A shot already in the air beats the shot-clock buzzer.
 
+**Checking in.** A game does not start until you check the ball — the HUD says *Press
+space bar to check*, and it is the same button whether it is your ball or you are
+checking it back. Nothing runs on a timer: the CPU never checks in for you, so the clock
+starts when you say it does. Whichever button press checks the ball in is swallowed, so
+holding it never launches a shot on the first live frame (`checkGuard` in `MatchState`).
+
+**Practice is not a game.** The gym and the training drills set `manualCheck: false` and
+`instantInbound: true`: there is nothing to check in, and the ball is back in your hands
+the instant a shot drops or misses. Chasing a carom across an empty gym is not a drill,
+and the drill clock should be spent on reps. A real game keeps both off — a make or a
+miss there still goes to a dead ball and a check.
+
 ## Fouls and free throws
 
 A defender who leaves his feet into a finisher gives up a shooting foul. Rates are

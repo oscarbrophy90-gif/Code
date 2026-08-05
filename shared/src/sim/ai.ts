@@ -80,6 +80,9 @@ export class AiController {
   private plannedRelease: number | null = null;
   private moveTarget: DribbleMoveId | null = null;
   private commitTimer = 0;
+  /** counts down before the CPU checks the ball in */
+  private checkDelay = 0;
+  private autoCheck = true;
   private driveTimer = 0;
   private commitDirX = 0;
   private commitDirZ = 0;
@@ -95,9 +98,14 @@ export class AiController {
   private side: Side;
   adaptive: boolean;
 
-  constructor(side: Side, difficulty: Difficulty, seed = 1337, adaptive = true) {
+  /**
+   * `autoCheck` is off when a human is on the other side: checking the ball in
+   * is the human's job, and a CPU that does it first takes that away.
+   */
+  constructor(side: Side, difficulty: Difficulty, seed = 1337, adaptive = true, autoCheck = true) {
     this.side = side;
     this.adaptive = adaptive;
+    this.autoCheck = autoCheck;
     this.baseProfile = { ...DIFFICULTY_PRESETS[difficulty] };
     this.profile = { ...this.baseProfile };
     this.rng = new Rng(seed);
@@ -161,9 +169,18 @@ export class AiController {
     }
     this.ftPlannedRelease = null;
     if (state.phase !== 'live') {
+      // Check the ball in when it is on the CPU to do so. It waits a beat first
+      // so a human on the other side always gets the chance to check first.
+      if (state.phase === 'checkball' && state.config.manualCheck && this.autoCheck) {
+        this.checkDelay = this.checkDelay > 0 ? this.checkDelay - dt : this.rng.range(0.5, 1.1);
+        if (this.checkDelay <= 0) input.shoot = true;
+      } else {
+        this.checkDelay = 0;
+      }
       // Walk back to a sensible spot between possessions.
       return input;
     }
+    this.checkDelay = 0;
 
     this.commitTimer = Math.max(0, this.commitTimer - dt);
 

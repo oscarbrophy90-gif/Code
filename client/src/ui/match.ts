@@ -93,13 +93,14 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
   // parked out of the way and never given a controller.
   const drill = opts.drill ?? null;
   const parkedBot = !!drill && (drill.mode === 'shooting' || drill.mode === 'finishing');
-  const ai = opts.net || parkedBot ? null : new AiController(remoteSide, opts.difficulty, seed ^ 0x5bf03, true);
+  const ai = opts.net || parkedBot ? null : new AiController(remoteSide, opts.difficulty, seed ^ 0x5bf03, true, false);
   const park = PARK_BY_ID[opts.parkId] ?? PARK_BY_ID['downtown'];
 
   const cam = new Camera();
   const courtRenderer = new CourtRenderer();
   const playerRenderer = new PlayerRenderer();
   const hud = new Hud();
+  hud.touch = settings.touchControls;
   const input = new InputManager();
   input.attach();
   audio.masterVolume = settings.masterVolume;

@@ -173,6 +173,10 @@ export interface MatchConfig {
    * straight to the other player instead of going to a live rebound battle.
    */
   turnoverOnMiss: boolean;
+  /** the offence has to check the ball in before play starts */
+  manualCheck: boolean;
+  /** practice modes: the ball comes straight back after a make or a miss */
+  instantInbound: boolean;
   /** seconds; 0 = untimed, first to target */
   timeLimit: number;
   parkId: string;
@@ -261,6 +265,9 @@ export interface MatchState {
   stats: [PlayerMatchStats, PlayerMatchStats];
   /** set while the game is stopped at the stripe */
   freeThrow: { side: Side; remaining: number } | null;
+  /** a side that was holding shoot when it checked in; its shoot is ignored
+   *  until released, so checking in never launches a shot */
+  checkGuard: [boolean, boolean];
   events: SimEvent[];
   config: MatchConfig;
   winner: Side | null;

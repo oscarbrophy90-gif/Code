@@ -133,6 +133,8 @@ export function defaultMatchConfig(overrides: Partial<MatchConfig> = {}): MatchC
     shotClock: 14,
     makeItTakeIt: true,
     turnoverOnMiss: true,
+    manualCheck: true,
+    instantInbound: false,
     timeLimit: 0,
     parkId: 'downtown',
     playlist: 'casual',
@@ -161,6 +163,7 @@ export function createMatch(
     clock: config.timeLimit,
     stats: [emptyStats(), emptyStats()],
     freeThrow: null,
+    checkGuard: [false, false],
     events: [],
     config,
     winner: null,
@@ -218,13 +221,23 @@ export function stepMatch(state: MatchState, inputs: [PlayerInput, PlayerInput],
 
   if (state.phase === 'deadball' || state.phase === 'checkball') {
     state.phaseTimer -= dt;
-    if (state.phaseTimer <= 0) {
-      if (state.phase === 'deadball') {
-        setupCheckball(state, state.possession);
-      } else {
+    if (state.phase === 'deadball') {
+      if (state.phaseTimer <= 0) setupCheckball(state, state.possession);
+    } else if (state.config.manualCheck) {
+      // You check the ball in yourself. Either player can do it — you check it
+      // when you have it, you check it back when you do not.
+      const ready = state.phaseTimer <= 0;
+      const checked = inputs[0].shoot || inputs[1].shoot;
+      if (ready && checked) {
+        // Whoever is still holding the button does not get to fire a shot with
+        // the same press, so checking in never costs you a possession.
+        state.checkGuard = [inputs[0].shoot, inputs[1].shoot];
         state.phase = 'live';
         state.events.push({ type: 'phase', phase: 'live' });
       }
+    } else if (state.phaseTimer <= 0) {
+      state.phase = 'live';
+      state.events.push({ type: 'phase', phase: 'live' });
     }
   }
 
@@ -241,7 +254,12 @@ export function stepMatch(state: MatchState, inputs: [PlayerInput, PlayerInput],
   }
 
   for (const side of [0, 1] as Side[]) {
-    updatePlayer(state, side, live ? inputs[side] : neutral(inputs[side]), dt, rng);
+    let input = live ? inputs[side] : neutral(inputs[side]);
+    if (state.checkGuard[side]) {
+      if (input.shoot) input = { ...input, shoot: false };
+      else state.checkGuard[side] = false;
+    }
+    updatePlayer(state, side, input, dt, rng);
   }
 
   updateBall(state, dt, rng);
@@ -1043,6 +1061,13 @@ function updateBall(state: MatchState, dt: number, rng: Rng): void {
         shooter.makeStreak = 0;
         state.events.push({ type: 'miss', side: ball.shotBy as Side });
         changePossession(state, other(ball.shotBy as Side), 'miss');
+      } else if (state.config.instantInbound) {
+        // Practice: the ball is back in your hands the moment it misses. There
+        // is no drill in chasing a carom across an empty gym.
+        const shooter = state.players[ball.shotBy as Side];
+        shooter.makeStreak = 0;
+        state.events.push({ type: 'miss', side: ball.shotBy as Side });
+        returnBallTo(state, ball.shotBy as Side);
       } else {
         // Rim carom. Direction is derived from where the shot landed relative
         // to the rim so long misses bounce long.
@@ -1403,10 +1428,36 @@ function scoreBasket(state: MatchState, side: Side, value: 1 | 2): void {
     return;
   }
 
+  if (state.config.instantInbound) {
+    returnBallTo(state, state.config.makeItTakeIt ? side : other(side));
+    return;
+  }
+
   state.phase = 'deadball';
   state.phaseTimer = 1.0;
   state.possession = state.config.makeItTakeIt ? side : other(side);
   state.events.push({ type: 'phase', phase: 'deadball' });
+}
+
+/**
+ * Puts the ball straight back in a player's hands where they stand and keeps
+ * play live. Practice modes only — a game always restarts from a check.
+ */
+function returnBallTo(state: MatchState, side: Side): void {
+  const p = state.players[side];
+  const ball = state.ball;
+  ball.state = 'held';
+  ball.owner = side;
+  ball.shotBy = null;
+  ball.shotGrade = null;
+  ball.shotWillGoIn = false;
+  ball.settled = false;
+  ball.vx = ball.vy = ball.vz = 0;
+  if (p.state !== 'staggered') p.state = 'dribble';
+  state.possession = side;
+  state.needsClear = false;
+  state.shotClock = state.config.shotClock;
+  state.phase = 'live';
 }
 
 function turnover(state: MatchState, side: Side, reason: 'shotClock' | 'outOfBounds' | 'strip'): void {
