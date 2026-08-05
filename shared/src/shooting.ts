@@ -78,22 +78,37 @@ export interface ShotProfile {
   idealPoint: number;
   /** half-width of the green window in normalised meter units */
   greenHalfWidth: number;
-  /** half-width of the "excellent" (near-green) band */
+  /** half-width of the "excellent" band — still an automatic make */
   excellentHalfWidth: number;
-  /** make chance on a perfect release */
+  /** half-width of the "slightly early / slightly late" band */
+  slightHalfWidth: number;
+  /** half-width of the "early / late" band; beyond this is very early / late */
+  earlyHalfWidth: number;
+  /** make chance on a perfect release. Always 1. */
   greenMakeChance: number;
-  /** make chance at the outer edge of the excellent band */
-  excellentMakeChance: number;
-  /** make chance far outside the window */
-  badMakeChance: number;
-  /** falloff exponent between bands */
+  /** make chance on a slightly early or late release, if you are wide open */
+  slightMakeChance: number;
+  /** falloff exponent inside the slight band */
   falloff: number;
-  /** true when the contest is heavy enough that greens are no longer automatic */
+  /** true when the contest is heavy enough to have collapsed the window */
   heavilyContested: boolean;
   jumpshot: JumpshotDef;
 }
 
-export type ShotGrade = 'green' | 'excellent' | 'good' | 'early' | 'late' | 'wild';
+/**
+ * Release grades, best to worst. Green and Excellent always score; a slightly
+ * early or late release can drop if nobody is contesting; early, late and the
+ * very early / very late releases are misses.
+ */
+export type ShotGrade =
+  | 'green'
+  | 'excellent'
+  | 'slightlyEarly'
+  | 'slightlyLate'
+  | 'early'
+  | 'late'
+  | 'veryEarly'
+  | 'veryLate';
 
 export interface ShotResult {
   made: boolean;
@@ -200,7 +215,11 @@ export function computeShotProfile(input: ShotInput): ShotProfile {
   // shooting motion — you release near the top of the jump, not at the start.
   const idealPoint = 0.86;
   const greenHalfWidth = clamp01(greenSeconds / meterDuration);
-  const excellentHalfWidth = Math.min(0.35, greenHalfWidth + 0.06);
+  // Bands step outward from the green window. Excellent is the shot you very
+  // nearly perfected; slight is the one you felt go wrong as you let it go.
+  const excellentHalfWidth = Math.min(0.3, greenHalfWidth + 0.035);
+  const slightHalfWidth = Math.min(0.42, excellentHalfWidth + 0.06);
+  const earlyHalfWidth = Math.min(0.6, slightHalfWidth + 0.12);
 
   // --- make chances -------------------------------------------------------
   // A green release ALWAYS goes in. No exceptions, no hidden roll: if the
@@ -217,23 +236,26 @@ export function computeShotProfile(input: ShotInput): ShotProfile {
   const rangeLimit = 22 + (rating / 99) * 12 + deepRange * 8;
   const distanceMult = clamp01(1 - Math.max(0, input.distance - rangeLimit) / 16);
 
-  const ratingBase = 0.2 + clamp01((rating - 25) / 74) * 0.42; // 0.20 .. 0.62
-  const contestBase = 1 - input.contest * (0.62 * (1 - deadeye * 0.45));
+  // A slightly early or late release is the only shot in the game decided by a
+  // roll, and being open is what decides it. A hand in your face takes it to
+  // nothing; wide open, a good shooter still gets most of them.
+  const ratingBase = 0.42 + clamp01((rating - 25) / 74) * 0.5; // 0.42 .. 0.92
+  const openness = clamp01(1 - input.contest * (1.55 * (1 - deadeye * 0.4)));
   const heatCheck = Math.min(4, input.makeStreak) * badgeLevel(input.badges, 'heatCheck') * 0.025;
 
-  const excellentMakeChance = clamp01(
-    (ratingBase * 0.98 + heatCheck) * contestBase * distanceMult * mod.base * staminaMult,
+  const slightMakeChance = clamp01(
+    (ratingBase + heatCheck) * openness * distanceMult * mod.base * staminaMult,
   );
-  const badMakeChance = clamp01(excellentMakeChance * 0.28);
 
   return {
     meterDuration,
     idealPoint,
     greenHalfWidth,
     excellentHalfWidth,
+    slightHalfWidth,
+    earlyHalfWidth,
     greenMakeChance,
-    excellentMakeChance,
-    badMakeChance,
+    slightMakeChance,
     falloff: js.falloff,
     heavilyContested,
     jumpshot: js,
@@ -247,27 +269,34 @@ export function computeShotProfile(input: ShotInput): ShotProfile {
 export function resolveShot(profile: ShotProfile, releasePoint: number, roll: number, isThree: boolean): ShotResult {
   const error = releasePoint - profile.idealPoint;
   const absError = Math.abs(error);
+  const early = error < 0;
 
   let grade: ShotGrade;
   let makeChance: number;
 
   if (absError <= profile.greenHalfWidth) {
+    // Perfect. Goes in, every time.
     grade = 'green';
-    makeChance = profile.greenMakeChance;
+    makeChance = 1;
   } else if (absError <= profile.excellentHalfWidth) {
-    const t = (absError - profile.greenHalfWidth) / Math.max(1e-4, profile.excellentHalfWidth - profile.greenHalfWidth);
-    // Just outside the window is still a very good look; it decays toward the
-    // rating-driven base as the release gets further out.
+    // Near enough to perfect that it also goes in, every time.
     grade = 'excellent';
-    makeChance = lerp(0.92, profile.excellentMakeChance, Math.pow(t, profile.falloff));
+    makeChance = 1;
+  } else if (absError <= profile.slightHalfWidth) {
+    // The only shot in the game that is a coin toss, and being open is the coin.
+    const t = (absError - profile.excellentHalfWidth) / Math.max(1e-4, profile.slightHalfWidth - profile.excellentHalfWidth);
+    grade = early ? 'slightlyEarly' : 'slightlyLate';
+    makeChance = profile.slightMakeChance * (1 - Math.pow(t, profile.falloff) * 0.45);
+  } else if (absError <= profile.earlyHalfWidth) {
+    // You felt this one leave wrong. It does not go in.
+    grade = early ? 'early' : 'late';
+    makeChance = 0;
   } else {
-    const t = clamp01((absError - profile.excellentHalfWidth) / 0.34);
-    makeChance = lerp(profile.excellentMakeChance, profile.badMakeChance, Math.pow(t, profile.falloff));
-    if (t > 0.72) grade = 'wild';
-    else grade = error < 0 ? 'early' : 'late';
+    grade = early ? 'veryEarly' : 'veryLate';
+    makeChance = 0;
   }
 
-  const made = roll < makeChance;
+  const made = makeChance >= 1 || roll < makeChance;
   return {
     made,
     grade,
@@ -281,20 +310,34 @@ export function resolveShot(profile: ShotProfile, releasePoint: number, roll: nu
 export const GRADE_LABEL: Record<ShotGrade, string> = {
   green: 'GREEN',
   excellent: 'EXCELLENT',
-  good: 'GOOD',
+  slightlyEarly: 'SLIGHTLY EARLY',
+  slightlyLate: 'SLIGHTLY LATE',
   early: 'EARLY',
   late: 'LATE',
-  wild: 'WILD',
+  veryEarly: 'VERY EARLY',
+  veryLate: 'VERY LATE',
 };
 
+/**
+ * The meter fills with this colour on release, so the bar tells you what you
+ * did before the ball lands: green means it is in, white means it is live,
+ * orange and red mean it is not.
+ */
 export const GRADE_COLOR: Record<ShotGrade, string> = {
   green: '#3ef07a',
-  excellent: '#9de84f',
-  good: '#e3d24a',
-  early: '#4fa8e8',
-  late: '#e8794f',
-  wild: '#e84f6b',
+  excellent: '#3ef07a',
+  slightlyEarly: '#f2f6fb',
+  slightlyLate: '#f2f6fb',
+  early: '#ff8a3d',
+  late: '#ff8a3d',
+  veryEarly: '#ff3b4e',
+  veryLate: '#ff3b4e',
 };
+
+/** True for the two grades that always score. */
+export function isAutomatic(grade: ShotGrade): boolean {
+  return grade === 'green' || grade === 'excellent';
+}
 
 /**
  * Contest strength from defender geometry. Shared so the server can recompute

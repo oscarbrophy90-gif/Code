@@ -864,7 +864,7 @@ function completeFinish(state: MatchState, side: Side, rng: Rng): void {
   state.events.push({
     type: 'shotRelease',
     side,
-    grade: made ? 'green' : 'good',
+    grade: made ? 'green' : 'late',
     made,
     value: 1,
     timingError: 0,
@@ -879,7 +879,7 @@ function completeFinish(state: MatchState, side: Side, rng: Rng): void {
 
   launchBall(state, side, made, 1, 0, rng);
   state.ball.flightDuration = 0.34;
-  state.ball.shotGrade = made ? 'green' : 'good';
+  state.ball.shotGrade = made ? 'green' : 'late';
 }
 
 // -------------------------------------------------------------------- blocks

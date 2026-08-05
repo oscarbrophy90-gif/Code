@@ -26,6 +26,8 @@ export class Hud {
   popups: FeedbackPopup[] = [];
   private lastGrade: ShotGrade | null = null;
   private gradeFlash = 0;
+  /** the meter as it stood at the moment of release, replayed as the flood */
+  private lastMeter: { profile: ShotProfile; progress: number; x: number; z: number; y: number } | null = null;
 
   push(text: string, color: string, x: number, z: number, big = false): void {
     this.popups.push({ text, color, x, z, life: big ? 1.5 : 1.1, maxLife: big ? 1.5 : 1.1, big });
@@ -34,7 +36,9 @@ export class Hud {
 
   flashGrade(grade: ShotGrade): void {
     this.lastGrade = grade;
-    this.gradeFlash = 1.1;
+    // Long enough to read the colour, short enough to be gone before the ball
+    // lands and tells you the same thing.
+    this.gradeFlash = 0.55;
   }
 
   update(dt: number): void {
@@ -126,24 +130,54 @@ export class Hud {
   ): void {
     if (style === 'hidden') return;
     const meter = activeShotMeter(state, side);
-    if (!meter) return;
-    const p = state.players[side];
-    const { progress, profile } = meter;
 
+    if (meter) {
+      const p = state.players[side];
+      this.lastMeter = { profile: meter.profile, progress: meter.progress, x: p.x, z: p.z, y: p.y };
+      this.paintMeter(ctx, cam, style, meter.progress, meter.profile, this.lastMeter, w, h, null);
+      return;
+    }
+
+    // Released: the whole bar floods with the colour of what you just did.
+    // Green means it is already in, white means it is live, orange and red
+    // mean it is not — you know before the ball gets there.
+    if (this.gradeFlash > 0 && this.lastGrade && this.lastMeter) {
+      const m = this.lastMeter;
+      this.paintMeter(ctx, cam, style, m.progress, m.profile, m, w, h, GRADE_COLOR[this.lastGrade]);
+    }
+  }
+
+  private paintMeter(
+    ctx: CanvasRenderingContext2D,
+    cam: Camera,
+    style: ShotMeterStyle,
+    progress: number,
+    profile: ShotProfile,
+    at: { x: number; z: number; y: number },
+    w: number,
+    h: number,
+    flood: string | null,
+  ): void {
+    ctx.save();
+    if (flood) {
+      // Fade the flood out rather than cutting it, so it reads as a flash.
+      ctx.globalAlpha = Math.min(1, this.gradeFlash / 0.28);
+    }
     switch (style) {
       case 'arcBar':
-        this.arcMeter(ctx, cam, p.x, p.z, p.y, progress, profile);
+        this.arcMeter(ctx, cam, at.x, at.z, at.y, progress, profile, flood);
         break;
       case 'circleRing':
-        this.ringMeter(ctx, cam, p.x, p.z, p.y, progress, profile);
+        this.ringMeter(ctx, cam, at.x, at.z, at.y, progress, profile, flood);
         break;
       case 'dualPips':
-        this.pipMeter(ctx, cam, p.x, p.z, p.y, progress, profile);
+        this.pipMeter(ctx, cam, at.x, at.z, at.y, progress, profile, flood);
         break;
       case 'sideBar':
-        this.sideMeter(ctx, progress, profile, w, h);
+        this.sideMeter(ctx, progress, profile, w, h, flood);
         break;
     }
+    ctx.restore();
   }
 
   private bandGeometry(profile: ShotProfile): { greenFrom: number; greenTo: number; excFrom: number; excTo: number } {
@@ -164,6 +198,7 @@ export class Hud {
     y: number,
     progress: number,
     profile: ShotProfile,
+    flood: string | null,
   ): void {
     const anchor = cam.project(x, y + 8.8, z);
     if (anchor.depth <= 0) return;
@@ -171,6 +206,21 @@ export class Hud {
     const a0 = Math.PI * 0.84;
     const a1 = Math.PI * 0.16;
     const at = (t: number) => a0 + (a1 - a0) * Math.min(1, Math.max(0, t));
+
+    if (flood) {
+      ctx.save();
+      ctx.lineCap = 'butt';
+      ctx.lineWidth = 15;
+      ctx.strokeStyle = flood;
+      ctx.shadowColor = flood;
+      ctx.shadowBlur = 18;
+      ctx.beginPath();
+      ctx.arc(anchor.x, anchor.y, r, a0, a1, true);
+      ctx.stroke();
+      ctx.restore();
+      return;
+    }
+
     const g = this.bandGeometry(profile);
     const green = profile.heavilyContested ? '#ffc53d' : '#3ef07a';
     // A perfect window is only a few dozen milliseconds wide, so enforce a
@@ -231,11 +281,26 @@ export class Hud {
     y: number,
     progress: number,
     profile: ShotProfile,
+    flood: string | null,
   ): void {
     const anchor = cam.project(x, 0.05, z);
     if (anchor.depth <= 0) return;
     void y;
     const r = Math.max(22, anchor.scale * 2.1);
+
+    if (flood) {
+      ctx.save();
+      ctx.lineWidth = 9;
+      ctx.strokeStyle = flood;
+      ctx.shadowColor = flood;
+      ctx.shadowBlur = 14;
+      ctx.beginPath();
+      ctx.arc(anchor.x, anchor.y, r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+      return;
+    }
+
     const g = this.bandGeometry(profile);
     const at = (t: number) => -Math.PI / 2 + Math.min(1, Math.max(0, t)) * Math.PI * 2;
 
@@ -276,6 +341,7 @@ export class Hud {
     y: number,
     progress: number,
     profile: ShotProfile,
+    flood: string | null,
   ): void {
     const anchor = cam.project(x, y + 8.2, z);
     if (anchor.depth <= 0) return;
@@ -283,6 +349,19 @@ export class Hud {
     const g = this.bandGeometry(profile);
     const left = anchor.x - width / 2;
     const pips = 22;
+
+    if (flood) {
+      ctx.save();
+      ctx.fillStyle = flood;
+      ctx.shadowColor = flood;
+      ctx.shadowBlur = 12;
+      for (let i = 0; i < pips; i++) {
+        const px = left + (i / (pips - 1)) * width;
+        ctx.fillRect(px - 1.6, anchor.y - 7.5, 3.2, 15);
+      }
+      ctx.restore();
+      return;
+    }
 
     ctx.save();
     for (let i = 0; i < pips; i++) {
@@ -314,6 +393,7 @@ export class Hud {
     profile: ShotProfile,
     w: number,
     h: number,
+    flood: string | null,
   ): void {
     const bw = 16;
     const bh = Math.min(280, h * 0.42);
@@ -321,6 +401,17 @@ export class Hud {
     const y = (h - bh) / 2;
     const g = this.bandGeometry(profile);
     const toY = (t: number) => y + bh - Math.min(1, Math.max(0, t)) * bh;
+
+    if (flood) {
+      ctx.save();
+      ctx.fillStyle = flood;
+      ctx.shadowColor = flood;
+      ctx.shadowBlur = 16;
+      roundRect(ctx, x, y, bw, bh, 3);
+      ctx.fill();
+      ctx.restore();
+      return;
+    }
 
     ctx.save();
     ctx.fillStyle = 'rgba(8,10,16,0.8)';

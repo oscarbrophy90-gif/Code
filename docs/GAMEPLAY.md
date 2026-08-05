@@ -31,16 +31,22 @@ players green 25–35% of their shots; the bot-versus-bot balance suite settles 
 The ideal release sits at 86% of the animation, so the bar reads like a real shooting
 motion rather than a stopwatch.
 
-| Band | Condition | Make chance |
+| Band | Bar colour | Make chance |
 | --- | --- | --- |
-| **Green** | within the green half-width | 100%. Always. There is no hidden roll and no contest that takes it away. |
-| **Excellent** | within green + 6% of the bar | interpolates from 80% of the green chance down to the base chance |
-| **Early / Late / Wild** | beyond that | falls off toward roughly 28% of the base chance |
+| **Green** | green | 100%. Always. No hidden roll, no contest that takes it away. |
+| **Excellent** | green | 100%. Near enough to perfect that it also drops, every time. |
+| **Slightly early / late** | white | The only roll in the game. Scaled by how open you are: wide open a good shooter converts most of them, a hand in your face takes it to zero. |
+| **Early / Late** | orange | Miss. |
+| **Very early / very late** | red | Miss. |
 
-The base chance for a non-perfect shot comes from the governing rating (0.20 at 25 rated
-to 0.62 at 99), then contest, distance falloff beyond your range, stamina and the shot
-type all apply. A green is the reward for perfect timing and it is unconditional;
-everything else is a percentage.
+On release the whole meter floods with that colour, so you know what happened
+before the ball lands: green is already in, white is live, orange and red are
+not.
+
+Only the white band is a percentage, and openness is what decides it: the base runs from
+0.42 at 25 rated to 0.92 at 99, multiplied by `1 − contest × 1.55`, so any real contest
+zeroes it outright. Distance beyond your range, stamina and the shot type apply on top.
+Everything else is binary — green and excellent always score, orange and red never do.
 
 Contest does not touch a green's make chance — it attacks the window instead. A defender
 who leaves his feet without blocking the shot narrows the green half-width by up to 68%,

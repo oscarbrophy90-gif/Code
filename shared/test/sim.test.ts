@@ -18,7 +18,7 @@ import { scoutReport } from '../src/scouting.ts';
 import { DEFAULT_TITLES, newlyEarnedTitles, streakBadge } from '../src/data/titles.ts';
 import { DRILLS, SHOOT_AROUND, drillMedal, drillReward } from '../src/data/drills.ts';
 import { DEFAULT_UNLOCKS, STORE_BY_ID } from '../src/data/cosmetics.ts';
-import { computeShotProfile, resolveShot } from '../src/shooting.ts';
+import { GRADE_COLOR, computeShotProfile, isAutomatic, resolveShot } from '../src/shooting.ts';
 import { freshBadges } from '../src/badges.ts';
 import { isAcceptableMatch, rankLabel, tierForPoints, updateRank, freshRank } from '../src/mmr.ts';
 import { generateChallenges, seasonForTime, buildBattlePass } from '../src/seasons.ts';
@@ -386,7 +386,13 @@ function ladderRun(d: Difficulty, games: number) {
     cpuFgm += state.stats[1].fgm;
     cpuFga += state.stats[1].fga;
   }
-  return { winRate: wins / games, cpuFg: cpuFga ? cpuFgm / cpuFga : 0, movesPerGame: cpuMoves / games };
+  return {
+    winRate: wins / games,
+    cpuFg: cpuFga ? cpuFgm / cpuFga : 0,
+    // Per possession, not per game: the best CPUs end possessions faster, so a
+    // per-game count punishes them for being efficient.
+    movesPerPossession: cpuFga ? cpuMoves / cpuFga : 0,
+  };
 }
 
 test('all six difficulties exist and get harder in order', () => {
@@ -407,8 +413,11 @@ test('all six difficulties exist and get harder in order', () => {
 
   // Rookie misses open shots; Hall of Fame does not.
   assert.ok(results[results.length - 1].cpuFg > results[0].cpuFg + 0.15);
-  // Higher difficulties use more dribble moves.
-  assert.ok(results[results.length - 1].movesPerGame > results[0].movesPerGame);
+  // Higher difficulties work harder for their looks.
+  assert.ok(
+    results[results.length - 1].movesPerPossession > results[0].movesPerPossession,
+    `moves per possession should rise (${results[0].movesPerPossession.toFixed(2)} -> ${results[results.length - 1].movesPerPossession.toFixed(2)})`,
+  );
 });
 
 // ------------------------------------------------------- fouls & free throws
@@ -607,4 +616,100 @@ test('challenge-only titles can never be bought', () => {
     assert.ok(item.requirement, 'it must show what unlocks it instead of a price');
     assert.ok(!DEFAULT_UNLOCKS.includes(id), 'it must not be granted for free');
   }
+});
+
+// -------------------------------------------------------------- shot grades
+
+function shootProfile(overrides: Partial<Parameters<typeof computeShotProfile>[0]> = {}) {
+  const attrs = startingAttributes({ position: 'SG', jerseyNumber: 3, heightIn: 77, weightLb: 200, wingspanIn: 80 });
+  attrs.threePoint = 90;
+  return computeShotProfile({
+    attrs,
+    badges: freshBadges(),
+    jumpshotId: 'base-rise',
+    shotType: 'jumper',
+    distance: 24,
+    isThree: true,
+    contest: 0,
+    stamina: 1,
+    driftSpeed: 0,
+    greenStreak: 0,
+    makeStreak: 0,
+    clutch: false,
+    heightDelta: 0,
+    ...overrides,
+  });
+}
+
+/** Releases just inside each band, on both sides of perfect. */
+function atBand(profile: ReturnType<typeof computeShotProfile>, band: 'green' | 'excellent' | 'slight' | 'early' | 'very') {
+  const mid = (a: number, b: number) => (a + b) / 2;
+  const off =
+    band === 'green' ? profile.greenHalfWidth * 0.5
+    : band === 'excellent' ? mid(profile.greenHalfWidth, profile.excellentHalfWidth)
+    : band === 'slight' ? mid(profile.excellentHalfWidth, profile.slightHalfWidth)
+    : band === 'early' ? mid(profile.slightHalfWidth, profile.earlyHalfWidth)
+    : profile.earlyHalfWidth + 0.05;
+  return { late: profile.idealPoint + off, early: profile.idealPoint - off };
+}
+
+test('green and excellent always go in; early, late and very are always misses', () => {
+  for (const contest of [0, 0.5, 1]) {
+    const profile = shootProfile({ contest });
+    for (const roll of [0, 0.5, 0.9999]) {
+      for (const band of ['green', 'excellent'] as const) {
+        const at = atBand(profile, band);
+        for (const point of [at.early, at.late]) {
+          const r = resolveShot(profile, point, roll, true);
+          assert.ok(isAutomatic(r.grade), `${band} at contest ${contest} graded ${r.grade}`);
+          assert.equal(r.made, true, `${band} must go in`);
+          assert.equal(r.makeChance, 1);
+        }
+      }
+      for (const band of ['early', 'very'] as const) {
+        const at = atBand(profile, band);
+        for (const point of [at.early, at.late]) {
+          const r = resolveShot(profile, point, roll, true);
+          assert.equal(r.made, false, `${band} must miss (graded ${r.grade})`);
+          assert.equal(r.makeChance, 0);
+        }
+      }
+    }
+  }
+});
+
+test('a slightly early or late release goes in only when you are open', () => {
+  const open = shootProfile({ contest: 0 });
+  const contested = shootProfile({ contest: 0.75 });
+
+  assert.ok(open.slightMakeChance > 0.5, 'wide open, a slight miss is a live shot');
+  assert.equal(contested.slightMakeChance, 0, 'with a hand in your face it is not');
+
+  const openShot = resolveShot(open, atBand(open, 'slight').late, 0.2, true);
+  assert.equal(openShot.grade, 'slightlyLate');
+  assert.equal(openShot.made, true);
+
+  const openEarly = resolveShot(open, atBand(open, 'slight').early, 0.2, true);
+  assert.equal(openEarly.grade, 'slightlyEarly');
+
+  const contestedShot = resolveShot(contested, atBand(contested, 'slight').late, 0.0001, true);
+  assert.equal(contestedShot.made, false, 'contested, a slight miss never drops');
+});
+
+test('the meter colours say what happened: green, white, orange, red', () => {
+  assert.equal(GRADE_COLOR.green, GRADE_COLOR.excellent, 'both automatic grades read as green');
+  assert.equal(GRADE_COLOR.slightlyEarly, GRADE_COLOR.slightlyLate);
+  assert.equal(GRADE_COLOR.early, GRADE_COLOR.late);
+  assert.equal(GRADE_COLOR.veryEarly, GRADE_COLOR.veryLate);
+  // green / white / orange / red, and four distinct colours between the tiers
+  const tiers = [GRADE_COLOR.green, GRADE_COLOR.slightlyEarly, GRADE_COLOR.early, GRADE_COLOR.veryEarly];
+  assert.equal(new Set(tiers).size, 4);
+  assert.equal(GRADE_COLOR.green, '#3ef07a');
+});
+
+test('the bands nest outward from perfect', () => {
+  const profile = shootProfile();
+  assert.ok(profile.greenHalfWidth < profile.excellentHalfWidth);
+  assert.ok(profile.excellentHalfWidth < profile.slightHalfWidth);
+  assert.ok(profile.slightHalfWidth < profile.earlyHalfWidth);
 });

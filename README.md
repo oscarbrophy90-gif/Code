@@ -41,13 +41,14 @@ This is a playable game, not a prototype stub.
   release error ±34% down to ±4.5%, and the move pool widens from basic handles to
   signature combos. Measured against a constant reference opponent they produce a 93% →
   3% win-rate curve.
-- **Green-bar shooting.** A perfect release always goes in — no exceptions, no hidden
-  roll, however heavy the contest. Slightly early or late shots fall off to realistic
-  percentages. Contest attacks the *window* instead: a defender in your face shrinks the
-  green band by up to 68%, scaled by your shooting rating, so a great shooter keeps a
-  usable sliver under pressure and a poor one has almost nothing. Six jump shots trade
-  window size against release speed, and the window is recomputed every frame from your
-  ratings, badges, stamina, drift and the closeout — you can watch it shrink.
+- **Green-bar shooting.** Timing decides the shot, not a dice roll. Green and Excellent
+  always go in, however heavy the contest. Slightly early or late is the one band with a
+  roll, and being open is what decides it — wide open a good shooter converts most of
+  them, contested it drops to nothing. Early, late, very early and very late are misses.
+  On release the whole bar floods with the answer: **green** in, **white** live,
+  **orange** and **red** out. Contest attacks the *window*, shrinking the green band by
+  up to 68% scaled by your shooting rating, so a great shooter keeps a usable sliver
+  under pressure. Six jump shots trade window size against release speed.
 - **Adaptive AI.** The CPU builds a scouting report as you play — how often you shoot
   threes, how often you attack the rim — and from All-Star upward it acts on it, closing
   out harder on a shooter and sagging off a driver. Adaptive difficulty also tracks the
