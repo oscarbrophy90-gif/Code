@@ -155,6 +155,7 @@ export const ACT_STATE_IDS = [
   'airborne',
   'landing',
   'staggered',
+  'fallen',
   'contesting',
   'stealing',
   'celebrating',

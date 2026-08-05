@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { AiController } from '../src/sim/ai.ts';
-import { createMatch, defaultMatchConfig, SIM_DT, stepMatch, drainEvents } from '../src/sim/match.ts';
+import { createMatch, currentContest, defaultMatchConfig, SIM_DT, stepMatch, drainEvents } from '../src/sim/match.ts';
 import { generateOpponent } from '../src/data/opponents.ts';
 import {
   clampHeightToPosition,
@@ -1034,4 +1034,182 @@ test('a crossover finishes on the side you aimed, and the legs alternate', () =>
   run('betweenLegs', 1);
   const second = handAfter();
   assert.equal(first, -second, `through the legs should alternate hands (${first} then ${second})`);
+});
+
+// -------------------------------------------------------- euro, floor, dunks
+
+test('a eurostep plants and goes up with it rather than gliding on', () => {
+  const state = createMatch(generateOpponent(85, 21), generateOpponent(85, 22), defaultMatchConfig({ manualCheck: false }), 616);
+  for (let i = 0; i < 200; i++) stepMatch(state, [emptyInput(), emptyInput()], SIM_DT);
+
+  const p = state.players[0];
+  // Put the handler in front of the rim with the ball and a head of steam.
+  p.x = 2;
+  p.z = 12;
+  p.state = 'dribble';
+  p.moveCooldown = 0;
+  p.stamina = 1;
+  state.ball.owner = 0;
+  state.ball.state = 'held';
+
+  stepMatch(state, [{ ...emptyInput(), move: 'euro', moveDirX: -1, moveDirZ: -1 }, emptyInput()], SIM_DT);
+  for (let i = 0; i < 120 && state.players[0].state === 'moveLock'; i++) {
+    stepMatch(state, [emptyInput(), emptyInput()], SIM_DT);
+  }
+
+  // The move ends in the layup, not back in a dribble with momentum.
+  assert.equal(state.players[0].state, 'shooting', 'a euro should finish by going up with it');
+  assert.equal(state.players[0].shotType, 'euroLayup');
+  assert.ok(
+    Math.hypot(state.players[0].vx, state.players[0].vz) < 0.001,
+    'and it plants — carrying speed on after two steps is a travel',
+  );
+});
+
+test('the third ankle breaker in a row puts the defender on the floor', () => {
+  const state = createMatch(generateOpponent(85, 31), generateOpponent(60, 32), defaultMatchConfig({ manualCheck: false }), 808);
+  // Get past the check into live play, or no move ever fires.
+  for (let i = 0; i < 200; i++) stepMatch(state, [emptyInput(), emptyInput()], SIM_DT);
+  const d = state.players[1];
+
+  // Two breakdowns leave him staggered; the third takes his legs.
+  d.ankledStreak = 2;
+  d.ankledResetIn = 6;
+  d.state = 'idle';
+  d.staggerTimer = 0;
+
+  const p = state.players[0];
+  p.cfg.attrs.ballHandle = 99;
+  d.cfg.attrs.perimeterDefense = 25;
+  p.x = d.x + 1.5;
+  p.z = d.z;
+
+  let floored = false;
+  for (let attempt = 0; attempt < 60 && !floored; attempt++) {
+    p.state = 'dribble';
+    p.moveCooldown = 0;
+    p.stamina = 1;
+    state.ball.owner = 0;
+    state.ball.state = 'held';
+    p.x = state.players[1].x + 1.5;
+    p.z = state.players[1].z;
+    state.players[1].ankledStreak = 2;
+    state.players[1].ankledResetIn = 6;
+    stepMatch(state, [{ ...emptyInput(), move: 'doubleCross', moveDirX: 1, moveDirZ: 0 }, emptyInput()], SIM_DT);
+    for (const e of drainEvents(state)) if (e.type === 'ankleBreaker' && e.floored) floored = true;
+    for (let i = 0; i < 60 && state.players[0].state === 'moveLock'; i++) {
+      stepMatch(state, [emptyInput(), emptyInput()], SIM_DT);
+      for (const e of drainEvents(state)) if (e.type === 'ankleBreaker' && e.floored) floored = true;
+    }
+  }
+
+  assert.ok(floored, 'expected a third straight breakdown to floor the defender');
+  assert.equal(state.players[1].state, 'fallen');
+
+  // On the floor he cannot contest, which is the point of it.
+  const shooter = state.players[0];
+  shooter.x = 20;
+  shooter.z = 24;
+  const openContest = currentContest(state, 0);
+  assert.equal(openContest, 0, 'a man on the floor contests nothing');
+});
+
+test('a dunk taken at a jumping defender has almost no window', () => {
+  const attrs = startingAttributes({ position: 'SF', jerseyNumber: 3, heightIn: 80, weightLb: 220, wingspanIn: 84 });
+  attrs.dunk = 90;
+  const base = {
+    attrs,
+    badges: freshBadges(),
+    jumpshotId: 'base-rise' as const,
+    distance: 3,
+    isThree: false,
+    stamina: 1,
+    driftSpeed: 0,
+    greenStreak: 0,
+    makeStreak: 0,
+    clutch: false,
+    heightDelta: 0,
+  };
+  const open = computeShotProfile({ ...base, shotType: 'dunk', contest: 0 });
+  const contested = computeShotProfile({ ...base, shotType: 'dunk', contest: 0.9 });
+  assert.ok(
+    contested.greenHalfWidth < open.greenHalfWidth * 0.3,
+    `a contested dunk window should collapse (${open.greenHalfWidth.toFixed(4)} -> ${contested.greenHalfWidth.toFixed(4)})`,
+  );
+  // Hitting it anyway still goes in — greens are unconditional.
+  const r = resolveShot(contested, contested.idealPoint, 0.999, false);
+  assert.equal(r.made, true);
+});
+
+test('taking the ball out of bounds is a turnover', () => {
+  const state = createMatch(generateOpponent(80, 41), generateOpponent(80, 42), defaultMatchConfig({ manualCheck: false }), 313);
+  for (let i = 0; i < 200; i++) stepMatch(state, [emptyInput(), emptyInput()], SIM_DT);
+  const handler = state.possession;
+  assert.equal(state.ball.owner, handler);
+
+  // Sprint at the sideline until you cross it.
+  let turnedOver = false;
+  const out = { ...emptyInput(), mx: 1, sprint: true };
+  for (let i = 0; i < 120 * 8 && !turnedOver; i++) {
+    stepMatch(state, handler === 0 ? [out, emptyInput()] : [emptyInput(), out], SIM_DT);
+    for (const e of drainEvents(state)) {
+      if (e.type === 'turnover' && e.reason === 'outOfBounds') turnedOver = true;
+    }
+  }
+  assert.ok(turnedOver, 'running the ball off the court should lose it');
+  assert.notEqual(state.possession, handler, 'and it goes to the other player');
+});
+
+test('sprinting into the rim and greening it produces a dunk highlight', () => {
+  const a = generateOpponent(90, 51);
+  const b = generateOpponent(70, 52);
+  a.attrs.dunk = 95;
+  a.attrs.vertical = 95;
+  a.attrs.speed = 90;
+  a.attrs.speedWithBall = 90;
+  a.attrs.acceleration = 90;
+  a.dunkPackageId = 'poster';
+  const state = createMatch(a, b, defaultMatchConfig({ manualCheck: false, instantInbound: true, shotClock: 999 }), 2468);
+  for (let i = 0; i < 200; i++) stepMatch(state, [emptyInput(), emptyInput()], SIM_DT);
+
+  let highlights = 0;
+  let dunkAttempts = 0;
+  let posterized = 0;
+
+  // Drive at the rim on repeat and hold the button across a spread of release
+  // points, so some of them land in the window.
+  for (let attempt = 0; attempt < 40 && highlights === 0; attempt++) {
+    const p = state.players[0];
+    p.x = 1;
+    p.z = 16;
+    p.state = 'dribble';
+    p.stamina = 1;
+    p.moveCooldown = 0;
+    state.ball.owner = 0;
+    state.ball.state = 'held';
+    state.needsClear = false;
+
+    const drive = { ...emptyInput(), mz: -1, sprint: true };
+    for (let i = 0; i < 40; i++) stepMatch(state, [drive, emptyInput()], SIM_DT);
+
+    const hold = { ...drive, shoot: true };
+    const release = 30 + attempt;
+    for (let i = 0; i < 140; i++) {
+      const input = i < release ? hold : { ...drive, shoot: false };
+      stepMatch(state, [input, emptyInput()], SIM_DT);
+      for (const e of drainEvents(state)) {
+        if (e.type === 'shotRelease' && (e.shotType === 'dunk' || e.shotType === 'contactDunk')) dunkAttempts++;
+        if (e.type === 'dunkHighlight') {
+          highlights++;
+          if (e.posterized) posterized++;
+          assert.ok(e.packageId.length > 0, 'the highlight carries the equipped package');
+        }
+      }
+      if (state.players[0].state === 'dribble' && state.ball.owner === 0 && i > release + 20) break;
+    }
+  }
+
+  assert.ok(dunkAttempts > 0, 'sprint + shoot at the rim should launch dunks');
+  assert.ok(highlights > 0, `a greened dunk should cut away (${dunkAttempts} attempts, ${highlights} highlights)`);
+  void posterized;
 });

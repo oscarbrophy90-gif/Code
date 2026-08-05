@@ -106,6 +106,12 @@ export class PlayerRenderer {
         crouch = 0.5;
         spread = 1.5;
         break;
+      case 'fallen':
+        // Flat on the floor. Everything collapses toward the deck.
+        crouch = 2.6;
+        spread = 2.6;
+        armLift = -0.5;
+        break;
       case 'stealing':
         armLift = 0.55;
         spread = 1.35;
@@ -137,12 +143,17 @@ export class PlayerRenderer {
         crouch = hasBall ? 0.2 : 0.12;
     }
 
-    const bodyH = heightFt * (1 - crouch * 0.22);
+    const down = p.state === 'fallen';
+    const bodyH = heightFt * (down ? 0.22 : 1 - crouch * 0.22);
     const hipY = bodyH * 0.48;
     const shoulderY = bodyH * 0.83;
     const headY = bodyH * 0.94;
 
-    const at = (yFt: number, dx = 0, dz = 0) => cam.project(p.x + dx, p.y + yFt, p.z + dz);
+    // A player on the floor is drawn lying out along the ground, so the sprawl
+    // is horizontal instead of a very short standing figure.
+    const sprawl = down ? 2.1 : 0;
+    const at = (yFt: number, dx = 0, dz = 0) =>
+      cam.project(p.x + dx + sprawl * (yFt / Math.max(0.001, heightFt)), p.y + yFt * (down ? 0.4 : 1), p.z + dz);
 
     const hip = at(hipY, lean * 0.3);
     const shoulder = at(shoulderY, lean * 0.55);

@@ -204,8 +204,13 @@ export function computeShotProfile(input: ShotInput): ShotProfile {
   if (input.clutch) badgeMult += badgeLevel(input.badges, 'coldBlooded') * 0.15;
   badgeMult += Math.min(3, input.greenStreak) * badgeLevel(input.badges, 'greenMachine') * 0.05;
 
+  // Going up at somebody who has left their feet is the hardest timing in the
+  // game — the window collapses beyond what an ordinary contest would do.
+  const dunking = input.shotType === 'dunk' || input.shotType === 'contactDunk';
+  const airborneSqueeze = dunking ? 1 - input.contest * 0.45 : 1;
+
   const greenSeconds =
-    js.greenWindow * mod.window * ratingMult * staminaMult * contestMult * driftMult * badgeMult;
+    js.greenWindow * mod.window * ratingMult * staminaMult * contestMult * driftMult * badgeMult * airborneSqueeze;
 
   // Quick Draw shortens the animation without touching the window.
   const quickDraw = badgeLevel(input.badges, 'quickDraw');

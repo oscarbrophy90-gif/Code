@@ -52,6 +52,7 @@ export type PlayerActState =
   | 'airborne'
   | 'landing'
   | 'staggered'
+  | 'fallen'
   | 'contesting'
   | 'stealing'
   | 'celebrating';
@@ -128,6 +129,12 @@ export interface SimPlayer {
   fumbleChecked: boolean;
   /** which hand the ball is in: -1 left, +1 right. Moves swap it. */
   dribbleHand: -1 | 1;
+  /** consecutive ankle breakers taken inside the streak window */
+  ankledStreak: number;
+  /** seconds left to take another one before the streak resets */
+  ankledResetIn: number;
+  /** how long the handler has been pinned against the line still pushing out */
+  outOfBoundsTimer: number;
   /** chained-move counter for Tight Handles */
   comboCount: number;
   comboTimer: number;
@@ -241,10 +248,12 @@ export type SimEvent =
   | { type: 'rebound'; side: Side; offensive: boolean }
   | { type: 'steal'; side: Side }
   | { type: 'block'; side: Side; chaseDown: boolean }
-  | { type: 'ankleBreaker'; side: Side }
+  | { type: 'ankleBreaker'; side: Side; floored: boolean }
   | { type: 'move'; side: Side; move: DribbleMoveId }
   | { type: 'contactDunk'; side: Side }
   | { type: 'dunk'; side: Side }
+  /** a greened dunk worth cutting away to: the client plays the animation */
+  | { type: 'dunkHighlight'; side: Side; packageId: string; posterized: boolean; value: 1 | 2 }
   | { type: 'turnover'; side: Side; reason: 'shotClock' | 'outOfBounds' | 'strip' }
   | { type: 'clear'; side: Side }
   | { type: 'foul'; on: Side; by: Side; shots: number }

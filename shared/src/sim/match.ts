@@ -3,6 +3,7 @@ import { Rng } from '../rng.ts';
 import {
   computeContest,
   computeShotProfile,
+  isAutomatic,
   resolveShot,
   type ShotProfile,
   type ShotType,
@@ -119,6 +120,9 @@ function makePlayer(side: Side, cfg: SimPlayerConfig): SimPlayer {
     distanceRun: 0,
     fumbleChecked: false,
     dribbleHand: 1,
+    ankledStreak: 0,
+    ankledResetIn: 0,
+    outOfBoundsTimer: 0,
     comboCount: 0,
     comboTimer: 0,
   };
@@ -395,8 +399,15 @@ function updatePlayer(state: MatchState, side: Side, input: PlayerInput, dt: num
     p.stagger = clamp01(p.staggerTimer / 0.9);
     if (p.staggerTimer <= 0) {
       p.stagger = 0;
-      if (p.state === 'staggered') p.state = 'idle';
+      if (p.state === 'staggered' || p.state === 'fallen') p.state = 'idle';
     }
+  }
+
+  // "Three in a row" is three inside a window, not three all game: stay on your
+  // feet for six seconds and the count is wiped.
+  if (p.ankledResetIn > 0) {
+    p.ankledResetIn -= dt;
+    if (p.ankledResetIn <= 0) p.ankledStreak = 0;
   }
 
   // Vertical ---------------------------------------------------------------
@@ -438,9 +449,21 @@ function updatePlayer(state: MatchState, side: Side, input: PlayerInput, dt: num
     p.moveTimer += dt;
     const def = MOVE_BY_ID[p.moveId];
     const progress = p.moveTimer / p.moveDuration;
-    const shape = Math.sin(Math.min(1, progress) * Math.PI);
+    // The eurostep is two beats — out to one side, then back across and
+    // forward — so it reads as two planted steps rather than a slide.
+    const shape =
+      p.moveId === 'euro'
+        ? Math.sin(Math.min(1, progress) * Math.PI * 2)
+        : Math.sin(Math.min(1, progress) * Math.PI);
     p.vx += p.moveDirX * def.lateral * shape * dt * 9;
     p.vz += p.moveDirZ * def.lateral * shape * dt * 9;
+    if (p.moveId === 'euro') {
+      // Second step carries you to the rim, not just sideways.
+      const toRim = normalize(COURT.rimX - p.x, COURT.rimZ - p.z);
+      const forward = Math.max(0, Math.sin(Math.min(1, progress) * Math.PI));
+      p.vx += toRim.x * def.burst * forward * dt * 6;
+      p.vz += toRim.z * def.burst * forward * dt * 6;
+    }
     if (def.retreat > 0) {
       // Retreat is always away from the rim.
       const away = normalize(p.x - COURT.rimX, p.z - COURT.rimZ);
@@ -463,6 +486,17 @@ function updatePlayer(state: MatchState, side: Side, input: PlayerInput, dt: num
       if (tryFumble(state, side, def, rng)) return;
     }
     if (p.moveTimer >= p.moveDuration) {
+      if (p.moveId === 'euro' && hasBall) {
+        // A eurostep is two steps and then you have to go up with it — keep
+        // moving after the second step and you have travelled. So it plants:
+        // momentum dies and the layup starts.
+        p.vx = 0;
+        p.vz = 0;
+        p.moveId = null;
+        p.moveCooldown = moveCooldownFor(p);
+        startShot(state, side, 'euroLayup');
+        return;
+      }
       p.state = hasBall ? 'dribble' : 'idle';
       p.vx += p.moveDirX * def.burst * 0.6;
       p.vz += p.moveDirZ * def.burst * 0.6;
@@ -476,6 +510,14 @@ function updatePlayer(state: MatchState, side: Side, input: PlayerInput, dt: num
   if (p.state === 'landing') {
     if (p.stateTimer <= 0) p.state = hasBall ? 'dribble' : 'idle';
     applyMovement(state, p, input, dt, 0.35);
+    return;
+  }
+
+  if (p.state === 'fallen') {
+    // On the floor. No movement, no contest, nothing — that is the point.
+    p.vx *= 0.85;
+    p.vz *= 0.85;
+    p.handUp = false;
     return;
   }
 
@@ -493,6 +535,21 @@ function updatePlayer(state: MatchState, side: Side, input: PlayerInput, dt: num
 
     if (input.move && p.moveCooldown <= 0 && p.y === 0 && p.fakeTimer <= 0) {
       tryDribbleMove(state, side, input.move, input, rng);
+      return;
+    }
+
+    // Sprint into the rim and press shoot: a dunk on the meter. Green it and
+    // it is a highlight; a defender leaving his feet at you squeezes the window
+    // to almost nothing, and hitting it anyway is a poster.
+    if (
+      input.shoot &&
+      input.sprint &&
+      p.y === 0 &&
+      !state.needsClear &&
+      Math.hypot(input.mx, input.mz) > 0.2 &&
+      canDunkNow(state, side)
+    ) {
+      startShot(state, side, dunkTypeFor(state, side));
       return;
     }
 
@@ -589,10 +646,31 @@ function applyMovement(state: MatchState, p: SimPlayer, input: PlayerInput, dt: 
   p.x += p.vx * dt;
   p.z += p.vz * dt;
   const clamped = clampToCourt(p.x, p.z);
+  const wentOut = clamped.x !== p.x || clamped.z !== p.z;
   if (clamped.x !== p.x) p.vx = 0;
   if (clamped.z !== p.z) p.vz = 0;
   p.x = clamped.x;
   p.z = clamped.z;
+
+  // Out of bounds is a turnover, but brushing the line is not: you have to keep
+  // driving into it for a beat. Clipping the sideline while cutting should cost
+  // you a step, not the ball. The baseline is behind the hoop in a half-court
+  // game, so only the sidelines and the half-court line count.
+  const atSideline = Math.abs(clamped.x) >= COURT.halfWidth - 0.65;
+  const atHalfCourt = clamped.z >= COURT.playDepth - 0.15;
+  const drivingOut =
+    (atSideline && input.mx * Math.sign(clamped.x) > 0.45) || (atHalfCourt && input.mz > 0.45);
+
+  if (drivingOut && hasBall && state.phase === 'live' && !state.config.instantInbound) {
+    p.outOfBoundsTimer += dt;
+    if (p.outOfBoundsTimer > 0.4) {
+      p.outOfBoundsTimer = 0;
+      turnover(state, p.side, 'outOfBounds');
+      return;
+    }
+  } else {
+    p.outOfBoundsTimer = 0;
+  }
 
   if (speed > 0.6) p.facing = Math.atan2(p.vx, -p.vz);
   else if (hasBall) p.facing = Math.atan2(COURT.rimX - p.x, -(COURT.rimZ - p.z));
@@ -789,17 +867,65 @@ function resolveAnkleBreaker(
 
   if (rng.chance(chance)) {
     const severity = clamp01(0.55 + ratio * 0.6 + wrongWay * 0.3);
-    d.staggerTimer = 0.5 + severity * 0.65;
-    d.stagger = 1;
-    d.state = 'staggered';
-    d.vx *= 0.15;
-    d.vz *= 0.15;
+    d.ankledStreak++;
+    d.ankledResetIn = 6;
+
+    // Broken down three times in a row and the legs go: he hits the floor and
+    // stays there, which is a genuinely open look rather than just a step of
+    // space. The counter resets so it takes another three to earn it again.
+    const floored = d.ankledStreak >= 3;
+    if (floored) {
+      d.ankledStreak = 0;
+      d.ankledResetIn = 0;
+      d.state = 'fallen';
+      d.stateTimer = 1.75;
+      d.staggerTimer = 1.75;
+      d.stagger = 1;
+      d.vx = 0;
+      d.vz = 0;
+      d.handUp = false;
+      d.contestTimer = 0;
+    } else {
+      d.staggerTimer = 0.5 + severity * 0.65;
+      d.stagger = 1;
+      d.state = 'staggered';
+      d.vx *= 0.15;
+      d.vz *= 0.15;
+    }
     state.stats[side].ankleBreakers++;
-    state.stats[side].gradePoints += 0.6;
-    state.events.push({ type: 'ankleBreaker', side });
+    state.stats[side].gradePoints += floored ? 1.1 : 0.6;
+    state.events.push({ type: 'ankleBreaker', side, floored });
     awardBadgeProgress(p.cfg.badges, p.cfg.attrs, 'ankleBreaker', 1);
     awardBadgeProgress(p.cfg.badges, p.cfg.attrs, 'blowBy', 0.5);
   }
+}
+
+
+/** Rim proximity, ratings and a gather of speed: the bar for going up with it. */
+function canDunkNow(state: MatchState, side: Side): boolean {
+  const p = state.players[side];
+  const dist = distanceToRim(p.x, p.z);
+  const gather = Math.hypot(p.vx, p.vz);
+  return (
+    dist < 9 &&
+    p.cfg.attrs.dunk >= 55 &&
+    p.cfg.attrs.vertical >= 50 &&
+    p.stamina > 0.15 &&
+    (gather > 3 || (dist < 5 && p.cfg.attrs.dunk >= 70))
+  );
+}
+
+/**
+ * A dunk taken at somebody who has left their feet at you is a contact dunk —
+ * the poster. It needs a package that can do it and the strength to finish it.
+ */
+function dunkTypeFor(state: MatchState, side: Side): ShotType {
+  const p = state.players[side];
+  const d = state.players[other(side)];
+  const pkg = DUNK_PACKAGE_BY_ID[p.cfg.dunkPackageId] ?? DUNK_PACKAGE_BY_ID['basic-slam'];
+  const defDist = Math.hypot(d.x - p.x, d.z - p.z);
+  const contesting = d.y > 0.4 || d.state === 'contesting';
+  return pkg.contactCapable && contesting && defDist < 4.2 ? 'contactDunk' : 'dunk';
 }
 
 // -------------------------------------------------------------------- shots
@@ -900,6 +1026,31 @@ function releaseShot(state: MatchState, side: Side, rng: Rng): void {
     shotType: p.shotType,
   });
 
+  // A greened dunk earns the cutaway. A poster is one taken at a defender who
+  // left his feet at you and hit anyway.
+  const isDunk = p.shotType === 'dunk' || p.shotType === 'contactDunk';
+  if (isDunk && result.made && isAutomatic(result.grade)) {
+    const posterized = p.shotType === 'contactDunk' || (profile.heavilyContested && d.y > 0.3);
+    if (posterized) {
+      state.stats[side].contactDunks++;
+      awardBadgeProgress(p.cfg.badges, p.cfg.attrs, 'contactDunk', 2);
+    }
+    state.events.push({
+      type: 'dunkHighlight',
+      side,
+      packageId: p.cfg.dunkPackageId,
+      posterized,
+      value,
+    });
+    if (posterized) {
+      // Being posterised is its own punishment: you land badly.
+      d.state = 'fallen';
+      d.stateTimer = 1.2;
+      d.staggerTimer = 1.2;
+      d.stagger = 1;
+    }
+  }
+
   // Badge feed.
   const attrs = p.cfg.attrs;
   const badges = p.cfg.badges;
@@ -925,6 +1076,12 @@ function releaseShot(state: MatchState, side: Side, rng: Rng): void {
 
   launchBall(state, side, result.made, value, result.timingError, rng);
   state.ball.shotGrade = result.grade;
+}
+
+
+/** True for the two shot types that go up at the rim rather than toward it. */
+function isDunkShot(type: ShotType): boolean {
+  return type === 'dunk' || type === 'contactDunk';
 }
 
 function launchBall(
@@ -1222,6 +1379,19 @@ function updateBall(state: MatchState, dt: number, rng: Rng): void {
         shooter.makeStreak = 0;
         state.events.push({ type: 'miss', side: ball.shotBy as Side });
         changePossession(state, other(ball.shotBy as Side), 'miss');
+      } else if (ball.shotBy !== null && isDunkShot(state.players[ball.shotBy].shotType) && !state.config.instantInbound) {
+        // A missed dunk does not roll off gently — it clangs off the iron and
+        // goes straight up, and comes down as a live ball.
+        const off = normalize(ball.x - COURT.rimX + rng.range(-0.5, 0.5), ball.z - COURT.rimZ + rng.range(-0.5, 0.5));
+        ball.state = 'loose';
+        ball.x = COURT.rimX + off.x * 0.7;
+        ball.z = COURT.rimZ + off.z * 0.7;
+        ball.y = COURT.rimY;
+        ball.vx = off.x * rng.range(3, 7);
+        ball.vz = off.z * rng.range(3, 7);
+        ball.vy = rng.range(14, 19);
+        state.events.push({ type: 'miss', side: ball.shotBy as Side });
+        state.players[ball.shotBy as Side].makeStreak = 0;
       } else if (state.config.instantInbound) {
         // Practice: the ball is back in your hands the moment it misses. There
         // is no drill in chasing a carom across an empty gym.

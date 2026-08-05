@@ -74,6 +74,14 @@ const OFFENCE: Row[] = [
     action: 'Attack the rim. Turns into a layup, a dunk or a contact dunk depending on your ratings and the defender.',
   },
   {
+    keys: ['Shift', 'W/A/D', 'Space'],
+    pad: 'RT + stick + A',
+    touch: 'SPRINT + stick + SHOOT',
+    label: 'Dunk',
+    action:
+      'Sprint into the rim and hold shoot. Green it and it cuts to your equipped dunk animation. A defender leaving his feet at you shrinks the window to almost nothing — hit it anyway and you poster him and he hits the floor. Miss and the ball flies off the iron and stays live.',
+  },
+  {
     keys: ['R'],
     pad: 'B / Circle',
     touch: 'FAKE',
@@ -138,7 +146,7 @@ export function renderControls(_params: RouteParams): HTMLElement {
           el(
             'p',
             { class: 'hint', style: 'margin:0 0 12px' },
-            'Chain them: each move inside the window extends the combo and raises the ankle-breaker odds. Stepback, Snatch Back, Eurostep and Hop Jumper cancel straight into a shot, so the move and the release are one action.',
+            'Chain them: each move inside the window extends the combo and raises the ankle-breaker odds. Break the same defender down three times inside six seconds and he goes to the floor, which is the most open look in the game. Stepback, Snatch Back and Hop Jumper cancel into a shot; the Eurostep plants straight into the layup.',
           ),
           ...DRIBBLE_MOVES.map((m) => moveRow(m, attrs ? attrs[m.gate] : null)),
         ),
@@ -252,6 +260,7 @@ function moveRow(move: DribbleMoveDef, rating: number | null): HTMLElement {
 /** Extra notes for the moves whose two keys mean different things. */
 const MOVE_NOTE: Record<string, string> = {
   crossover: 'J fakes left and bursts right, L fakes right and bursts left.',
+  euro: 'Two steps and you have to go up with it — carrying on after the second step is a travel, so it plants into the layup.',
   betweenLegs: 'Alternates hands — press it again and the ball goes back the other way.',
   hesitation: 'Sells the jumper. A CPU that bites on pump fakes bites on this.',
 };

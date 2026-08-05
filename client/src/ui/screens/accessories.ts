@@ -13,6 +13,7 @@ import { audio } from '../../engine/audio.ts';
 import { navigate, refresh } from '../../main.ts';
 import { el, fmt, panel, toast } from '../dom.ts';
 import { portraitEl } from '../portrait.ts';
+import { drawDunkFrame } from '../dunkscene.ts';
 
 /** Grouped so the locker room reads like a wardrobe, not a spreadsheet. */
 const SECTIONS: { title: string; blurb: string; categories: StoreCategory[] }[] = [
@@ -104,6 +105,9 @@ function renderCategory(category: StoreCategory): HTMLElement {
   const player = store.player;
   const owned = STORE_ITEMS.filter((i) => i.category === category && player.unlocked.includes(i.id));
 
+  // Dunk packages are animations, so show the animation rather than a swatch.
+  const preview = category === 'dunkPackage' ? dunkPreview() : null;
+
   if (owned.length === 0) {
     return el(
       'div',
@@ -127,7 +131,46 @@ function renderCategory(category: StoreCategory): HTMLElement {
       CATEGORY_LABEL[category],
       el('span', { class: 'faint' }, `${owned.length} owned`),
     ),
+    preview,
     el('div', { class: 'locker-grid' }, ...owned.map((item) => renderChip(item))),
+  );
+}
+
+/**
+ * Loops the equipped dunk package so you can see what you have on before you
+ * take it into a game. It is the same renderer as the in-game cutaway.
+ */
+function dunkPreview(): HTMLElement {
+  const canvas = el('canvas', { class: 'dunk-preview' }) as HTMLCanvasElement;
+  const cfg = store.simConfig();
+  const start = performance.now();
+  let raf = 0;
+
+  const frame = (now: number) => {
+    if (!canvas.isConnected) {
+      cancelAnimationFrame(raf);
+      return;
+    }
+    const ctx = canvas.getContext('2d');
+    // A beat of hang at the top before it loops, so it does not feel jerky.
+    const t = ((now - start) / 2600) % 1.18;
+    if (ctx) {
+      drawDunkFrame(ctx, canvas, {
+        dunker: cfg,
+        victim: null,
+        packageId: store.player.loadout.dunkPackageId,
+        posterized: false,
+      }, Math.min(1, t));
+    }
+    raf = requestAnimationFrame(frame);
+  };
+  raf = requestAnimationFrame(frame);
+
+  return el(
+    'div',
+    { style: 'margin-bottom:10px' },
+    canvas,
+    el('div', { class: 'hint', style: 'margin-top:6px' }, 'Your equipped package, on a loop. This is what plays when you green a dunk.'),
   );
 }
 

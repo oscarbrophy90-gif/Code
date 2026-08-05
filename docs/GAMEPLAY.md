@@ -164,6 +164,20 @@ over-commit to the first move in a chain. A successful break staggers the defend
 
 Tuned to roughly one per game between evenly matched players, not one per possession.
 
+## Dunking
+
+Sprint into the rim with the ball and hold shoot: the meter runs and you go up
+with it. **Green it and the game cuts away** to your equipped dunk package played
+out at size — skippable with any key or a tap, and skipped entirely if reduced
+motion is on. The same renderer draws the looping preview in the Locker, so what
+you see there is what you get.
+
+A defender who leaves his feet at you squeezes the window by a further 45% on top
+of the ordinary contest, which on a hard closeout leaves almost nothing. Hit it
+anyway and it is a **poster**: contact-dunk credit, a different cutaway, and the
+defender lands on the floor. Miss and the ball clangs off the iron and goes
+fifteen feet in the air before coming down live.
+
 ## Finishing
 
 `E` near the rim picks a finish from context. A dunk needs 60 Dunk, 55 Vertical, and
@@ -197,6 +211,15 @@ Defense/Strength and Rim Protector. It knocks the defender back and finishes at 
   on who shot it: chasing your own miss uses **Offensive Rebound**, everything else uses
   **Defensive Rebound**. Contested boards resolve by weight from that rating, Vertical,
   Strength, height and whether you left the floor.
+
+## Getting broken down
+
+Every ankle breaker on the same defender inside a six-second window counts. The
+**third one in a row puts him on the floor** — a `fallen` state he cannot move,
+contest or block out of for 1.75 seconds. Contest goes to zero, which means the
+green window opens to whatever your rating actually allows: a 90 Three Point
+shooter gets an enormous band, a 40 gets a slightly less awful one and should
+still drive. Being posterised drops you too, for a shorter beat.
 
 ## Rules
 

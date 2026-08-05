@@ -33,6 +33,7 @@ import { Hud } from '../render/hud.ts';
 import { store } from '../state/store.ts';
 import { el, clear } from './dom.ts';
 import { buildTouchControls } from './touch.ts';
+import { playDunkScene } from './dunkscene.ts';
 
 export interface MatchResult {
   won: boolean;
@@ -109,6 +110,8 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
 
   let paused = false;
   let finished = false;
+  /** true while a dunk cutaway owns the screen */
+  let cutscene = false;
   let netSwing = 0;
   let shake = 0;
   let dribbleTimer = 0;
@@ -247,7 +250,7 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
 
   // -------------------------------------------------------------------- step
   const step = (dt: number) => {
-    if (paused || finished) return;
+    if (paused || finished || cutscene) return;
     elapsedRealSeconds += dt;
 
     const localInput = input.sample();
@@ -404,6 +407,24 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
           audio.play('dunk');
           shake = 1;
           hud.push('POSTER!', '#ff7a3d', p.x, p.z, true);
+          break;
+        }
+        case 'dunkHighlight': {
+          // Cut away to the animation. The world is frozen while it plays so
+          // nothing happens off screen, and it is always skippable.
+          if (e.side === localSide && !settings.reducedMotion) {
+            audio.play('dunk');
+            cutscene = true;
+            void playDunkScene(root, {
+              dunker: configs[e.side],
+              victim: configs[e.side === 0 ? 1 : 0],
+              packageId: e.packageId,
+              posterized: e.posterized,
+              value: e.value,
+            }).then(() => {
+              cutscene = false;
+            });
+          }
           break;
         }
         case 'dunk':
