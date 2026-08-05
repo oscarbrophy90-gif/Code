@@ -424,7 +424,7 @@ function renderBadges(): HTMLElement {
             class: `badge ${state.tier === 'none' ? 'locked' : ''}`,
             style: `--tier:${color}`,
             onclick: () =>
-              overlay(() =>
+              overlay((closeBadge) =>
                 el(
                   'div',
                   {},
@@ -454,7 +454,10 @@ function renderBadges(): HTMLElement {
                     : null,
                   el(
                     'button',
-                    { class: 'btn sm', style: 'margin-top:16px', onclick: () => navigate('myplayer') },
+                    // `overlay` hands us the function that dismisses it. Calling
+                    // navigate() here instead only re-rendered the screen behind
+                    // the dialog and left the dialog itself on top.
+                    { class: 'btn sm', style: 'margin-top:16px', onclick: closeBadge },
                     'Close',
                   ),
                 ),
