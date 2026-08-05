@@ -79,7 +79,7 @@ const OFFENCE: Row[] = [
     touch: 'SPRINT + stick + SHOOT',
     label: 'Dunk',
     action:
-      'Sprint into the rim and hold shoot. Green it and it cuts to your equipped dunk animation. A defender leaving his feet at you shrinks the window to almost nothing — hit it anyway and you poster him and he hits the floor. Miss and the ball flies off the iron and stays live.',
+      'Sprint into the rim and hold shoot. Green it and it cuts to your equipped dunk animation. Any build can go up — under about 38 Dunk it becomes a layup instead of doing nothing. A defender leaving his feet at you shrinks the window to almost nothing; hit it anyway and you poster him and he hits the floor. Miss and the ball flies off the iron and stays live.',
   },
   {
     keys: ['R'],
@@ -146,7 +146,7 @@ export function renderControls(_params: RouteParams): HTMLElement {
           el(
             'p',
             { class: 'hint', style: 'margin:0 0 12px' },
-            'Chain them: each move inside the window extends the combo and raises the ankle-breaker odds. Break the same defender down three times inside six seconds and he goes to the floor, which is the most open look in the game. Stepback, Snatch Back and Hop Jumper cancel into a shot; the Eurostep plants straight into the layup.',
+            'Chain them: each move inside the window extends the combo and raises the ankle-breaker odds. Break the same defender down and he is frozen for a beat; do it again inside six seconds and he goes to the floor for three seconds, which is the most open look in the game. Stepback, Snatch Back and Hop Jumper cancel into a shot; the Eurostep plants straight into the layup.',
           ),
           ...DRIBBLE_MOVES.map((m) => moveRow(m, attrs ? attrs[m.gate] : null)),
         ),

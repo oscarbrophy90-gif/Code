@@ -143,17 +143,20 @@ export class PlayerRenderer {
         crouch = hasBall ? 0.2 : 0.12;
     }
 
+    // A fallen player keeps his full length — he is laid out flat rather than
+    // squashed into a very short standing figure.
     const down = p.state === 'fallen';
-    const bodyH = heightFt * (down ? 0.22 : 1 - crouch * 0.22);
+    const bodyH = heightFt * (down ? 1 : 1 - crouch * 0.22);
     const hipY = bodyH * 0.48;
     const shoulderY = bodyH * 0.83;
     const headY = bodyH * 0.94;
 
-    // A player on the floor is drawn lying out along the ground, so the sprawl
-    // is horizontal instead of a very short standing figure.
-    const sprawl = down ? 2.1 : 0;
+    // Lying down is the standing pose tipped ninety degrees: what was height
+    // becomes length along the floor, and everything sits just off the deck.
     const at = (yFt: number, dx = 0, dz = 0) =>
-      cam.project(p.x + dx + sprawl * (yFt / Math.max(0.001, heightFt)), p.y + yFt * (down ? 0.4 : 1), p.z + dz);
+      down
+        ? cam.project(p.x + yFt * 0.82 + dz * 0.4, 0.28 + Math.abs(dx) * 0.35, p.z + dx * 0.7)
+        : cam.project(p.x + dx, p.y + yFt, p.z + dz);
 
     const hip = at(hipY, lean * 0.3);
     const shoulder = at(shoulderY, lean * 0.55);

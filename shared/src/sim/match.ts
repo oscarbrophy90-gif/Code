@@ -522,7 +522,9 @@ function updatePlayer(state: MatchState, side: Side, input: PlayerInput, dt: num
   }
 
   if (p.state === 'staggered') {
-    applyMovement(state, p, input, dt, 0.25);
+    // Fully stopped while the stagger is fresh, then it eases back so he can
+    // start recovering rather than sliding around broken.
+    applyMovement(state, p, input, dt, p.stagger > 0.6 ? 0 : 0.25);
     return;
   }
 
@@ -547,9 +549,13 @@ function updatePlayer(state: MatchState, side: Side, input: PlayerInput, dt: num
       p.y === 0 &&
       !state.needsClear &&
       Math.hypot(input.mx, input.mz) > 0.2 &&
-      canDunkNow(state, side)
+      distanceToRim(p.x, p.z) < 11
     ) {
-      startShot(state, side, dunkTypeFor(state, side));
+      // Sprinting at the rim with shoot held goes up with it. If the build
+      // genuinely cannot dunk it becomes a layup rather than doing nothing —
+      // an input that silently fails is worse than one that does the lesser
+      // version of what you asked for.
+      startShot(state, side, canDunkNow(state, side) ? dunkTypeFor(state, side) : 'layup');
       return;
     }
 
@@ -870,28 +876,30 @@ function resolveAnkleBreaker(
     d.ankledStreak++;
     d.ankledResetIn = 6;
 
-    // Broken down three times in a row and the legs go: he hits the floor and
-    // stays there, which is a genuinely open look rather than just a step of
-    // space. The counter resets so it takes another three to earn it again.
-    const floored = d.ankledStreak >= 3;
+    // First time you break him down he is frozen for a beat. Do it again inside
+    // the window and the legs go completely: three seconds on the floor.
+    const floored = d.ankledStreak >= 2;
     if (floored) {
       d.ankledStreak = 0;
       d.ankledResetIn = 0;
       d.state = 'fallen';
-      d.stateTimer = 1.75;
-      d.staggerTimer = 1.75;
+      d.stateTimer = 3;
+      d.staggerTimer = 3;
       d.stagger = 1;
       d.vx = 0;
       d.vz = 0;
       d.handUp = false;
       d.contestTimer = 0;
     } else {
-      d.staggerTimer = 0.5 + severity * 0.65;
+      // A dead stop, not a slow-down — he is caught leaning the wrong way.
+      d.staggerTimer = 1;
       d.stagger = 1;
       d.state = 'staggered';
-      d.vx *= 0.15;
-      d.vz *= 0.15;
+      d.vx = 0;
+      d.vz = 0;
+      d.handUp = false;
     }
+    void severity;
     state.stats[side].ankleBreakers++;
     state.stats[side].gradePoints += floored ? 1.1 : 0.6;
     state.events.push({ type: 'ankleBreaker', side, floored });
@@ -901,17 +909,20 @@ function resolveAnkleBreaker(
 }
 
 
-/** Rim proximity, ratings and a gather of speed: the bar for going up with it. */
+/**
+ * Whether this build can get up for a dunk at all. The bar is deliberately low
+ * — a starting build sits in the 30s and 40s, and gating dunks behind ratings
+ * it takes hours to earn just made the button do nothing. Difficulty lives in
+ * the green window instead, which is driven by the Dunk rating: a 40 gets a
+ * sliver, a 90 gets a real target.
+ */
 function canDunkNow(state: MatchState, side: Side): boolean {
   const p = state.players[side];
-  const dist = distanceToRim(p.x, p.z);
-  const gather = Math.hypot(p.vx, p.vz);
   return (
-    dist < 9 &&
-    p.cfg.attrs.dunk >= 55 &&
-    p.cfg.attrs.vertical >= 50 &&
-    p.stamina > 0.15 &&
-    (gather > 3 || (dist < 5 && p.cfg.attrs.dunk >= 70))
+    distanceToRim(p.x, p.z) < 11 &&
+    p.cfg.attrs.dunk >= 38 &&
+    p.cfg.attrs.vertical >= 35 &&
+    p.stamina > 0.1
   );
 }
 

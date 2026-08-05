@@ -167,7 +167,9 @@ Tuned to roughly one per game between evenly matched players, not one per posses
 ## Dunking
 
 Sprint into the rim with the ball and hold shoot: the meter runs and you go up
-with it. **Green it and the game cuts away** to your equipped dunk package played
+with it. The bar to attempt one is deliberately low (38 Dunk, 35 Vertical) —
+gating it above what a fresh build owns just made the button do nothing, so
+under that it becomes a layup rather than silently failing. **Green it and the game cuts away** to your equipped dunk package played
 out at size — skippable with any key or a tap, and skipped entirely if reduced
 motion is on. The same renderer draws the looping preview in the Locker, so what
 you see there is what you get.
@@ -215,8 +217,9 @@ Defense/Strength and Rim Protector. It knocks the defender back and finishes at 
 ## Getting broken down
 
 Every ankle breaker on the same defender inside a six-second window counts. The
-**third one in a row puts him on the floor** — a `fallen` state he cannot move,
-contest or block out of for 1.75 seconds. Contest goes to zero, which means the
+first freezes him dead for a second — no movement authority at all while the
+stagger is fresh. The **second one in a row puts him on the floor** — a `fallen`
+state he cannot move, contest or block out of for three seconds. Contest goes to zero, which means the
 green window opens to whatever your rating actually allows: a 90 Three Point
 shooter gets an enormous band, a 40 gets a slightly less awful one and should
 still drive. Being posterised drops you too, for a shorter beat.

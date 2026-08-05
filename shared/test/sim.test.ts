@@ -1066,14 +1066,14 @@ test('a eurostep plants and goes up with it rather than gliding on', () => {
   );
 });
 
-test('the third ankle breaker in a row puts the defender on the floor', () => {
+test('the second ankle breaker in a row puts the defender on the floor', () => {
   const state = createMatch(generateOpponent(85, 31), generateOpponent(60, 32), defaultMatchConfig({ manualCheck: false }), 808);
   // Get past the check into live play, or no move ever fires.
   for (let i = 0; i < 200; i++) stepMatch(state, [emptyInput(), emptyInput()], SIM_DT);
   const d = state.players[1];
 
-  // Two breakdowns leave him staggered; the third takes his legs.
-  d.ankledStreak = 2;
+  // One breakdown freezes him; the second takes his legs.
+  d.ankledStreak = 1;
   d.ankledResetIn = 6;
   d.state = 'idle';
   d.staggerTimer = 0;
@@ -1093,7 +1093,7 @@ test('the third ankle breaker in a row puts the defender on the floor', () => {
     state.ball.state = 'held';
     p.x = state.players[1].x + 1.5;
     p.z = state.players[1].z;
-    state.players[1].ankledStreak = 2;
+    state.players[1].ankledStreak = 1;
     state.players[1].ankledResetIn = 6;
     stepMatch(state, [{ ...emptyInput(), move: 'doubleCross', moveDirX: 1, moveDirZ: 0 }, emptyInput()], SIM_DT);
     for (const e of drainEvents(state)) if (e.type === 'ankleBreaker' && e.floored) floored = true;
@@ -1103,7 +1103,7 @@ test('the third ankle breaker in a row puts the defender on the floor', () => {
     }
   }
 
-  assert.ok(floored, 'expected a third straight breakdown to floor the defender');
+  assert.ok(floored, 'expected a second straight breakdown to floor the defender');
   assert.equal(state.players[1].state, 'fallen');
 
   // On the floor he cannot contest, which is the point of it.
@@ -1212,4 +1212,44 @@ test('sprinting into the rim and greening it produces a dunk highlight', () => {
   assert.ok(dunkAttempts > 0, 'sprint + shoot at the rim should launch dunks');
   assert.ok(highlights > 0, `a greened dunk should cut away (${dunkAttempts} attempts, ${highlights} highlights)`);
   void posterized;
+});
+
+test('a brand new build can go up for a dunk', () => {
+  // The bug: dunking was gated at 55 Dunk / 50 Vertical while every fresh build
+  // starts in the 30s and 40s, so sprint + shoot did nothing at all.
+  for (const position of POSITIONS) {
+    const build = defaultBuildFor(position);
+    const attrs = startingAttributes(build);
+    const cfg = generateOpponent(60, 7);
+    cfg.attrs = attrs;
+    cfg.heightIn = build.heightIn;
+    cfg.weightLb = build.weightLb;
+    cfg.wingspanIn = build.wingspanIn;
+
+    const state = createMatch(cfg, generateOpponent(60, 8), defaultMatchConfig({ manualCheck: false, shotClock: 999 }), 121);
+    for (let i = 0; i < 200; i++) stepMatch(state, [emptyInput(), emptyInput()], SIM_DT);
+
+    const p = state.players[0];
+    p.x = 0;
+    p.z = 12;
+    p.state = 'dribble';
+    p.stamina = 1;
+    state.ball.owner = 0;
+    state.ball.state = 'held';
+    state.needsClear = false;
+
+    // Sprint at the rim with shoot held.
+    const drive = { ...emptyInput(), mz: -1, sprint: true, shoot: true };
+    let launched: string | null = null;
+    for (let i = 0; i < 90 && !launched; i++) {
+      stepMatch(state, [drive, emptyInput()], SIM_DT);
+      if (state.players[0].state === 'shooting') launched = state.players[0].shotType;
+    }
+
+    assert.ok(launched, `${position}: sprint + shoot at the rim must do something`);
+    assert.ok(
+      launched === 'dunk' || launched === 'contactDunk' || launched === 'layup',
+      `${position}: expected a dunk or at worst a layup, got ${launched}`,
+    );
+  }
 });

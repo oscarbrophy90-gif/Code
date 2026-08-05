@@ -124,25 +124,28 @@ export function drawDunkFrame(
   ctx.fillStyle = 'rgba(255,255,255,0.05)';
   ctx.fillRect(0, floorY, w, h - floorY);
 
-  // Backboard, rim and net.
+  // Backboard, rim and net, all sized off the frame so the composition holds
+  // at any canvas size — the locker preview is a third the height of the
+  // in-game cutaway.
+  const u = h / 360; // one unit, relative to the reference height
   ctx.strokeStyle = 'rgba(238,242,248,0.8)';
-  ctx.lineWidth = 3;
-  ctx.strokeRect(rimX + 26, rimY - 54, 76, 66);
+  ctx.lineWidth = 3 * u;
+  ctx.strokeRect(rimX + 26 * u, rimY - 54 * u, 76 * u, 66 * u);
   ctx.strokeStyle = '#ff7a3d';
-  ctx.lineWidth = 5;
+  ctx.lineWidth = 5 * u;
   ctx.beginPath();
-  ctx.moveTo(rimX - 22, rimY);
-  ctx.lineTo(rimX + 26, rimY);
+  ctx.moveTo(rimX - 22 * u, rimY);
+  ctx.lineTo(rimX + 26 * u, rimY);
   ctx.stroke();
   // The net whips when the ball goes through.
   const flush = Math.max(0, (t - 0.62) / 0.2);
   ctx.strokeStyle = `rgba(238,242,248,${0.55 + flush * 0.35})`;
-  ctx.lineWidth = 1.4;
+  ctx.lineWidth = 1.4 * u;
   for (let i = 0; i <= 5; i++) {
-    const nx = rimX - 22 + (i / 5) * 48;
+    const nx = rimX - 22 * u + (i / 5) * 48 * u;
     ctx.beginPath();
     ctx.moveTo(nx, rimY);
-    ctx.lineTo(rimX + 2 + (nx - rimX) * 0.4, rimY + 26 + Math.min(1, flush) * 12);
+    ctx.lineTo(rimX + 2 * u + (nx - rimX) * 0.4, rimY + (26 + Math.min(1, flush) * 12) * u);
     ctx.stroke();
   }
 
@@ -150,14 +153,14 @@ export function drawDunkFrame(
   const approach = Math.min(1, t / 0.42);
   const rise = t < 0.42 ? 0 : Math.min(1, (t - 0.42) / 0.28);
   const hang = t < 0.7 ? 0 : Math.min(1, (t - 0.7) / 0.3);
-  const px = w * 0.16 + (rimX - 60 - w * 0.16) * easeOut(approach);
-  const lift = Math.sin(Math.min(1, rise + hang * 0.35) * Math.PI * 0.72) * (h * 0.42);
+  const px = w * 0.1 + (rimX - 58 * (h / 360) - w * 0.1) * easeOut(approach);
+  const lift = Math.sin(Math.min(1, rise + hang * 0.35) * Math.PI * 0.72) * (floorY - rimY - h * 0.05);
   const py = floorY - lift;
 
   // The victim, planted under the rim and going down.
   if (opts.posterized && opts.victim) {
     const fall = Math.max(0, (t - 0.6) / 0.4);
-    drawFigure(ctx, rimX - 66, floorY, h, opts.victim.jerseyPrimary, opts.victim.jerseySecondary, {
+    drawFigure(ctx, rimX - 66 * (h / 360), floorY, h, opts.victim.jerseyPrimary, opts.victim.jerseySecondary, {
       armsUp: 1 - fall,
       lean: fall * 1.35,
       scale: 0.92,
@@ -203,8 +206,9 @@ function drawFigure(
   accent: string,
   pose: { armsUp: number; lean: number; scale: number },
 ): void {
-  const s = h * 0.0028 * pose.scale;
-  const bodyH = 62 * s * 10;
+  // The figure stands a little under half the frame, so the rim, the ball and
+  // the caption all still read. The first cut of this was ten times too big.
+  const bodyH = h * 0.4 * pose.scale;
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(pose.lean * 0.18);
