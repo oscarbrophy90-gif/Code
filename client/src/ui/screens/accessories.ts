@@ -1,6 +1,8 @@
 import {
   CURRENCY_SHORT,
   RARITY_COLOR,
+  EMOTE_SLOTS,
+  STORE_BY_ID,
   STORE_ITEMS,
   TITLE_BY_ID,
   streakBadge,
@@ -106,7 +108,9 @@ function renderCategory(category: StoreCategory): HTMLElement {
   const owned = STORE_ITEMS.filter((i) => i.category === category && player.unlocked.includes(i.id));
 
   // Dunk packages are animations, so show the animation rather than a swatch.
-  const preview = category === 'dunkPackage' ? dunkPreview() : null;
+  // Emotes get the six-slot rack instead, because which emote you own matters
+  // far less than which key it is on.
+  const preview = category === 'dunkPackage' ? dunkPreview() : category === 'emote' ? emoteRack() : null;
 
   if (owned.length === 0) {
     return el(
@@ -197,6 +201,66 @@ function dunkPreview(): HTMLElement {
     canvas,
     el('div', { style: 'display:flex;gap:6px;margin-top:8px' }, normalBtn, posterBtn),
     hint,
+  );
+}
+
+/**
+ * The six in-game emote slots. Clicking a slot cycles it through everything you
+ * own and then back to empty, so setting up a full bar is six taps rather than
+ * six dialogs.
+ */
+function emoteRack(): HTMLElement {
+  const owned = STORE_ITEMS.filter((i) => i.category === 'emote' && store.player.unlocked.includes(i.id));
+  const slots = store.player.loadout.emoteSlots ?? [];
+
+  const setSlot = (index: number, id: string | null) => {
+    store.update((p) => {
+      const target = p.players[p.activeSlot];
+      const next = Array.from({ length: EMOTE_SLOTS }, (_, i) => target.loadout.emoteSlots?.[i] ?? null);
+      next[index] = id;
+      target.loadout.emoteSlots = next;
+    });
+    audio.play('ui');
+    refresh();
+  };
+
+  const cycle = (index: number) => {
+    if (owned.length === 0) return;
+    const current = slots[index] ?? null;
+    const at = current ? owned.findIndex((i) => i.id === current) : -1;
+    // …last owned emote → empty → first owned emote → …
+    const nextAt = at + 1;
+    setSlot(index, nextAt >= owned.length ? null : owned[nextAt].id);
+  };
+
+  return el(
+    'div',
+    { style: 'margin-bottom:12px' },
+    el(
+      'div',
+      { class: 'emote-rack' },
+      ...Array.from({ length: EMOTE_SLOTS }, (_, i) => {
+        const item = slots[i] ? STORE_BY_ID[slots[i] as string] : undefined;
+        return el(
+          'button',
+          {
+            class: `emote-slot ${item ? 'on' : ''}`,
+            style: item ? `--c1:${item.colors[0]};--c2:${item.colors[1]}` : '',
+            title: item ? `${item.name} — click to change` : 'Empty — click to fill',
+            onclick: () => cycle(i),
+          },
+          el('span', { class: 'emote-key' }, String(i + 1)),
+          el('span', { class: 'emote-name' }, item ? item.name : 'Empty'),
+        );
+      }),
+    ),
+    el(
+      'div',
+      { class: 'hint', style: 'margin-top:8px' },
+      owned.length === 0
+        ? 'Buy an emote in the store and it can go on a key here.'
+        : 'Press 1 to 6 in a game to fire these. Click a slot to cycle through the emotes you own.',
+    ),
   );
 }
 

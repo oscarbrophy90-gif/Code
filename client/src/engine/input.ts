@@ -46,6 +46,7 @@ export const CONTROL_SHEET: ControlBinding[] = [
   { keys: ['H'], label: 'Size-Up', action: 'Bait a reach and set up your combo' },
   { keys: ['B'], label: 'Double Crossover', action: 'Signature — needs 74 Ball Handle' },
   { keys: ['V'], label: 'Fake Pull-Through', action: 'Signature — needs 82 Ball Handle' },
+  { keys: ['1', '2', '3', '4', '5', '6'], label: 'Emotes', action: 'Fire the six emotes you equipped in the Locker' },
   { keys: ['Esc'], label: 'Pause', action: 'Pause the match' },
 ];
 
@@ -82,12 +83,30 @@ export class InputManager {
   };
   private lastFacingX = 0;
   private lastFacingZ = -1;
+  /** 0-5, set by the 1-6 keys and consumed once by the match screen */
+  private pendingEmote: number | null = null;
   onPause: (() => void) | null = null;
+
+  /**
+   * The emote slot asked for since the last call, or null. Emotes are pure
+   * presentation — they never reach the simulation, so they live here rather
+   * than on PlayerInput.
+   */
+  takeEmote(): number | null {
+    const slot = this.pendingEmote;
+    this.pendingEmote = null;
+    return slot;
+  }
 
   private keyDown = (e: KeyboardEvent) => {
     if (e.repeat) return;
     if (e.code === 'Escape') {
       this.onPause?.();
+      return;
+    }
+    const emote = EMOTE_KEYS.indexOf(e.code);
+    if (emote >= 0) {
+      this.pendingEmote = emote;
       return;
     }
     if (SWALLOW.has(e.code)) e.preventDefault();
@@ -253,6 +272,9 @@ function stickToMove(angle: number, modifier: boolean): DribbleMoveId {
   if (deg > 135 && deg <= 225) return modifier ? 'snatchBack' : 'stepback'; // down
   return modifier ? 'doubleCross' : 'behindBack'; // left
 }
+
+/** 1-6 fire the six equipped emote slots, in order. */
+const EMOTE_KEYS = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6'];
 
 const SWALLOW = new Set([
   'Space',

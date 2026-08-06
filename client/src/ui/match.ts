@@ -21,6 +21,7 @@ import {
   type SimEvent,
   type SimPlayerConfig,
   type Side,
+  STORE_BY_ID,
 } from '@hoops/shared';
 
 import { Camera } from '../engine/camera.ts';
@@ -31,7 +32,7 @@ import { CourtRenderer } from '../render/court.ts';
 import { PlayerRenderer } from '../render/players.ts';
 import { Hud } from '../render/hud.ts';
 import { store } from '../state/store.ts';
-import { el, clear } from './dom.ts';
+import { el, clear, toast } from './dom.ts';
 import { buildTouchControls } from './touch.ts';
 import { playDunkScene } from './dunkscene.ts';
 
@@ -248,8 +249,29 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
     root.appendChild(buildTouchControls(input.touch, () => togglePause(!paused)));
   }
 
+  // ------------------------------------------------------------------ emotes
+  /** Plays the emote in one of the six slots the Locker equipped. */
+  const fireEmote = (slot: number) => {
+    const id = store.player.loadout.emoteSlots?.[slot] ?? null;
+    if (!id) {
+      toast(`Emote slot ${slot + 1} is empty — equip one in the Locker`, 'info');
+      return;
+    }
+    const item = STORE_BY_ID[id];
+    if (!item) return;
+    const me = state.players[localSide];
+    hud.showEmote(item.name, item.colors[0], me.x, me.z);
+    audio.play('ui', 1.1);
+  };
+
   // -------------------------------------------------------------------- step
   const step = (dt: number) => {
+    // Consumed before the guard below, so a digit pressed while the game is
+    // paused or a cutaway is up is dropped rather than firing on the way back.
+    const emoteSlot = input.takeEmote();
+    if (emoteSlot !== null && !paused && !finished && !cutscene && state.phase !== 'over') {
+      fireEmote(emoteSlot);
+    }
     if (paused || finished || cutscene) return;
     elapsedRealSeconds += dt;
 

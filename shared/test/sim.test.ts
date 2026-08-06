@@ -17,7 +17,8 @@ import {
 import { scoutReport } from '../src/scouting.ts';
 import { DEFAULT_TITLES, newlyEarnedTitles, streakBadge } from '../src/data/titles.ts';
 import { DRILLS, SHOOT_AROUND, drillMedal, drillReward } from '../src/data/drills.ts';
-import { DEFAULT_UNLOCKS, STORE_BY_ID } from '../src/data/cosmetics.ts';
+import { DEFAULT_UNLOCKS, STORE_BY_ID, STORE_ITEMS } from '../src/data/cosmetics.ts';
+import { SHOP_SLOTS, SHOP_WINDOW_MS, catalogueItems, isPurchasableNow, msUntilShopRefresh, rotatingStock } from '../src/shop.ts';
 import { GRADE_COLOR, computeShotProfile, isAutomatic, resolveShot } from '../src/shooting.ts';
 import { freshBadges } from '../src/badges.ts';
 import { isAcceptableMatch, rankLabel, tierForPoints, updateRank, freshRank } from '../src/mmr.ts';
@@ -25,7 +26,7 @@ import { generateChallenges, seasonForTime, buildBattlePass } from '../src/seaso
 import { computeMatchReward } from '../src/economy.ts';
 import { packInput, unpackInput } from '../src/protocol.ts';
 import { emptyInput, emptyStats, type SimEvent } from '../src/sim/state.ts';
-import { ATTRIBUTE_KEYS, DIFFICULTIES, POSITIONS, type BuildSpec, type CareerStats, type Difficulty } from '../src/types.ts';
+import { ATTRIBUTE_KEYS, DIFFICULTIES, EMOTE_SLOTS, POSITIONS, type BuildSpec, type CareerStats, type Difficulty } from '../src/types.ts';
 import { shotAttribute } from '../src/shooting.ts';
 import { COURT, distanceToRim, isBeyondArc } from '../src/sim/court.ts';
 
@@ -1493,4 +1494,72 @@ test('a dunk over a defender in your way is a poster, an open one is not', () =>
 
   const trailing = sweep('behind', false);
   assert.equal(trailing.posters, 0, 'a defender behind you is not in your way');
+});
+
+test('the shop shelf is stable inside a window and turns over between them', () => {
+  const base = 1_800_000_000_000;
+  const ids = (t: number) => rotatingStock(t).map((i) => i.id).join(',');
+
+  // Same half hour, same shelf — you cannot reroll it by reloading the page.
+  assert.equal(ids(base), ids(base + 1));
+  assert.equal(ids(base), ids(base + SHOP_WINDOW_MS - 1));
+  assert.notEqual(ids(base), ids(base + SHOP_WINDOW_MS), 'the next window is a different shelf');
+
+  const stock = rotatingStock(base);
+  assert.equal(stock.length, SHOP_SLOTS);
+  assert.equal(new Set(stock.map((i) => i.id)).size, stock.length, 'no item twice on one shelf');
+  for (const item of stock) {
+    assert.ok(item.price > 0, 'rewards are earned, not stocked');
+    assert.ok(!item.requirement, 'prestige items are earned, not stocked');
+  }
+
+  // The countdown always points at the next turnover.
+  assert.equal(msUntilShopRefresh(base + 60_000), SHOP_WINDOW_MS - ((base + 60_000) % SHOP_WINDOW_MS));
+  assert.ok(msUntilShopRefresh(base) > 0 && msUntilShopRefresh(base) <= SHOP_WINDOW_MS);
+});
+
+test('mythic stock is rare, rotation-only, and unbuyable off the shelf', () => {
+  const mythics = STORE_ITEMS.filter((i) => i.rarity === 'mythic');
+  assert.ok(mythics.length >= 5, 'there is a mythic tier to chase');
+  for (const m of mythics) {
+    assert.equal(m.rotationOnly, true, 'mythic never sits in the permanent catalogue');
+    assert.ok(
+      !catalogueItems(m.category).some((i) => i.id === m.id),
+      `${m.name} must not be browsable in its category`,
+    );
+  }
+
+  // Walk a month of windows and count how often one actually shows up.
+  const base = 1_800_000_000_000;
+  const windows = (30 * 24 * 60 * 60 * 1000) / SHOP_WINDOW_MS;
+  let windowsWithMythic = 0;
+  for (let w = 0; w < windows; w++) {
+    const stock = rotatingStock(base + w * SHOP_WINDOW_MS);
+    if (stock.some((i) => i.rarity === 'mythic')) windowsWithMythic++;
+  }
+  const rate = windowsWithMythic / windows;
+  assert.ok(rate > 0, 'a mythic has to be reachable, or it is not an item');
+  assert.ok(rate < 0.06, `mythic should be a rare sight, showed in ${(rate * 100).toFixed(1)}% of windows`);
+
+  // And it cannot be bought in a window it is not stocked in.
+  const m = mythics[0];
+  let stockedAt: number | null = null;
+  for (let w = 0; w < windows && stockedAt === null; w++) {
+    const t = base + w * SHOP_WINDOW_MS;
+    if (rotatingStock(t).some((i) => i.id === m.id)) stockedAt = t;
+  }
+  if (stockedAt !== null) {
+    assert.equal(isPurchasableNow(m, stockedAt), true, 'buyable while it is on the shelf');
+    assert.equal(isPurchasableNow(m, stockedAt + SHOP_WINDOW_MS), false, 'and not once it is gone');
+  }
+});
+
+test('every emote slot can be filled and the catalogue supports six', () => {
+  const emotes = STORE_ITEMS.filter((i) => i.category === 'emote');
+  assert.ok(emotes.length >= EMOTE_SLOTS, `need at least ${EMOTE_SLOTS} emotes to fill the bar`);
+  const free = emotes.filter((e) => e.price === 0 && !e.rotationOnly);
+  assert.ok(free.length >= 3, 'a new player starts with something on the keys');
+  for (const e of emotes) {
+    assert.ok(e.id.startsWith('emote-'), 'emote ids are namespaced so migration can find them');
+  }
 });

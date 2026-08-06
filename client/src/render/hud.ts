@@ -19,6 +19,8 @@ export interface FeedbackPopup {
   life: number;
   maxLife: number;
   big: boolean;
+  /** drawn as a speech chip rather than a shout */
+  emote?: boolean;
 }
 
 /** Screen-space HUD: score bug, shot clock, meter, stamina, callouts. */
@@ -33,6 +35,12 @@ export class Hud {
 
   push(text: string, color: string, x: number, z: number, big = false): void {
     this.popups.push({ text, color, x, z, life: big ? 1.5 : 1.1, maxLife: big ? 1.5 : 1.1, big });
+    if (this.popups.length > 12) this.popups.shift();
+  }
+
+  /** An emote sits above the player as a chip and hangs around a beat longer. */
+  showEmote(text: string, color: string, x: number, z: number): void {
+    this.popups.push({ text, color, x, z, life: 1.9, maxLife: 1.9, big: false, emote: true });
     if (this.popups.length > 12) this.popups.shift();
   }
 
@@ -52,6 +60,10 @@ export class Hud {
   drawWorldPopups(ctx: CanvasRenderingContext2D, cam: Camera): void {
     for (const p of this.popups) {
       const t = 1 - p.life / p.maxLife;
+      if (p.emote) {
+        this.drawEmoteChip(ctx, cam, p, t);
+        continue;
+      }
       const proj = cam.project(p.x, 6.5 + t * 4.5, p.z);
       if (proj.depth <= 0) continue;
       ctx.save();
@@ -65,6 +77,45 @@ export class Hud {
       ctx.fillText(p.text, proj.x, proj.y);
       ctx.restore();
     }
+  }
+
+  /** A rounded chip on a stalk, so an emote reads as coming from the player. */
+  private drawEmoteChip(ctx: CanvasRenderingContext2D, cam: Camera, p: FeedbackPopup, t: number): void {
+    // Pops up quickly, then drifts a little rather than climbing out of frame.
+    const rise = Math.min(1, t * 6);
+    const proj = cam.project(p.x, 7.6 + rise * 1.5 + t * 0.6, p.z);
+    if (proj.depth <= 0) return;
+    const size = Math.max(11, proj.scale * 0.52);
+    ctx.save();
+    ctx.globalAlpha = Math.min(1, p.life * 3) * (0.35 + rise * 0.65);
+    ctx.font = `900 ${size}px Inter, system-ui, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const padX = size * 0.7;
+    const w = ctx.measureText(p.text).width + padX * 2;
+    const h = size * 1.9;
+    const x = proj.x - w / 2;
+    const y = proj.y - h / 2;
+
+    ctx.fillStyle = 'rgba(8,10,16,0.88)';
+    roundRect(ctx, x, y, w, h, h * 0.35);
+    ctx.fill();
+    ctx.strokeStyle = p.color;
+    ctx.lineWidth = Math.max(1.4, size * 0.11);
+    ctx.stroke();
+
+    // The stalk pointing back down at whoever said it.
+    ctx.beginPath();
+    ctx.moveTo(proj.x - size * 0.3, y + h - 1);
+    ctx.lineTo(proj.x, y + h + size * 0.55);
+    ctx.lineTo(proj.x + size * 0.3, y + h - 1);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(8,10,16,0.88)';
+    ctx.fill();
+
+    ctx.fillStyle = p.color;
+    ctx.fillText(p.text, proj.x, proj.y);
+    ctx.restore();
   }
 
   // ------------------------------------------------------------- score bug

@@ -73,6 +73,9 @@ export interface BodyCustomization {
   muscleDefinition: number; // 0..1
 }
 
+/** In-game emote slots, fired with the 1-6 keys. */
+export const EMOTE_SLOTS = 6;
+
 export interface Loadout {
   jerseyId: string;
   shoesId: string;
@@ -81,7 +84,13 @@ export interface Loadout {
   jumpshotId: string;
   dunkPackageId: string;
   celebrationId: string;
+  /** the emote the store equips on purchase — slot 1's default */
   emoteId: string;
+  /**
+   * The six in-game emote slots, fired with the 1-6 keys. A null slot is empty
+   * and its key does nothing.
+   */
+  emoteSlots: (string | null)[];
   courtId: string;
   /** shown under your name on the walkout */
   titleId: string;

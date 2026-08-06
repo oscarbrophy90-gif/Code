@@ -2,8 +2,13 @@ import {
   CURRENCY_SHORT,
   DUNK_PACKAGE_BY_ID,
   RARITY_COLOR,
+  SHOP_SLOTS,
   STORE_BY_ID,
-  itemsInCategory,
+  catalogueItems,
+  formatCountdown,
+  isPurchasableNow,
+  msUntilShopRefresh,
+  rotatingStock,
   DIFFICULTIES,
   type StoreCategory,
   type StoreItem,
@@ -13,8 +18,12 @@ import { store } from '../../state/store.ts';
 import { audio } from '../../engine/audio.ts';
 import { refresh, type RouteParams } from '../../main.ts';
 import { el, fmt, panel, tabs, toast } from '../dom.ts';
+import { previewItem } from '../preview.ts';
 
-const CATEGORIES: { id: StoreCategory; label: string }[] = [
+type Tab = StoreCategory | 'featured';
+
+const CATEGORIES: { id: Tab; label: string }[] = [
+  { id: 'featured', label: 'Featured' },
   { id: 'title', label: 'Titles' },
   { id: 'jersey', label: 'Jerseys' },
   { id: 'shoes', label: 'Shoes' },
@@ -30,11 +39,11 @@ const CATEGORIES: { id: StoreCategory; label: string }[] = [
   { id: 'court', label: 'Courts' },
 ];
 
-let category: StoreCategory = 'jersey';
+let category: Tab = 'featured';
 
 export function renderStore(params: RouteParams): HTMLElement {
   if (params.category && CATEGORIES.some((c) => c.id === params.category)) {
-    category = params.category as StoreCategory;
+    category = params.category as Tab;
   }
   const player = store.player;
 
@@ -51,25 +60,80 @@ export function renderStore(params: RouteParams): HTMLElement {
       CATEGORIES.map((c) => ({ id: c.id, label: c.label })),
       category,
       (id) => {
-        category = id as StoreCategory;
+        category = id as Tab;
         refresh();
       },
     ),
-    el('div', { class: 'grid cols-4' }, ...itemsInCategory(category).map(renderItem)),
+    category === 'featured'
+      ? featuredShelf()
+      : el('div', { class: 'grid cols-4' }, ...catalogueItems(category).map((i) => renderItem(i))),
   );
 }
 
-function renderItem(item: StoreItem): HTMLElement {
+/**
+ * The rotating shelf. Its contents come from the clock, not from a roll made
+ * when you opened the page, so it is the same shelf on every device for the
+ * whole half hour and you cannot reroll it by refreshing.
+ */
+function featuredShelf(): HTMLElement {
+  const now = Date.now();
+  const stock = rotatingStock(now);
+  const countdown = el('span', { class: 'shop-clock' }, formatCountdown(msUntilShopRefresh(now)));
+
+  // Tick the countdown in place, and rebuild the page when the shelf turns over.
+  const timer = window.setInterval(() => {
+    if (!countdown.isConnected) {
+      window.clearInterval(timer);
+      return;
+    }
+    const left = msUntilShopRefresh(Date.now());
+    countdown.textContent = formatCountdown(left);
+    if (left > SHOP_WINDOW_TICK) return;
+    window.clearInterval(timer);
+    window.setTimeout(refresh, left + 250);
+  }, 1000);
+
+  return el(
+    'div',
+    {},
+    el(
+      'div',
+      { class: 'shop-banner' },
+      el(
+        'div',
+        { style: 'min-width:0' },
+        el('div', { class: 'shop-title' }, `${SHOP_SLOTS} items in stock`),
+        el(
+          'div',
+          { class: 'hint', style: 'margin:2px 0 0' },
+          'The shelf turns over every 30 minutes. Mythic stock only ever appears here, and almost never — if you see pink, it will probably be gone next time you look.',
+        ),
+      ),
+      el('div', { style: 'text-align:right;flex-shrink:0' }, el('div', { class: 'faint', style: 'font-size:10px;font-weight:800' }, 'REFRESHES IN'), countdown),
+    ),
+    el('div', { class: 'grid cols-4' }, ...stock.map((i) => renderItem(i, true))),
+  );
+}
+
+/** Rebuild the page rather than tick once the shelf is within this of turning. */
+const SHOP_WINDOW_TICK = 1200;
+
+function renderItem(item: StoreItem, featured = false): HTMLElement {
   const player = store.player;
   const owned = player.unlocked.includes(item.id);
   const equipped = isEquipped(item);
   const gate = requirementMet(item);
   const affordable = player.currency >= item.price;
+  const inStock = isPurchasableNow(item, Date.now());
 
   const act = () => {
     if (equipped) return;
     if (owned) {
       equip(item);
+      return;
+    }
+    if (!inStock) {
+      toast(`${item.name} is only sold while it is on the featured shelf.`, 'bad');
       return;
     }
     if (!gate.ok) {
@@ -96,17 +160,21 @@ function renderItem(item: StoreItem): HTMLElement {
   };
 
   return el(
-    'button',
+    'div',
     {
-      class: 'item',
+      class: `item ${item.rarity === 'mythic' ? 'mythic' : ''} ${featured ? 'featured' : ''}`,
       style: `--c1:${item.colors[0]};--c2:${item.colors[1]};--rarity:${RARITY_COLOR[item.rarity]}`,
-      onclick: act,
     },
     el('div', { class: 'swatch' }),
     el(
       'div',
       { class: 'body' },
-      el('div', { class: 'rarity-tag' }, item.rarity),
+      el(
+        'div',
+        { class: 'row', style: 'gap:6px;align-items:center' },
+        el('div', { class: 'rarity-tag' }, item.rarity),
+        item.rotationOnly ? el('div', { class: 'rarity-tag', style: 'color:var(--amber)' }, 'rotation only') : null,
+      ),
       el('div', { class: 'iname' }, item.name),
       el('div', { class: 'idesc' }, item.description),
       item.requirement ? el('div', { style: 'font-size:10px;color:var(--amber);font-weight:700' }, item.requirement) : null,
@@ -116,8 +184,22 @@ function renderItem(item: StoreItem): HTMLElement {
         equipped
           ? el('span', { class: 'equipped' }, 'Equipped')
           : owned
-            ? el('span', { class: 'owned' }, 'Owned — tap to equip')
-            : el('span', { style: `color:${affordable && gate.ok ? 'var(--amber)' : 'var(--text-faint)'}` }, item.price === 0 ? 'Reward' : `${fmt(item.price)} ${CURRENCY_SHORT}`),
+            ? el('span', { class: 'owned' }, 'Owned')
+            : el('span', { style: `color:${affordable && gate.ok && inStock ? 'var(--amber)' : 'var(--text-faint)'}` }, item.price === 0 ? 'Reward' : `${fmt(item.price)} ${CURRENCY_SHORT}`),
+      ),
+      // Preview is always available, including for things you cannot afford or
+      // that are not in stock — knowing what it looks like is the point.
+      el(
+        'div',
+        { class: 'row', style: 'gap:6px;margin-top:8px' },
+        el('button', { class: 'btn sm', onclick: () => previewItem(item) }, 'Preview'),
+        equipped
+          ? null
+          : el(
+              'button',
+              { class: `btn sm ${owned ? '' : 'primary'}`, onclick: act },
+              owned ? 'Equip' : 'Buy',
+            ),
       ),
     ),
   );

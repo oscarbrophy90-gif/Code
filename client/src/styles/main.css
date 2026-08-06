@@ -1981,3 +1981,115 @@ input[type='text']:focus {
   background: #080b12;
   display: block;
 }
+
+/* ---------------------------------------------------------------- emote rack */
+.emote-rack {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+}
+.emote-slot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel);
+  color: var(--text-faint);
+  cursor: pointer;
+  text-align: left;
+  min-width: 0;
+}
+.emote-slot:hover { border-color: var(--text-faint); }
+.emote-slot.on { color: var(--text); border-color: var(--c1); }
+.emote-key {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 900;
+  background: #1b2030;
+  color: var(--text-faint);
+}
+.emote-slot.on .emote-key { background: var(--c1); color: #0b0e14; }
+.emote-name {
+  font-size: 12px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------------- featured shop */
+.shop-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: linear-gradient(90deg, rgba(255, 77, 141, 0.09), transparent 60%);
+}
+.shop-title { font-size: 13px; font-weight: 900; }
+.shop-clock {
+  font-size: 19px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  color: var(--amber);
+}
+.item.featured { border-color: color-mix(in srgb, var(--rarity) 45%, var(--line)); }
+.item.mythic {
+  border-color: #ff4d8d;
+  box-shadow: 0 0 0 1px rgba(255, 77, 141, 0.35), 0 0 22px rgba(255, 77, 141, 0.22);
+}
+.item.mythic .swatch { background: linear-gradient(135deg, var(--c1), var(--c2)); }
+
+/* ------------------------------------------------------------------ previews */
+.preview-dialog { max-width: 470px; }
+.preview-head {
+  border-left: 3px solid var(--rarity);
+  padding-left: 10px;
+  margin-bottom: 14px;
+}
+.preview-body {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 12px;
+  background: #0b0e14;
+}
+.preview-portrait {
+  width: 100%;
+  max-width: 190px;
+  aspect-ratio: 1;
+  border-radius: 4px;
+  background: #0e1220;
+}
+.preview-court {
+  width: 100%;
+  aspect-ratio: 2 / 1;
+  border-radius: 4px;
+  display: block;
+}
+.preview-meter {
+  height: 12px;
+  border-radius: 6px;
+  background: #232a3a;
+  margin-top: 5px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-width: 24%;
+}
+.preview-green {
+  display: block;
+  height: 100%;
+  border-radius: 6px;
+  background: var(--green);
+  min-width: 4px;
+}

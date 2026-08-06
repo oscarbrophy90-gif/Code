@@ -20,6 +20,7 @@ import {
   type MyPlayer,
   type Profile,
   type SimPlayerConfig,
+  EMOTE_SLOTS,
 } from '@hoops/shared';
 
 const STORAGE_KEY = 'hoops-elite.profile.v1';
@@ -109,6 +110,7 @@ export function createPlayer(slot: number, name: string, build: BuildSpec): MyPl
       dunkPackageId: 'basic-slam',
       celebrationId: 'celeb-nod',
       emoteId: 'emote-wave',
+      emoteSlots: ['emote-wave', 'emote-clap', 'emote-shrug', 'emote-point', null, null],
       courtId: 'court-standard',
       titleId: 'title-rookie',
       shotMeterStyle: 'arcBar',
@@ -191,6 +193,16 @@ class Store {
       if (!p.loadout.titleId) p.loadout.titleId = 'title-rookie';
       for (const t of DEFAULT_TITLES) if (!p.unlocked.includes(t)) p.unlocked.push(t);
       if (!p.drillBests) p.drillBests = {};
+      // Six emote slots replaced the single equipped emote. An older save keeps
+      // whatever it had in slot one and fills the rest from the free emotes it
+      // already owns, so the 1-6 keys do something the first time you press them.
+      if (!Array.isArray(p.loadout.emoteSlots)) {
+        const owned = p.unlocked.filter((id) => id.startsWith('emote-'));
+        const seeded = [p.loadout.emoteId, ...owned.filter((id) => id !== p.loadout.emoteId)];
+        p.loadout.emoteSlots = Array.from({ length: EMOTE_SLOTS }, (_, i) => seeded[i] ?? null);
+      }
+      // Length is fixed at six even if a save predates one of them.
+      p.loadout.emoteSlots = Array.from({ length: EMOTE_SLOTS }, (_, i) => p.loadout.emoteSlots[i] ?? null);
       // Saves made before Speed With Ball existed have no value for it. Seed it
       // from Ball Handle so an old build plays like it always did rather than
       // suddenly moving like it is stuck in mud.

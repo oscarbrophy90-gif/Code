@@ -48,6 +48,7 @@ interface Row {
 const MOVEMENT: Row[] = [
   { keys: ['W', 'A', 'S', 'D'], pad: 'Left stick', touch: 'Left thumbstick', label: 'Move', action: 'Drive your player around the floor. Arrow keys work too.' },
   { keys: ['Shift'], pad: 'RT / R2', touch: 'SPRINT', label: 'Sprint', action: 'Burst. Drains stamina fast, and a tired player has a smaller green window.' },
+  { keys: ['1', '2', '3', '4', '5', '6'], pad: 'D-pad', touch: 'Emote button', label: 'Emotes', action: 'Fire the six emotes you have on. You choose which emote sits on which key in the Locker, under Emotes.' },
   { keys: ['Esc'], pad: 'Start', touch: 'Pause button, top right', label: 'Pause', action: 'Pause, change your shot meter, or quit out.' },
 ];
 
