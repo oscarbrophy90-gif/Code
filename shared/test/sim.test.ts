@@ -27,6 +27,7 @@ import { packInput, unpackInput } from '../src/protocol.ts';
 import { emptyInput, emptyStats, type SimEvent } from '../src/sim/state.ts';
 import { ATTRIBUTE_KEYS, DIFFICULTIES, POSITIONS, type BuildSpec, type CareerStats, type Difficulty } from '../src/types.ts';
 import { shotAttribute } from '../src/shooting.ts';
+import { COURT, distanceToRim, isBeyondArc } from '../src/sim/court.ts';
 
 /** A zeroed career, so a title test starts from a player who has done nothing. */
 function emptyCareerStatsForTest(): CareerStats {
@@ -423,7 +424,11 @@ function ladderRun(d: Difficulty, games: number) {
 test('all six difficulties exist and get harder in order', () => {
   assert.deepEqual([...DIFFICULTIES], ['rookie', 'semiPro', 'pro', 'allStar', 'superstar', 'hallOfFame']);
 
-  const results = DIFFICULTIES.map((d) => ({ d, ...ladderRun(d, 8) }));
+  // 24 games each, not 8. At 8 the win rate can only land on multiples of
+  // 0.125, so a single lucky game moves a tier by more than the 0.13 tolerance
+  // below and the ladder assertion fails on noise rather than on a real
+  // regression. 24 games costs a few seconds and makes the curve stable.
+  const results = DIFFICULTIES.map((d) => ({ d, ...ladderRun(d, 24) }));
 
   // A constant-skill reference opponent must win less as difficulty rises.
   for (let i = 1; i < results.length; i++) {
@@ -1251,5 +1256,43 @@ test('a brand new build can go up for a dunk', () => {
       launched === 'dunk' || launched === 'contactDunk' || launched === 'layup',
       `${position}: expected a dunk or at worst a layup, got ${launched}`,
     );
+  }
+});
+
+test('standing at the corner three clears the ball, and it stays cleared in the paint', () => {
+  // The bug: the clear used a radial 23.75ft from the rim, but the painted line
+  // squares off at 22ft in the corners. Standing at the corner three you are
+  // behind the arc — the shot is worth two — yet you were only 22.2ft out, so
+  // the clear never satisfied and the game refused to let you shoot. Driving
+  // back into the paint then looked like the prompt "coming back".
+  const state = createMatch(
+    generateOpponent(60, 5),
+    generateOpponent(60, 6),
+    defaultMatchConfig({ manualCheck: false, shotClock: 999 }),
+    9091,
+  );
+  for (let i = 0; i < 200; i++) stepMatch(state, [emptyInput(), emptyInput()], SIM_DT);
+
+  const p = state.players[0];
+  state.ball.owner = 0;
+  state.ball.state = 'held';
+  state.needsClear = true;
+  p.state = 'dribble';
+
+  // The deep corner: behind the line by the rulebook, inside 23.75ft radially.
+  p.x = COURT.cornerThreeX + 1;
+  p.z = 8;
+  assert.ok(isBeyondArc(p.x, p.z), 'the corner spot is behind the arc');
+  assert.ok(distanceToRim(p.x, p.z) < COURT.threeRadius, 'and it is inside the radius, which is the whole bug');
+
+  stepMatch(state, [emptyInput(), emptyInput()], SIM_DT);
+  assert.equal(state.needsClear, false, 'standing behind the corner line must clear the ball');
+
+  // Now drive it back to the rim. The flag must not re-arm.
+  const drive = { ...emptyInput(), mz: -1, mx: -1 };
+  for (let i = 0; i < 240; i++) {
+    stepMatch(state, [drive, emptyInput()], SIM_DT);
+    if (state.ball.owner !== 0) break;
+    assert.equal(state.needsClear, false, 'the clear must not come back while you keep the ball');
   }
 });

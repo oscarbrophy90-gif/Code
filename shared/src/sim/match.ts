@@ -694,8 +694,13 @@ function applyMovement(state: MatchState, p: SimPlayer, input: PlayerInput, dt: 
   // Passive trickle so long possessions do not become unplayable.
   if (!wantsSprint) p.stamina = clamp01(p.stamina + 0.02 * dt / drain);
 
-  // Clear check.
-  if (state.needsClear && state.ball.owner === p.side && distanceToRim(p.x, p.z) >= COURT.clearRadius) {
+  // Clear check. This uses exactly the same test as the three-point line, so
+  // anywhere the game already treats you as a three-point shooter counts as
+  // cleared. It used to be a radial 23.75ft from the rim, which does not match
+  // the painted line in the corners: standing at the corner three you were
+  // visibly behind the arc but 22ft from the rim, so the game kept telling you
+  // to clear and refused to let you shoot.
+  if (state.needsClear && state.ball.owner === p.side && isBeyondArc(p.x, p.z)) {
     state.needsClear = false;
     state.events.push({ type: 'clear', side: p.side });
   }

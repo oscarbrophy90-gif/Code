@@ -479,7 +479,7 @@ export class Hud {
       ctx.fillText('CLEAR THE BALL', w / 2, h - 74);
       ctx.font = '700 11px Inter, system-ui, sans-serif';
       ctx.fillStyle = '#97a2b8';
-      ctx.fillText('Take it back behind the arc before you can score', w / 2, h - 58);
+      ctx.fillText('Take it back behind the three-point line — the corners count', w / 2, h - 58);
     }
 
     if (state.phase === 'freeThrow' && state.freeThrow) {
