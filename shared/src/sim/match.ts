@@ -1080,11 +1080,22 @@ function releaseShot(state: MatchState, side: Side, rng: Rng): void {
     shotType: p.shotType,
   });
 
-  // A greened dunk earns the cutaway. A poster is one taken at a defender who
-  // left his feet at you and hit anyway.
+  // A greened dunk earns the cutaway. A poster is one taken over a body.
   const isDunk = p.shotType === 'dunk' || p.shotType === 'contactDunk';
   if (isDunk && result.made && isAutomatic(result.grade)) {
-    const posterized = p.shotType === 'contactDunk' || (profile.heavilyContested && d.y > 0.3);
+    // What makes it a poster is that somebody was actually in the way — close,
+    // and between you and the rim when you went up. It used to also require the
+    // defender to have left his feet, so a man standing his ground under the
+    // basket got you the ordinary animation: measured at 0% posters against a
+    // defender planted directly in your path. Standing there and wearing it is
+    // the most posterisable thing in basketball.
+    const dx = d.x - p.shotFromX;
+    const dz = d.z - p.shotFromZ;
+    const defDist = Math.hypot(dx, dz);
+    const toRim = normalize(COURT.rimX - p.shotFromX, COURT.rimZ - p.shotFromZ);
+    const inFront = defDist > 0.01 ? (toRim.x * dx + toRim.z * dz) / defDist : 1;
+    const inTheWay = defDist < 6.5 && inFront > 0.2;
+    const posterized = p.shotType === 'contactDunk' || inTheWay || (profile.heavilyContested && d.y > 0.3);
     if (posterized) {
       state.stats[side].contactDunks++;
       awardBadgeProgress(p.cfg.badges, p.cfg.attrs, 'contactDunk', 2);
@@ -1663,10 +1674,15 @@ function tryCollect(state: MatchState, rng: Rng): void {
   if (offensive) awardBadgeProgress(p.cfg.badges, p.cfg.attrs, 'putback', 1);
 
   state.possession = winner;
-  // Streetball: any board has to be taken back past the arc. Practice modes
-  // have no scoring rules to protect, so they never ask for a clear — that was
-  // the stray CLEAR THE BALL prompt in the gym after a fumble.
-  state.needsClear = !state.config.instantInbound;
+  // A clear is owed on a change of possession, and an offensive rebound is not
+  // one — it is the same possession continuing. Asking for a clear on your own
+  // board was 35% of all clears, almost all of them taken about three feet from
+  // the rim: you cleared, worked into the mid range, missed, grabbed your own
+  // miss, and the game told you to go back out again.
+  //
+  // Practice modes have no scoring rules to protect, so they never ask for a
+  // clear — that was the stray CLEAR THE BALL prompt in the gym after a fumble.
+  state.needsClear = !state.config.instantInbound && !offensive;
   state.shotClock = state.config.shotClock;
 }
 

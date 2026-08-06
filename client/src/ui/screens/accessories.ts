@@ -145,6 +145,31 @@ function dunkPreview(): HTMLElement {
   const cfg = store.simConfig();
   const start = performance.now();
   let raf = 0;
+  // Two things play in a game off the same package, so both are previewable
+  // here: the clean flush, and the one with a defender under the rim wearing it.
+  let posterized = false;
+
+  // Only the jersey colours are read for the man getting dunked on, so a
+  // stand-in in contrasting kit is all the preview needs.
+  const victim = { ...cfg, name: 'Defender', jerseyPrimary: '#8c93a6', jerseySecondary: '#41485c' };
+
+  const hint = el(
+    'div',
+    { class: 'hint', style: 'margin-top:6px' },
+    'Your equipped package, on a loop. This is what plays when you green a dunk.',
+  );
+
+  const setMode = (poster: boolean) => {
+    posterized = poster;
+    normalBtn.classList.toggle('on', !poster);
+    posterBtn.classList.toggle('on', poster);
+    hint.textContent = poster
+      ? 'The poster finish. This is what plays when you green a dunk with a defender in front of you.'
+      : 'Your equipped package, on a loop. This is what plays when you green a dunk on an open rim.';
+  };
+
+  const normalBtn = el('button', { class: 'btn sm on', onclick: () => setMode(false) }, 'Normal');
+  const posterBtn = el('button', { class: 'btn sm', onclick: () => setMode(true) }, 'Poster');
 
   const frame = (now: number) => {
     if (!canvas.isConnected) {
@@ -157,9 +182,9 @@ function dunkPreview(): HTMLElement {
     if (ctx) {
       drawDunkFrame(ctx, canvas, {
         dunker: cfg,
-        victim: null,
+        victim: posterized ? victim : null,
         packageId: store.player.loadout.dunkPackageId,
-        posterized: false,
+        posterized,
       }, Math.min(1, t));
     }
     raf = requestAnimationFrame(frame);
@@ -170,7 +195,8 @@ function dunkPreview(): HTMLElement {
     'div',
     { style: 'margin-bottom:10px' },
     canvas,
-    el('div', { class: 'hint', style: 'margin-top:6px' }, 'Your equipped package, on a loop. This is what plays when you green a dunk.'),
+    el('div', { style: 'display:flex;gap:6px;margin-top:8px' }, normalBtn, posterBtn),
+    hint,
   );
 }
 

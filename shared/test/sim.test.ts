@@ -1383,3 +1383,114 @@ test('the stepback steps back, then rises into a shot you time on its own key', 
     assert.notEqual(attempt(hold, 'shoot').shotType, 'stepback', `space must not fire a stepback (held ${hold})`);
   }
 });
+
+test('an offensive rebound does not owe a clear, a defensive one does', () => {
+  // The bug: every board armed the clear, including your own. You cleared,
+  // worked into the mid range, missed, grabbed your own miss three feet from
+  // the rim and the game told you to take it back out again — 35% of all
+  // clears in a game were this. An offensive board is the same possession
+  // continuing, so nothing is owed.
+  const config = defaultMatchConfig();
+  let offensiveBoards = 0;
+  let defensiveBoards = 0;
+
+  for (const seed of [3665, 4398, 5131, 5864]) {
+    const state = createMatch(generateOpponent(78, seed), generateOpponent(78, seed + 1), config, seed * 5 + 2);
+    const ai0 = new AiController(0, 'pro', 1, false);
+    const ai1 = new AiController(1, 'pro', 2, false);
+    let frames = 0;
+
+    while (state.phase !== 'over' && frames < 120 * 60 * 8) {
+      stepMatch(state, [ai0.update(state, SIM_DT), ai1.update(state, SIM_DT)], SIM_DT);
+      for (const e of drainEvents(state)) {
+        if (e.type !== 'rebound') continue;
+        if (e.offensive) {
+          offensiveBoards++;
+          assert.equal(state.needsClear, false, 'your own board is the same possession — no clear owed');
+        } else {
+          defensiveBoards++;
+          assert.equal(state.needsClear, true, 'a defensive board is a change of possession — clear it');
+        }
+      }
+      frames++;
+    }
+  }
+
+  assert.ok(offensiveBoards > 0, 'expected some offensive rebounds to check');
+  assert.ok(defensiveBoards > 0, 'expected some defensive rebounds to check');
+});
+
+test('a dunk over a defender in your way is a poster, an open one is not', () => {
+  // The bug: posterising also required the defender to have left his feet, so a
+  // man standing his ground under the rim got you the ordinary animation.
+  // Measured 0% posters against a defender planted directly in the path.
+  function sweep(park: 'front' | 'away' | 'behind', defenderJumps: boolean) {
+    let highlights = 0;
+    let posters = 0;
+    for (let seed = 0; seed < 40; seed++) {
+      const a = generateOpponent(88, seed * 7 + 1);
+      a.attrs.dunk = 95;
+      a.attrs.vertical = 92;
+      a.attrs.speed = 90;
+      a.attrs.acceleration = 90;
+      const state = createMatch(
+        a,
+        generateOpponent(80, seed * 7 + 2),
+        defaultMatchConfig({ manualCheck: false, instantInbound: true, shotClock: 999 }),
+        seed * 13 + 5,
+      );
+      for (let i = 0; i < 200; i++) stepMatch(state, [emptyInput(), emptyInput()], SIM_DT);
+      const p = state.players[0];
+      const d = state.players[1];
+      p.x = 0;
+      p.z = 15;
+      p.state = 'dribble';
+      p.stamina = 1;
+      state.ball.owner = 0;
+      state.ball.state = 'held';
+      state.needsClear = false;
+
+      const drive = { ...emptyInput(), mz: -1, sprint: true };
+      const release = 26 + (seed % 22);
+      for (let i = 0; i < 160; i++) {
+        // Hold the defender where the case under test needs him.
+        if (park === 'front') {
+          d.x = p.x * 0.5;
+          d.z = Math.max(6.5, p.z - 3);
+        } else if (park === 'away') {
+          d.x = 20;
+          d.z = 28;
+        } else {
+          d.x = p.x;
+          d.z = p.z + 3;
+        }
+        d.vx = 0;
+        d.vz = 0;
+        d.handUp = true;
+        d.y = defenderJumps ? 1.6 : 0;
+        stepMatch(state, [i < release ? { ...drive, shoot: true } : drive, emptyInput()], SIM_DT);
+        for (const e of drainEvents(state)) {
+          if (e.type !== 'dunkHighlight') continue;
+          highlights++;
+          if (e.posterized) posters++;
+        }
+      }
+    }
+    return { highlights, posters };
+  }
+
+  const standing = sweep('front', false);
+  assert.ok(standing.highlights > 0, 'expected dunks to land');
+  assert.equal(standing.posters, standing.highlights, 'a body in your way is a poster even if he never jumped');
+
+  const jumping = sweep('front', true);
+  assert.equal(jumping.posters, jumping.highlights, 'a defender leaving his feet at you is still a poster');
+
+  // And it stays special: an open rim is the ordinary flush.
+  const open = sweep('away', false);
+  assert.ok(open.highlights > 0, 'expected open dunks to land');
+  assert.equal(open.posters, 0, 'nobody near you is not a poster');
+
+  const trailing = sweep('behind', false);
+  assert.equal(trailing.posters, 0, 'a defender behind you is not in your way');
+});
