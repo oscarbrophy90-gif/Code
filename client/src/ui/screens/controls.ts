@@ -263,6 +263,7 @@ const MOVE_NOTE: Record<string, string> = {
   euro: 'Two steps and you have to go up with it — carrying on after the second step is a travel, so it plants into the layup.',
   betweenLegs: 'Alternates hands — press it again and the ball goes back the other way.',
   hesitation: 'Sells the jumper. A CPU that bites on pump fakes bites on this.',
+  stepback: 'Shot on its own key: hold K to step back, keep holding to raise the meter, release to shoot. Space does not fire a stepback.',
 };
 
 /** A move described by what it does to you and to the defender. */

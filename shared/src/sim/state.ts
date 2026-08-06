@@ -12,6 +12,13 @@ export interface PlayerInput {
   sprint: boolean;
   /** held while the shot meter is running */
   shoot: boolean;
+  /**
+   * Held on the dribble move's own key. A stepback is thrown and timed on one
+   * button: press to step back, keep holding to raise the meter, let go to
+   * shoot. Shoot alone never fires a stepback, so the two are never fighting
+   * over the same press.
+   */
+  moveShoot: boolean;
   /** held to drive to the rim / finish */
   drive: boolean;
   /** edge-triggered dribble move request */
@@ -33,6 +40,7 @@ export function emptyInput(): PlayerInput {
     mz: 0,
     sprint: false,
     shoot: false,
+    moveShoot: false,
     drive: false,
     move: null,
     moveDirX: 0,
@@ -116,6 +124,8 @@ export interface SimPlayer {
   shotFromZ: number;
   shotIsThree: boolean;
   shotDrift: number;
+  /** this shot's meter is held on the move key rather than on shoot */
+  shotOnMoveKey: boolean;
   handUp: boolean;
   contestTimer: number;
   stealCooldown: number;

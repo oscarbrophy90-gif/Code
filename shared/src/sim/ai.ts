@@ -188,6 +188,9 @@ export class AiController {
     if (hasBall) this.offense(state, input, dt);
     else if (state.ball.state === 'loose' || state.ball.state === 'shot') this.chaseBall(state, input);
     else this.defense(state, input, dt);
+    // A bot has one shoot decision, not a hand on two keys, so the stepback
+    // rides the same intent it already computed.
+    input.moveShoot = input.shoot;
     return input;
   }
 

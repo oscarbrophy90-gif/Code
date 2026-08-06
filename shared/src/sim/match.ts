@@ -110,6 +110,7 @@ function makePlayer(side: Side, cfg: SimPlayerConfig): SimPlayer {
     shotFromZ: 0,
     shotIsThree: false,
     shotDrift: 0,
+    shotOnMoveKey: false,
     handUp: false,
     contestTimer: 0,
     stealCooldown: 0,
@@ -428,8 +429,10 @@ function updatePlayer(state: MatchState, side: Side, input: PlayerInput, dt: num
   if (p.state === 'shooting') {
     p.shotElapsed += dt;
     p.shotProfile = buildShotProfile(state, side, p.shotType);
+    // A stepback is timed on the key that threw it, everything else on shoot.
+    const holding = p.shotOnMoveKey ? input.moveShoot : input.shoot;
     const forced = p.shotElapsed >= p.shotProfile.meterDuration * 1.4;
-    if (!input.shoot || forced) {
+    if (!holding || forced) {
       releaseShot(state, side, rng);
     }
     applyMovement(state, p, input, dt, 0.28);
@@ -471,8 +474,15 @@ function updatePlayer(state: MatchState, side: Side, input: PlayerInput, dt: num
       p.vz += away.z * def.retreat * shape * dt * 9;
     }
     const canCancel = progress >= def.cancelPoint;
-    if (canCancel && input.shoot) {
+    // The stepback is the one move you shoot with its own key. Pressing shoot
+    // mid-stepback used to both start and end the meter in the same breath,
+    // which is why it fired the instant it became legal and always graded very
+    // early. Now you hold the stepback key: the meter starts when you clear the
+    // step and runs for as long as you keep holding.
+    const onMoveKey = p.moveId === 'stepback';
+    if (canCancel && (onMoveKey ? input.moveShoot : input.shoot)) {
       startShot(state, side, def.followUp === 'euroLayup' ? 'euroLayup' : (def.followUp as ShotType) ?? 'jumper');
+      p.shotOnMoveKey = onMoveKey;
       return;
     }
     if (canCancel && input.drive && distanceToRim(p.x, p.z) < 12) {
@@ -997,6 +1007,7 @@ function startShot(state: MatchState, side: Side, shotType: ShotType): void {
   p.shotFromZ = p.z;
   p.shotIsThree = isBeyondArc(p.x, p.z);
   p.shotDrift = Math.hypot(p.vx, p.vz);
+  p.shotOnMoveKey = false;
   p.shotProfile = buildShotProfile(state, side, shotType);
   const isFinish = shotType === 'layup' || shotType === 'floater' || shotType === 'euroLayup';
   p.vy = Math.sqrt(2 * GRAVITY * jumpHeight(p) * (isFinish ? 0.72 : 0.5));

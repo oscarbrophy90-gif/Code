@@ -550,7 +550,7 @@ function drawFooter(
   if (!touch) {
     ctx.textAlign = 'left';
     ctx.fillStyle = 'rgba(150,162,184,0.42)';
-    ctx.fillText('SPACE shoot / contest · E drive · F steal · J L crossover · K stepback · ESC pause', 16, h - 12);
+    ctx.fillText('SPACE shoot / contest · E drive · F steal · J L crossover · HOLD K stepback jumper · ESC pause', 16, h - 12);
   }
   ctx.restore();
 }

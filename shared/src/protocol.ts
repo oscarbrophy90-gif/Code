@@ -81,6 +81,7 @@ export const INPUT_FLAGS = {
   steal: 1 << 3,
   contest: 1 << 4,
   fake: 1 << 5,
+  moveShoot: 1 << 6,
 } as const;
 
 const MOVE_ORDER = [
@@ -109,6 +110,7 @@ export function packInput(input: PlayerInput): PackedInput {
   if (input.steal) f |= INPUT_FLAGS.steal;
   if (input.contest) f |= INPUT_FLAGS.contest;
   if (input.fake) f |= INPUT_FLAGS.fake;
+  if (input.moveShoot) f |= INPUT_FLAGS.moveShoot;
   const m = input.move ? MOVE_ORDER.indexOf(input.move as (typeof MOVE_ORDER)[number]) + 1 : 0;
   return { f, mx: q(input.mx), mz: q(input.mz), dx: q(input.moveDirX), dz: q(input.moveDirZ), m };
 }
@@ -121,6 +123,7 @@ export function unpackInput(p: PackedInput): PlayerInput {
     moveDirZ: dq(p.dz),
     sprint: (p.f & INPUT_FLAGS.sprint) !== 0,
     shoot: (p.f & INPUT_FLAGS.shoot) !== 0,
+    moveShoot: (p.f & INPUT_FLAGS.moveShoot) !== 0,
     drive: (p.f & INPUT_FLAGS.drive) !== 0,
     steal: (p.f & INPUT_FLAGS.steal) !== 0,
     contest: (p.f & INPUT_FLAGS.contest) !== 0,

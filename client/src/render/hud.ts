@@ -137,6 +137,10 @@ export class Hud {
       const p = state.players[side];
       this.lastMeter = { profile: meter.profile, progress: meter.progress, x: p.x, z: p.z, y: p.y };
       this.paintMeter(ctx, cam, style, meter.progress, meter.profile, this.lastMeter, w, h, null);
+      // A stepback is held on K, not on shoot, so say which button is holding
+      // this particular meter — otherwise the reflex is to stab space and the
+      // shot goes off in your hand.
+      if (p.shotOnMoveKey) this.holdHint(ctx, cam, p.x, p.z, p.y);
       return;
     }
 
@@ -190,6 +194,24 @@ export class Hud {
       excFrom: (profile.idealPoint - profile.excellentHalfWidth) / span,
       excTo: (profile.idealPoint + profile.excellentHalfWidth) / span,
     };
+  }
+
+  /** "HOLD K" over the shooter while the stepback meter is running. */
+  private holdHint(ctx: CanvasRenderingContext2D, cam: Camera, x: number, z: number, y: number): void {
+    const anchor = cam.project(x, y + 10.6, z);
+    if (anchor.depth <= 0) return;
+    ctx.save();
+    ctx.font = '800 12px system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const label = this.touch ? 'HOLD SHOOT — RELEASE TO FIRE' : 'HOLD K — RELEASE TO SHOOT';
+    const pad = 7;
+    const tw = ctx.measureText(label).width;
+    ctx.fillStyle = 'rgba(8,10,14,0.72)';
+    ctx.fillRect(anchor.x - tw / 2 - pad, anchor.y - 10, tw + pad * 2, 20);
+    ctx.fillStyle = '#f2f4f8';
+    ctx.fillText(label, anchor.x, anchor.y);
+    ctx.restore();
   }
 
   private arcMeter(

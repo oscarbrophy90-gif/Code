@@ -1296,3 +1296,70 @@ test('standing at the corner three clears the ball, and it stays cleared in the 
     assert.equal(state.needsClear, false, 'the clear must not come back while you keep the ball');
   }
 });
+
+test('the stepback is thrown and timed on its own key, and shoot never fires one', () => {
+  // The bug: the stepback cancelled into its jumper on the shoot button, so the
+  // same press that started the meter also ended it. It fired the instant the
+  // cancel became legal and always graded very early, with nothing the player
+  // could do about it. Now K throws the step and holds the meter.
+  function attempt(holdFrames: number, key: 'moveShoot' | 'shoot') {
+    const state = createMatch(
+      generateOpponent(75, 3),
+      generateOpponent(75, 4),
+      defaultMatchConfig({ manualCheck: false, instantInbound: true, shotClock: 999 }),
+      777,
+    );
+    for (let i = 0; i < 200; i++) stepMatch(state, [emptyInput(), emptyInput()], SIM_DT);
+    const p = state.players[0];
+    p.x = 4;
+    p.z = 22;
+    p.state = 'dribble';
+    p.stamina = 1;
+    p.moveCooldown = 0;
+    state.ball.owner = 0;
+    state.ball.state = 'held';
+    state.needsClear = false;
+
+    for (let i = 0; i < 400; i++) {
+      const held = i < holdFrames;
+      const input = {
+        ...emptyInput(),
+        move: i === 0 ? ('stepback' as const) : null,
+        moveDirX: 0,
+        moveDirZ: 1,
+        [key]: held,
+      };
+      stepMatch(state, [input, emptyInput()], SIM_DT);
+      for (const e of drainEvents(state)) {
+        if (e.type === 'shotRelease') return { shotType: e.shotType, grade: e.grade, error: e.timingError };
+      }
+    }
+    return null;
+  }
+
+  // Holding longer walks the release through the meter instead of pinning it at
+  // the front, and somewhere in there is a green.
+  const errors: number[] = [];
+  let greens = 0;
+  for (let hold = 20; hold <= 100; hold += 2) {
+    const r = attempt(hold, 'moveShoot');
+    assert.ok(r, `holding K for ${hold} frames should launch a stepback`);
+    assert.equal(r.shotType, 'stepback');
+    errors.push(r.error);
+    if (r.grade === 'green') greens++;
+  }
+  for (let i = 1; i < errors.length; i++) {
+    assert.ok(errors[i] > errors[i - 1], 'a longer hold must always release later on the meter');
+  }
+  assert.ok(errors[0] < -0.5, 'a short hold is very early');
+  assert.ok(errors[errors.length - 1] > 0.1, 'an over-long hold is late');
+  assert.ok(greens > 0, 'there is a green window you can actually hit');
+
+  // Shoot on its own must never produce a stepback. It can still give you an
+  // ordinary pull-up once the step has finished — that is space shooting
+  // normally, which is the point.
+  for (const hold of [30, 60, 90, 140]) {
+    const r = attempt(hold, 'shoot');
+    assert.notEqual(r?.shotType, 'stepback', `space must not fire a stepback (held ${hold})`);
+  }
+});

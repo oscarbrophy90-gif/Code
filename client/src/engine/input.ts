@@ -39,7 +39,7 @@ export const CONTROL_SHEET: ControlBinding[] = [
   { keys: ['U'], label: 'Behind the Back', action: 'Wide escape dribble' },
   { keys: ['O'], label: 'Spin', action: 'Spin off the defender' },
   { keys: ['I'], label: 'Hesitation', action: 'Freeze them, then burst' },
-  { keys: ['K'], label: 'Stepback', action: 'Create space, cancels into a jumper' },
+  { keys: ['K'], label: 'Stepback', action: 'Hold K: step back, keep holding to raise the meter, release to shoot' },
   { keys: ['M'], label: 'Snatch Back', action: 'Hard retreat into a shot' },
   { keys: ['Y'], label: 'Hop Jumper', action: 'Lateral hop into a shot' },
   { keys: ['N'], label: 'Eurostep', action: 'Two-step finish around a defender' },
@@ -144,6 +144,9 @@ export class InputManager {
     input.sprint = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight');
     input.shoot = this.keys.has('Space');
     input.contest = this.keys.has('Space');
+    // K throws the stepback and then times it: hold to run the meter, release
+    // to shoot. Space never fires a stepback.
+    input.moveShoot = this.keys.has('KeyK');
     input.drive = this.keys.has('KeyE');
     input.steal = this.pressedThisFrame.has('KeyF');
     input.fake = this.pressedThisFrame.has('KeyR');
@@ -167,6 +170,9 @@ export class InputManager {
     input.sprint = input.sprint || t.sprint;
     input.shoot = input.shoot || t.shoot;
     input.contest = input.contest || t.shoot;
+    // A touchscreen has no second button to hold, so SHOOT keeps timing the
+    // stepback there exactly as it always has.
+    input.moveShoot = input.moveShoot || t.shoot;
     input.drive = input.drive || t.drive;
     input.steal = input.steal || t.steal;
     input.fake = input.fake || t.fake;
@@ -217,6 +223,7 @@ export class InputManager {
     if (btn(0)) {
       input.shoot = true; // A / Cross
       input.contest = true;
+      input.moveShoot = true; // no spare face button, so A times the stepback
     }
     if (btn(1)) input.drive = true; // B / Circle
     if (rising(2)) input.steal = true; // X / Square
