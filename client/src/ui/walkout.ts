@@ -11,7 +11,7 @@ import {
 } from '@hoops/shared';
 
 import { audio } from '../engine/audio.ts';
-import { el } from './dom.ts';
+import { captureSceneKeys, el } from './dom.ts';
 
 export interface WalkoutOptions {
   player: SimPlayerConfig;
@@ -41,16 +41,17 @@ export function playWalkout(opts: WalkoutOptions): Promise<void> {
       if (done) return;
       done = true;
       for (const t of timers) window.clearTimeout(t);
-      window.removeEventListener('keydown', onKey);
+      releaseKeys();
       stage.classList.add('out');
       window.setTimeout(() => {
         stage.remove();
         resolve();
       }, 260);
     };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' || e.key === ' ' || e.key === 'Enter') finish();
-    };
+    const releaseKeys = captureSceneKeys(
+      () => finish(),
+      (e) => e.key === 'Escape' || e.key === ' ' || e.key === 'Enter',
+    );
     const at = (ms: number, fn: () => void) => timers.push(window.setTimeout(fn, ms));
 
     // ------------------------------------------------------------ furniture
@@ -69,7 +70,6 @@ export function playWalkout(opts: WalkoutOptions): Promise<void> {
     stage.addEventListener('click', (e) => {
       if (e.target === stage || e.target === body) finish();
     });
-    window.addEventListener('keydown', onKey);
     document.body.appendChild(stage);
 
     // -------------------------------------------------------------- the beats

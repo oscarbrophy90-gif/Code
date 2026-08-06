@@ -1,6 +1,6 @@
 import { DUNK_PACKAGE_BY_ID, type SimPlayerConfig } from '@hoops/shared';
 
-import { el } from './dom.ts';
+import { captureSceneKeys, el } from './dom.ts';
 
 export interface DunkSceneOptions {
   dunker: SimPlayerConfig;
@@ -48,16 +48,15 @@ export function playDunkScene(host: HTMLElement, opts: DunkSceneOptions): Promis
       if (done) return;
       done = true;
       cancelAnimationFrame(raf);
-      window.removeEventListener('keydown', onKey);
+      releaseKeys();
       scene.classList.add('out');
       window.setTimeout(() => {
         scene.remove();
         resolve();
       }, 200);
     };
-    const onKey = () => finish();
+    const releaseKeys = captureSceneKeys(() => finish());
     scene.addEventListener('click', finish);
-    window.addEventListener('keydown', onKey);
     host.appendChild(scene);
 
     const ctx = canvas.getContext('2d');

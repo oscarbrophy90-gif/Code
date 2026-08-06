@@ -49,6 +49,9 @@ export interface StartMatchOptions {
   drill?: DrillDef | null;
 }
 
+/** True while a walkout is on screen, so a second one can never stack on it. */
+let walkoutUp = false;
+
 export function startMatch(opts: StartMatchOptions): void {
   audio.unlock();
   // Every game opens with the walkout. Practice and drills are not games, so
@@ -57,13 +60,21 @@ export function startMatch(opts: StartMatchOptions): void {
     launchMatch(opts);
     return;
   }
+  // Belt and braces on top of the cutscene swallowing its own keys: whatever
+  // manages to fire a second start while the walkout is playing gets ignored,
+  // so skipping a scene can never leave you looking at another one.
+  if (walkoutUp) return;
+  walkoutUp = true;
   void playWalkout({
     player: store.simConfig(),
     opponent: opts.opponent,
     difficulty: opts.difficulty,
     venue: PARK_BY_ID[opts.parkId]?.name ?? 'Hoops Elite',
     subtitle: opts.eventName ?? labelFor(opts.playlist),
-  }).then(() => launchMatch(opts));
+  }).then(() => {
+    walkoutUp = false;
+    launchMatch(opts);
+  });
 }
 
 function launchMatch(opts: StartMatchOptions): void {

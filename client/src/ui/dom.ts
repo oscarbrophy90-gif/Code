@@ -189,3 +189,44 @@ export function slider(opts: {
     input,
   );
 }
+
+/**
+ * Takes the keyboard away from the page for as long as a cutscene is up, and
+ * gives it back when the scene ends.
+ *
+ * The bug this exists for: you reach a cutscene by clicking a button, so that
+ * button still holds focus underneath the overlay. Enter and Space are how a
+ * browser activates a focused button, and they are also how you skip a scene —
+ * so one Enter both skipped the walkout and re-clicked "Play Pro" behind it,
+ * starting another match and mounting another walkout. Pressing Enter again did
+ * it again.
+ *
+ * So: drop focus on the way in, and swallow the keypress in the capture phase
+ * before it can reach anything else.
+ *
+ * @param onSkip called for a key that should end the scene
+ * @param isSkipKey which keys those are; every key by default
+ * @returns a release function — call it when the scene is done
+ */
+export function captureSceneKeys(
+  onSkip: () => void,
+  isSkipKey: (e: KeyboardEvent) => boolean = () => true,
+): () => void {
+  const previous = document.activeElement;
+  if (previous instanceof HTMLElement) previous.blur();
+
+  const onKey = (e: KeyboardEvent) => {
+    if (e.repeat) return;
+    if (!isSkipKey(e)) return;
+    // Both of these matter. preventDefault stops the browser activating a
+    // focused control, stopPropagation keeps the match's own key handler from
+    // seeing it — otherwise the key that skipped the scene is also an input on
+    // the first frame back.
+    e.preventDefault();
+    e.stopPropagation();
+    onSkip();
+  };
+
+  window.addEventListener('keydown', onKey, true);
+  return () => window.removeEventListener('keydown', onKey, true);
+}
