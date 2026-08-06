@@ -249,33 +249,28 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
     root.appendChild(buildTouchControls(input.touch, () => togglePause(!paused)));
   }
 
-  // ------------------------------------------------------------------ emotes
-  /** Plays the emote in one of the six slots the Locker equipped. */
-  const fireEmote = (slot: number) => {
-    const id = store.player.loadout.emoteSlots?.[slot] ?? null;
-    if (!id) {
-      toast(`Emote slot ${slot + 1} is empty — equip one in the Locker`, 'info');
-      return;
-    }
-    const item = STORE_BY_ID[id];
-    if (!item) return;
-    const me = state.players[localSide];
-    hud.showEmote(item.name, item.colors[0], me.x, me.z);
-    audio.play('ui', 1.1);
-  };
-
   // -------------------------------------------------------------------- step
   const step = (dt: number) => {
-    // Consumed before the guard below, so a digit pressed while the game is
-    // paused or a cutaway is up is dropped rather than firing on the way back.
-    const emoteSlot = input.takeEmote();
-    if (emoteSlot !== null && !paused && !finished && !cutscene && state.phase !== 'over') {
-      fireEmote(emoteSlot);
-    }
     if (paused || finished || cutscene) return;
     elapsedRealSeconds += dt;
 
     const localInput = input.sample();
+    // The simulation owns the cooldown and the ball, but it has no idea which
+    // emote sits on which key — so equipment is checked here, and an emote that
+    // cannot fire says why instead of silently doing nothing.
+    if (localInput.emote !== null) {
+      const me = state.players[localSide];
+      if (!store.player.loadout.emoteSlots?.[localInput.emote]) {
+        toast(`Emote slot ${localInput.emote + 1} is empty — equip one in the Locker`, 'info');
+        localInput.emote = null;
+      } else if (me.emoteCooldown > 0) {
+        toast(`Emote cooling down — ${Math.ceil(me.emoteCooldown)}s`, 'info');
+        localInput.emote = null;
+      } else if (state.phase !== 'live' || state.ball.owner !== localSide) {
+        toast('You can only emote with the ball, in play', 'info');
+        localInput.emote = null;
+      }
+    }
     let remote: PlayerInput;
     if (opts.net) {
       opts.net.sendInput(state.frame, localInput);
@@ -447,6 +442,17 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
               cutscene = false;
             });
           }
+          break;
+        }
+        case 'emote': {
+          // The simulation decides an emote actually happened — it owns the
+          // cooldown and the ball bounce — so the caption hangs off the event
+          // rather than off the keypress that asked for it.
+          const p = state.players[e.side];
+          const id = e.side === localSide ? (store.player.loadout.emoteSlots?.[e.slot] ?? null) : null;
+          const item = id ? STORE_BY_ID[id] : undefined;
+          hud.showEmote(item?.name ?? 'Emote', item?.colors[0] ?? '#8a93a6', p.x, p.z);
+          audio.play('ui', 1.1);
           break;
         }
         case 'dunk':

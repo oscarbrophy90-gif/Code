@@ -8,7 +8,7 @@ import {
 
 import { store } from '../state/store.ts';
 import { el, overlay } from './dom.ts';
-import { drawPortrait } from './portrait.ts';
+import { AvatarRenderer, livePreview } from './avatar.ts';
 import { drawDunkFrame } from './dunkscene.ts';
 
 /**
@@ -54,29 +54,69 @@ function previewBody(item: StoreItem): HTMLElement {
       return courtPreview(item);
     case 'title':
       return titlePreview(item);
+    case 'emote':
+    case 'celebration':
+      return performancePreview(item);
     default:
       return motifPreview(item);
   }
 }
 
 /**
- * Anything worn is shown on your own build with the item on, next to your
- * current look, so the comparison is the point rather than the render.
+ * Anything worn is shown on your own build head to toe, exactly as it renders
+ * on court, next to what you have on right now.
  */
 function wornPreview(item: StoreItem): HTMLElement {
   const now = store.player;
   const withItem = applyToCopy(now, item);
 
-  const shot = (player: MyPlayer, label: string) => {
-    const canvas = el('canvas', { class: 'preview-portrait' }) as HTMLCanvasElement;
-    drawPortrait(canvas, player, 190);
-    return el('div', { style: 'text-align:center;flex:1;min-width:0' }, canvas, el('div', { class: 'faint', style: 'font-size:11px;margin-top:6px' }, label));
+  const figure = (player: MyPlayer, label: string, highlight: boolean) => {
+    const canvas = el('canvas', { class: `preview-figure ${highlight ? 'on' : ''}` }) as HTMLCanvasElement;
+    const cfg = store.simConfig(player);
+    const avatar = new AvatarRenderer();
+    livePreview(canvas, () => avatar.draw(canvas, cfg));
+    return el(
+      'div',
+      { style: 'text-align:center;flex:1;min-width:0' },
+      canvas,
+      el('div', { class: highlight ? '' : 'faint', style: 'font-size:11px;margin-top:6px;font-weight:700' }, label),
+    );
   };
 
   return el(
     'div',
     { class: 'preview-body' },
-    el('div', { class: 'row', style: 'gap:10px;align-items:flex-start' }, shot(now, 'Now'), shot(withItem, 'With this on')),
+    el('div', { class: 'row', style: 'gap:10px;align-items:flex-start' }, figure(now, 'Now', false), figure(withItem, 'With this on', true)),
+    el('div', { class: 'hint', style: 'margin-top:8px' }, 'Drawn by the same renderer the court uses, so this is exactly how it turns up in a game.'),
+  );
+}
+
+/**
+ * Emotes and celebrations are movement, so the preview is your own player
+ * performing it on a loop rather than a card with a name on it.
+ */
+function performancePreview(item: StoreItem): HTMLElement {
+  const canvas = el('canvas', { class: 'preview-figure wide' }) as HTMLCanvasElement;
+  const cfg = store.simConfig();
+  const avatar = new AvatarRenderer();
+  // A beat of stillness between runs so a short emote does not look frantic.
+  const cycle = 2.6;
+  livePreview(canvas, (elapsed) => {
+    const t = Math.min(1, ((elapsed % cycle) / cycle) * 1.5);
+    avatar.draw(canvas, cfg, { emoteId: item.id, t, zoom: 0.92 });
+  });
+
+  return el(
+    'div',
+    { class: 'preview-body' },
+    canvas,
+    el(
+      'div',
+      { class: 'hint', style: 'margin-top:8px' },
+      item.category === 'emote'
+        ? 'Put it on one of the six keys in the Locker. In a game you hold the ball out on a bounce while it plays — nobody can take it off you, but the shot clock keeps running.'
+        : 'Plays after a bucket that matters.',
+    ),
   );
 }
 
@@ -102,6 +142,9 @@ function applyToCopy(player: MyPlayer, item: StoreItem): MyPlayer {
       break;
     case 'hairstyle':
       copy.body.hairstyleId = item.id;
+      break;
+    case 'tattoo':
+      copy.loadout.tattooId = item.id;
       break;
     default:
       break;

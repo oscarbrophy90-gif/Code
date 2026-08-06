@@ -69,6 +69,7 @@ export function generateOpponent(targetOverall: number, seed: number): SimPlayer
   }
 
   const team = rng.pick(TEAMS);
+  const skin = rng.int(0, 8);
   const name = `${rng.pick(FIRST)} ${rng.pick(LAST)}`;
 
   return {
@@ -83,8 +84,29 @@ export function generateOpponent(targetOverall: number, seed: number): SimPlayer
     dunkPackageId: attrs.dunk > 82 ? 'poster' : attrs.dunk > 74 ? 'rim-hang' : attrs.dunk > 68 ? 'tomahawk' : 'basic-slam',
     jerseyPrimary: team.primary,
     jerseySecondary: team.accent,
-    skinTone: rng.int(0, 8),
+    skinTone: skin,
     isBot: true,
+    // Bots get dressed too, or every opponent turns up in the same kit and the
+    // court reads as one player rendered twice.
+    appearance: {
+      skinTone: skin,
+      jerseyPrimary: team.primary,
+      jerseySecondary: team.accent,
+      shoePrimary: rng.pick(['#f2f2f2', '#2b2f3a', '#5b6570', '#1f4fd8', '#d43d2a', '#0d1018']),
+      shoeSecondary: team.accent,
+      clothingId: rng.pick(['cloth-shorts-basic', 'cloth-compression', 'cloth-cutoff', 'cloth-longshorts']),
+      clothingPrimary: '#20242f',
+      clothingSecondary: team.accent,
+      accessoryId: rng.pick(['acc-none', 'acc-none', 'acc-headband', 'acc-armsleeve', 'acc-wristbands', 'acc-chain', 'acc-goggles']),
+      accessoryPrimary: team.accent,
+      accessorySecondary: '#e8eef5',
+      hairstyleId: rng.pick(['hair-fade', 'hair-buzz', 'hair-afro', 'hair-braids', 'hair-locs', 'hair-bald', 'hair-highfade', 'hair-cornrows', 'hair-curls']),
+      hairPrimary: rng.pick(['#241a17', '#1a1210', '#3a2a24', '#4a3226']),
+      tattooId: rng.pick(['tat-none', 'tat-none', 'tat-sleeve-left', 'tat-sleeve-both', 'tat-forearm']),
+      jerseyNumber: rng.int(0, 100),
+      // Bots taunt too, drawn from the free set.
+      emoteSlots: ['emote-wave', 'emote-shrug', 'emote-point', 'emote-clap', 'emote-flex', 'emote-facepalm'],
+    },
     position: build.position,
     archetype: template.name,
     titleId: botTitle(targetOverall, rng),

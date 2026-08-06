@@ -126,17 +126,21 @@ export function drawDunkFrame(
   // One unit, relative to a reference height, so the furniture scales with the
   // canvas — the locker preview is a third the height of the in-game cutaway.
   const u = h / 360;
-  const flush = Math.max(0, (t - 0.62) / 0.2);
+  const flush = Math.max(0, (t - (1 - styleFor(opts.packageId).hangFor)) / 0.2);
 
   // Backboard.
   ctx.strokeStyle = 'rgba(238,242,248,0.8)';
   ctx.lineWidth = 3 * u;
   ctx.strokeRect(rimX + 26 * u, rimY - 54 * u, 76 * u, 66 * u);
 
-  // Where the dunker is: run-up, gather, rise, then hanging off the rim.
-  const approach = Math.min(1, t / 0.42);
-  const rise = t < 0.42 ? 0 : Math.min(1, (t - 0.42) / 0.24);
-  const hang = t < 0.66 ? 0 : Math.min(1, (t - 0.66) / 0.34);
+  // Where the dunker is: run-up, gather, rise, then hanging off the rim. How
+  // long each beat lasts is the package's business.
+  const style = styleFor(opts.packageId);
+  const hangStart = 1 - style.hangFor;
+  const riseStart = hangStart - 0.24;
+  const approach = Math.min(1, t / riseStart);
+  const rise = t < riseStart ? 0 : Math.min(1, (t - riseStart) / (hangStart - riseStart));
+  const hang = t < hangStart ? 0 : Math.min(1, (t - hangStart) / style.hangFor);
 
   // The reach: 0.74 up the body plus the arm, which is where drawFigure puts
   // the grabbing hand. Solving for the feet puts that hand exactly on the rim.
@@ -146,19 +150,21 @@ export function drawDunkFrame(
 
   // Hanging: one hand on the iron, body swinging under it, letting go at the
   // very end. This is the bit that makes a dunk feel like a dunk.
-  const swing = hang > 0 ? Math.sin(hang * Math.PI * 2.2) * (1 - hang) * 0.5 : 0;
+  const swing = hang > 0 ? Math.sin(hang * Math.PI * 2.2) * (1 - hang) * style.swing : 0;
   const release = Math.max(0, (hang - 0.75) / 0.25);
-  const gripX = rimX - 4 * u;
+  const gripX = rimX + style.finishSide * 4 * u;
 
-  const runX = w * 0.1 + (gripX - 26 * u - w * 0.1) * easeOut(approach);
-  const px = hang > 0 ? gripX - 20 * u + swing * 26 * u : runX;
+  // Run in from whichever side the package uses.
+  const startX = style.from < 0 ? w * 0.08 : w * 0.95;
+  const runX = startX + (gripX - style.from * 26 * u - startX) * easeOut(approach);
+  const px = hang > 0 ? gripX - style.finishSide * 20 * u + swing * 26 * u : runX;
   const py =
     hang > 0
       ? rimY + handAbove + release * (floorY - rimY - handAbove) * 0.9
       : floorY - Math.sin(rise * Math.PI * 0.5) * (floorY - rimY - handAbove);
 
   // The rim bends under the weight and springs back as he lets go.
-  const rimFlex = hang > 0 ? Math.sin(Math.min(1, hang * 1.6) * Math.PI * 0.7) * (1 - release) * 9 * u : 0;
+  const rimFlex = hang > 0 ? Math.sin(Math.min(1, hang * 1.6) * Math.PI * 0.7) * (1 - release) * 9 * u * style.flex : 0;
 
   // Rim and net, bent by whoever is hanging off them.
   const rimYNow = rimY + rimFlex;
@@ -193,16 +199,29 @@ export function drawDunkFrame(
     lean: hang > 0 ? swing * 0.9 : -0.25 - rise * 0.35,
     scale: 1,
     tuck: hang > 0 ? (1 - release) * 0.8 : 0,
+    // A reverse turns his back to you on the way up and finishes facing away.
+    spin: style.spin * Math.min(1, rise + hang),
+    oneHand: style.oneHand,
+    facing: style.from,
   });
 
   // The ball: in the hand, then through the rim.
   const ballR = h * 0.036;
   ctx.fillStyle = '#e0762c';
   ctx.beginPath();
-  if (t < 0.62) {
-    ctx.arc(px + bodyH * 0.2, py - bodyH * 0.72, ballR, 0, Math.PI * 2);
+  if (t < hangStart) {
+    // Cocked back and up as he gathers — the bigger the windup, the further
+    // behind the head it travels before it comes over the top.
+    const cock = style.windup * Math.sin(Math.min(1, rise) * Math.PI * 0.9);
+    ctx.arc(
+      px + bodyH * (0.2 + reachUp * 0.16) - style.from * cock * bodyH * 0.55,
+      py - bodyH * (0.72 + reachUp * 0.3) - cock * bodyH * 0.35,
+      ballR,
+      0,
+      Math.PI * 2,
+    );
   } else {
-    const drop = Math.min(1, (t - 0.62) / 0.3);
+    const drop = Math.min(1, (t - hangStart) / 0.3);
     ctx.arc(rimX + 2 * u, rimYNow + drop * (floorY - rimYNow) * 0.92, ballR, 0, Math.PI * 2);
   }
   ctx.fill();
@@ -212,6 +231,55 @@ export function drawDunkFrame(
     ctx.fillStyle = `rgba(255,255,255,${(1 - flush) * 0.35})`;
     ctx.fillRect(0, 0, w, h);
   }
+}
+
+
+/**
+ * What makes one package different from another.
+ *
+ * Every dunk used to run the identical path — same side, same rise, same hang —
+ * so the five packages were five names on one animation. These are the knobs
+ * the scene reads, and each package sets them differently.
+ */
+interface DunkStyle {
+  /** run-up side: -1 comes in from the left, +1 from the right */
+  from: -1 | 1;
+  /** how far the ball is cocked back behind the head before the flush */
+  windup: number;
+  /** true for a one-hand finish, false for a two-hand flush */
+  oneHand: boolean;
+  /** fraction of the scene spent hanging off the rim */
+  hangFor: number;
+  /** how hard the body swings under the rim */
+  swing: number;
+  /**
+   * Radians of extra body turn on the way up. The figure rotates about its
+   * feet, so this stays small — a big angle swings the whole body out of the
+   * frame instead of turning it. The mirrored `from` is what actually sells a
+   * reverse; this is the lean on top of it.
+   */
+  spin: number;
+  /** which side of the rim he finishes on */
+  finishSide: -1 | 1;
+  /** how much the rim bends */
+  flex: number;
+}
+
+const DUNK_STYLE: Record<string, DunkStyle> = {
+  // Straight on, two hands, down and off. No showmanship.
+  'basic-slam': { from: -1, windup: 0.1, oneHand: false, hangFor: 0.12, swing: 0.25, spin: 0, finishSide: -1, flex: 0.7 },
+  // Long approach from the left, ball cocked right back, one hand over the top.
+  tomahawk: { from: -1, windup: 1, oneHand: true, hangFor: 0.2, swing: 0.5, spin: 0, finishSide: -1, flex: 1 },
+  // The whole point is the hang, so it gets most of the scene.
+  'rim-hang': { from: 1, windup: 0.45, oneHand: true, hangFor: 0.46, swing: 1.15, spin: 0, finishSide: -1, flex: 1.25 },
+  // Straight into contact, two hands, the rim takes a beating.
+  poster: { from: -1, windup: 0.6, oneHand: false, hangFor: 0.24, swing: 0.4, spin: 0, finishSide: -1, flex: 1.6 },
+  // In from the baseline, turning under the rim to finish on the far side.
+  'reverse-flush': { from: 1, windup: 0.25, oneHand: true, hangFor: 0.22, swing: 0.35, spin: 0.3, finishSide: 1, flex: 0.85 },
+};
+
+function styleFor(id: string): DunkStyle {
+  return DUNK_STYLE[id] ?? DUNK_STYLE['basic-slam'];
 }
 
 /**
@@ -234,14 +302,26 @@ function drawFigure(
   h: number,
   jersey: string,
   accent: string,
-  pose: { armsUp: number; lean: number; scale: number; tuck?: number },
+  pose: {
+    armsUp: number;
+    lean: number;
+    scale: number;
+    tuck?: number;
+    /** extra body rotation, for reverses */
+    spin?: number;
+    /** one-hand finish rather than a two-hand flush */
+    oneHand?: boolean;
+    /** -1 faces right, +1 faces left — which way the run-up came from */
+    facing?: -1 | 1;
+  },
 ): void {
   // The figure stands a little under half the frame, so the rim, the ball and
   // the caption all still read. The first cut of this was ten times too big.
   const bodyH = h * FIGURE_H * pose.scale;
   ctx.save();
   ctx.translate(x, y);
-  ctx.rotate(pose.lean * 0.18);
+  if ((pose.facing ?? -1) > 0) ctx.scale(-1, 1);
+  ctx.rotate(pose.lean * 0.18 + (pose.spin ?? 0));
 
   // Legs. Hanging off the rim they tuck up rather than dangling straight.
   const tuck = pose.tuck ?? 0;
@@ -280,9 +360,12 @@ function drawFigure(
   ctx.lineTo(bodyH * 0.26, -bodyH * (0.74 + reach * 0.18));
   ctx.lineTo(bodyH * 0.34, -bodyH * (0.74 + reach * 0.42));
   ctx.stroke();
+  // The off arm either trails (one-hand) or goes up with it (two-hand flush).
+  const off = pose.oneHand === false ? reach : reach * 0.18;
   ctx.beginPath();
   ctx.moveTo(-bodyH * 0.12, -bodyH * 0.74);
-  ctx.lineTo(-bodyH * 0.24, -bodyH * (0.6 + reach * 0.1));
+  ctx.lineTo(-bodyH * 0.26, -bodyH * (0.68 + off * 0.2));
+  if (pose.oneHand === false) ctx.lineTo(-bodyH * 0.3, -bodyH * (0.74 + off * 0.42));
   ctx.stroke();
 
   // Head.

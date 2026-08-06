@@ -227,6 +227,8 @@ function isEquipped(item: StoreItem): boolean {
       return l.courtId === item.id;
     case 'hairstyle':
       return b.hairstyleId === item.id;
+    case 'tattoo':
+      return l.tattooId === item.id;
     case 'jumpshot':
       return `jumpshot-${l.jumpshotId}` === item.id;
     case 'dunkPackage':
@@ -266,6 +268,9 @@ function equip(item: StoreItem): void {
         break;
       case 'hairstyle':
         target.body.hairstyleId = item.id;
+        break;
+      case 'tattoo':
+        target.loadout.tattooId = item.id;
         break;
       case 'jumpshot':
         target.loadout.jumpshotId = item.id.replace('jumpshot-', '');

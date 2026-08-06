@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { AiController } from '../src/sim/ai.ts';
-import { createMatch, currentContest, defaultMatchConfig, SIM_DT, stepMatch, drainEvents } from '../src/sim/match.ts';
+import { createMatch, currentContest, defaultMatchConfig, EMOTE_COOLDOWN, EMOTE_DURATION, SIM_DT, stepMatch, drainEvents } from '../src/sim/match.ts';
 import { generateOpponent } from '../src/data/opponents.ts';
 import {
   clampHeightToPosition,
@@ -1318,6 +1318,10 @@ test('the stepback steps back, then rises into a shot you time on its own key', 
     // Take the strip roll out of it — this test is about the step and the
     // meter, and a fumble is covered elsewhere.
     a.attrs.ballHandle = 95;
+    // Pin the jump shot too. Otherwise the meter length rides on whatever this
+    // seed happened to roll, and any change to how bots are generated silently
+    // moves the timings this test is measuring.
+    a.jumpshotId = 'base-rise';
     const state = createMatch(
       a,
       generateOpponent(75, 4),
@@ -1364,14 +1368,17 @@ test('the stepback steps back, then rises into a shot you time on its own key', 
   // the front, and somewhere in there is a green.
   const errors: number[] = [];
   let greens = 0;
-  for (let hold = 55; hold <= 150; hold += 3) {
+  for (let hold = 55; hold <= 150; hold += 1) {
     const r = attempt(hold, 'moveShoot');
     assert.equal(r.shotType, 'stepback', `holding K for ${hold} frames should launch a stepback`);
     errors.push(r.error!);
     if (r.grade === 'green') greens++;
   }
   for (let i = 1; i < errors.length; i++) {
-    assert.ok(errors[i] > errors[i - 1], 'a longer hold must always release later on the meter');
+    // Non-decreasing rather than strictly increasing: past the safety valve
+    // that fires a shot you never let go of, the release point stops moving.
+    // What matters is that holding longer never releases *earlier*.
+    assert.ok(errors[i] >= errors[i - 1], 'a longer hold must never release earlier on the meter');
   }
   assert.ok(errors[0] < -0.5, 'a short hold is very early');
   assert.ok(errors[errors.length - 1] > 0.1, 'an over-long hold is late');
@@ -1562,4 +1569,99 @@ test('every emote slot can be filled and the catalogue supports six', () => {
   for (const e of emotes) {
     assert.ok(e.id.startsWith('emote-'), 'emote ids are namespaced so migration can find them');
   }
+});
+
+test('an emote holds the ball out, cannot be stolen, and costs you the clock', () => {
+  const state = createMatch(
+    generateOpponent(80, 21),
+    generateOpponent(80, 22),
+    defaultMatchConfig({ manualCheck: false, shotClock: 999 }),
+    5150,
+  );
+  for (let i = 0; i < 200; i++) stepMatch(state, [emptyInput(), emptyInput()], SIM_DT);
+
+  const me = state.players[0];
+  const them = state.players[1];
+  me.x = 0;
+  me.z = 20;
+  me.state = 'dribble';
+  me.stamina = 1;
+  state.ball.owner = 0;
+  state.ball.state = 'held';
+  state.needsClear = false;
+  state.shotClock = 14;
+  const clockBefore = state.shotClock;
+
+  // Fire slot 2 and hold the defender right on top of him, reaching every frame.
+  const emote = { ...emptyInput(), emote: 2 };
+  const reach = { ...emptyInput(), steal: true };
+  stepMatch(state, [emote, reach], SIM_DT);
+  assert.equal(me.state, 'emoting', 'the emote starts');
+  assert.equal(me.emoteSlot, 2, 'and remembers which slot, so the right one animates');
+
+  const events = drainEvents(state);
+  assert.ok(
+    events.some((e) => e.type === 'emote' && e.side === 0 && e.slot === 2),
+    'the sim announces it, so the client never has to guess from the keypress',
+  );
+
+  let bounced = false;
+  let frames = 0;
+  while (state.players[0].state === 'emoting' && frames < 120 * 5) {
+    them.x = me.x + 1;
+    them.z = me.z;
+    them.stealCooldown = 0;
+    stepMatch(state, [{ ...emptyInput(), emote: null }, reach], SIM_DT);
+    assert.equal(state.ball.owner, 0, 'nobody takes it off you mid-emote');
+    // Held out to the side, off the hip, on a bounce.
+    if (state.ball.y < 1) bounced = true;
+    frames++;
+  }
+
+  assert.ok(bounced, 'the ball is bounced rather than glued to the hands');
+  assert.equal(state.stats[1].steals, 0, 'reaching in during an emote gets nothing');
+  assert.equal(state.ball.owner, 0, 'and you still have it when it ends');
+  assert.equal(state.players[0].state, 'dribble', 'back to dribbling afterwards');
+
+  // The clock never stopped for it.
+  const elapsed = frames * SIM_DT;
+  assert.ok(
+    clockBefore - state.shotClock > elapsed * 0.9,
+    `the shot clock keeps running through an emote (lost ${(clockBefore - state.shotClock).toFixed(2)}s over ${elapsed.toFixed(2)}s)`,
+  );
+  assert.ok(Math.abs(elapsed - EMOTE_DURATION) < 0.05, `the emote runs for about ${EMOTE_DURATION}s, ran ${elapsed.toFixed(2)}s`);
+});
+
+test('emotes are on a ten second cooldown', () => {
+  const state = createMatch(
+    generateOpponent(80, 31),
+    generateOpponent(80, 32),
+    defaultMatchConfig({ manualCheck: false, shotClock: 999 }),
+    6161,
+  );
+  for (let i = 0; i < 200; i++) stepMatch(state, [emptyInput(), emptyInput()], SIM_DT);
+  const me = state.players[0];
+  me.state = 'dribble';
+  state.ball.owner = 0;
+  state.ball.state = 'held';
+  state.needsClear = false;
+
+  stepMatch(state, [{ ...emptyInput(), emote: 0 }, emptyInput()], SIM_DT);
+  assert.equal(me.state, 'emoting');
+  assert.ok(Math.abs(me.emoteCooldown - EMOTE_COOLDOWN) < 0.02);
+
+  // Spam it for nine seconds: exactly one emote should have happened.
+  let started = 1;
+  for (let i = 0; i < 120 * 9; i++) {
+    const was = state.players[0].state;
+    stepMatch(state, [{ ...emptyInput(), emote: 0 }, emptyInput()], SIM_DT);
+    if (was !== 'emoting' && state.players[0].state === 'emoting') started++;
+  }
+  assert.equal(started, 1, 'holding the key down does not chain emotes');
+
+  // Past ten seconds it comes back.
+  for (let i = 0; i < 120 * 2; i++) stepMatch(state, [emptyInput(), emptyInput()], SIM_DT);
+  assert.equal(state.players[0].emoteCooldown, 0, 'the cooldown clears');
+  stepMatch(state, [{ ...emptyInput(), emote: 0 }, emptyInput()], SIM_DT);
+  assert.equal(state.players[0].state, 'emoting', 'and you can emote again');
 });

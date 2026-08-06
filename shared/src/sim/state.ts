@@ -32,6 +32,12 @@ export interface PlayerInput {
   contest: boolean;
   /** edge-triggered pump fake */
   fake: boolean;
+  /**
+   * Edge-triggered emote slot, 0-5, or null. Emotes are cosmetic but they are
+   * not free: you hold the ball out on a bounce while you do it, which is why
+   * the simulation has to own them rather than the renderer.
+   */
+  emote: number | null;
 }
 
 export function emptyInput(): PlayerInput {
@@ -48,6 +54,7 @@ export function emptyInput(): PlayerInput {
     steal: false,
     contest: false,
     fake: false,
+    emote: null,
   };
 }
 
@@ -63,7 +70,34 @@ export type PlayerActState =
   | 'fallen'
   | 'contesting'
   | 'stealing'
+  | 'emoting'
   | 'celebrating';
+
+/**
+ * Everything the renderer needs to draw a player wearing what they own. It is
+ * presentation only — the simulation never reads it — but it lives on the sim
+ * config because the renderer only ever gets handed a SimPlayer.
+ */
+export interface Appearance {
+  skinTone: number;
+  jerseyPrimary: string;
+  jerseySecondary: string;
+  shoePrimary: string;
+  shoeSecondary: string;
+  /** sleeves, tights, hoodie — drawn over the limbs */
+  clothingId: string;
+  clothingPrimary: string;
+  clothingSecondary: string;
+  accessoryId: string | null;
+  accessoryPrimary: string;
+  accessorySecondary: string;
+  hairstyleId: string;
+  hairPrimary: string;
+  tattooId: string;
+  jerseyNumber: number;
+  /** what sits on each of the 1-6 keys, so the renderer can perform the right one */
+  emoteSlots: (string | null)[];
+}
 
 /** Static per-player configuration handed to the sim. */
 export interface SimPlayerConfig {
@@ -91,6 +125,8 @@ export interface SimPlayerConfig {
   gear?: string[];
   /** archetype label for bots, e.g. "Paint Beast" */
   archetype?: string;
+  /** what this player is wearing, head to toe */
+  appearance?: Appearance;
 }
 
 export interface SimPlayer {
@@ -145,6 +181,12 @@ export interface SimPlayer {
   ankledResetIn: number;
   /** how long the handler has been pinned against the line still pushing out */
   outOfBoundsTimer: number;
+  /** seconds left of the emote being performed, 0 when not emoting */
+  emoteTimer: number;
+  /** which slot is playing, -1 when none */
+  emoteSlot: number;
+  /** seconds until another emote is allowed */
+  emoteCooldown: number;
   /** chained-move counter for Tight Handles */
   comboCount: number;
   comboTimer: number;
@@ -266,6 +308,7 @@ export type SimEvent =
   | { type: 'dunkHighlight'; side: Side; packageId: string; posterized: boolean; value: 1 | 2 }
   | { type: 'turnover'; side: Side; reason: 'shotClock' | 'outOfBounds' | 'strip' }
   | { type: 'clear'; side: Side }
+  | { type: 'emote'; side: Side; slot: number }
   | { type: 'foul'; on: Side; by: Side; shots: number }
   | { type: 'freeThrow'; side: Side; made: boolean; remaining: number }
   | { type: 'phase'; phase: MatchPhase }

@@ -72,6 +72,8 @@ export interface PackedInput {
   dz: number;
   /** dribble move index + 1, 0 = none */
   m: number;
+  /** emote slot + 1, 0 = none */
+  e: number;
 }
 
 export const INPUT_FLAGS = {
@@ -112,7 +114,15 @@ export function packInput(input: PlayerInput): PackedInput {
   if (input.fake) f |= INPUT_FLAGS.fake;
   if (input.moveShoot) f |= INPUT_FLAGS.moveShoot;
   const m = input.move ? MOVE_ORDER.indexOf(input.move as (typeof MOVE_ORDER)[number]) + 1 : 0;
-  return { f, mx: q(input.mx), mz: q(input.mz), dx: q(input.moveDirX), dz: q(input.moveDirZ), m };
+  return {
+    f,
+    mx: q(input.mx),
+    mz: q(input.mz),
+    dx: q(input.moveDirX),
+    dz: q(input.moveDirZ),
+    m,
+    e: input.emote === null ? 0 : input.emote + 1,
+  };
 }
 
 export function unpackInput(p: PackedInput): PlayerInput {
@@ -129,6 +139,7 @@ export function unpackInput(p: PackedInput): PlayerInput {
     contest: (p.f & INPUT_FLAGS.contest) !== 0,
     fake: (p.f & INPUT_FLAGS.fake) !== 0,
     move: p.m > 0 ? (MOVE_ORDER[p.m - 1] as PlayerInput['move']) : null,
+    emote: p.e > 0 ? p.e - 1 : null,
   };
 }
 
@@ -161,5 +172,6 @@ export const ACT_STATE_IDS = [
   'fallen',
   'contesting',
   'stealing',
+  'emoting',
   'celebrating',
 ] as const;

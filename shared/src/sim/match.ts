@@ -80,9 +80,19 @@ function staminaDrainMult(p: SimPlayer): number {
   return lerp(1.4, 0.58, clamp01((p.cfg.attrs.stamina - 25) / 74));
 }
 
+/** How long an emote holds you up for. */
+export const EMOTE_DURATION = 1.6;
+/** And how long before you are allowed another one. */
+export const EMOTE_COOLDOWN = 10;
+
 // -------------------------------------------------------------- construction
 
-function makePlayer(side: Side, cfg: SimPlayerConfig): SimPlayer {
+/**
+ * A player in its rest state. Exported so the cosmetics preview can build one
+ * and hand it to the very same renderer the court uses — a preview drawn by
+ * different code is a preview that can lie to you.
+ */
+export function makePlayer(side: Side, cfg: SimPlayerConfig): SimPlayer {
   return {
     side,
     cfg,
@@ -111,6 +121,9 @@ function makePlayer(side: Side, cfg: SimPlayerConfig): SimPlayer {
     shotIsThree: false,
     shotDrift: 0,
     shotOnMoveKey: false,
+    emoteTimer: 0,
+    emoteSlot: -1,
+    emoteCooldown: 0,
     handUp: false,
     contestTimer: 0,
     stealCooldown: 0,
@@ -392,6 +405,7 @@ function updatePlayer(state: MatchState, side: Side, input: PlayerInput, dt: num
   p.stealCooldown = Math.max(0, p.stealCooldown - dt);
   p.moveCooldown = Math.max(0, p.moveCooldown - dt);
   p.fakeTimer = Math.max(0, p.fakeTimer - dt);
+  p.emoteCooldown = Math.max(0, p.emoteCooldown - dt);
   p.comboTimer = Math.max(0, p.comboTimer - dt);
   if (p.comboTimer <= 0) p.comboCount = 0;
 
@@ -540,6 +554,25 @@ function updatePlayer(state: MatchState, side: Side, input: PlayerInput, dt: num
     return;
   }
 
+  // Emoting ------------------------------------------------------------------
+  // You stand there bouncing the ball and taunting. It costs you tempo, not
+  // possession: nobody can take it off you mid-emote, but the shot clock never
+  // stops for it, so an emote with four seconds left is a genuine mistake.
+  if (p.state === 'emoting') {
+    p.emoteTimer -= dt;
+    p.handUp = false;
+    p.vx *= 0.8;
+    p.vz *= 0.8;
+    if (p.emoteTimer <= 0) {
+      // Done: the ball comes back up into the hands and play carries on.
+      p.emoteTimer = 0;
+      p.emoteSlot = -1;
+      p.state = hasBall ? 'dribble' : 'idle';
+    }
+    if (hasBall) placeHeldBall(state, p, state.ball);
+    return;
+  }
+
   if (p.state === 'landing') {
     if (p.stateTimer <= 0) p.state = hasBall ? 'dribble' : 'idle';
     applyMovement(state, p, input, dt, 0.35);
@@ -566,6 +599,17 @@ function updatePlayer(state: MatchState, side: Side, input: PlayerInput, dt: num
     if (input.fake && p.fakeTimer <= 0 && p.y === 0) {
       p.fakeTimer = 0.45;
       p.state = 'idle';
+    }
+
+    if (input.emote !== null && p.emoteCooldown <= 0 && p.y === 0) {
+      p.state = 'emoting';
+      p.emoteTimer = EMOTE_DURATION;
+      p.emoteSlot = input.emote;
+      p.emoteCooldown = EMOTE_COOLDOWN;
+      p.vx = 0;
+      p.vz = 0;
+      state.events.push({ type: 'emote', side, slot: input.emote });
+      return;
     }
 
     if (input.move && p.moveCooldown <= 0 && p.y === 0 && p.fakeTimer <= 0) {
@@ -1379,6 +1423,15 @@ function attemptSteal(state: MatchState, defSide: Side, rng: Rng): void {
   d.state = 'stealing';
   d.stateTimer = 0.22;
 
+  // The ball is not available mid-emote. Reaching in while someone is showboating
+  // gets you nothing but the recovery time, which is the trade: he loses tempo
+  // off the shot clock, you lose position for a beat.
+  if (p.state === 'emoting') {
+    d.staggerTimer = 0.32;
+    d.stagger = 0.6;
+    return;
+  }
+
   const reach = 3.2 + (d.cfg.wingspanIn - d.cfg.heightIn) / 12;
   if (dist > reach) return;
 
@@ -1532,6 +1585,16 @@ function placeHeldBall(state: MatchState, p: SimPlayer, ball: Ball): void {
     ball.x = p.x + rightX * 0.35;
     ball.z = p.z + rightZ * 0.35;
     ball.y = reachHeight(p) * 0.9;
+    return;
+  }
+
+  if (p.state === 'emoting') {
+    // Held out to one side on a lazy bounce, which is the whole look of it —
+    // and it is still yours, nobody can take it while this is running.
+    const bounce = Math.abs(Math.sin(p.emoteTimer * 7.5));
+    ball.x = p.x + rightX * 1.25 + fwdX * 0.3;
+    ball.z = p.z + rightZ * 1.25 + fwdZ * 0.3;
+    ball.y = 0.45 + bounce * 2.1;
     return;
   }
 

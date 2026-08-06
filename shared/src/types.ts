@@ -81,6 +81,7 @@ export interface Loadout {
   shoesId: string;
   clothingId: string;
   accessoryId: string | null;
+  tattooId: string;
   jumpshotId: string;
   dunkPackageId: string;
   celebrationId: string;

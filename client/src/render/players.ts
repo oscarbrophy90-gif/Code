@@ -1,4 +1,5 @@
-import { COURT, SKIN_TONES, type Ball, type MatchState, type SimPlayer } from '@hoops/shared';
+import { COURT, EMOTE_DURATION, SKIN_TONES, type Appearance, type Ball, type MatchState, type SimPlayer } from '@hoops/shared';
+import { emotePose, type EmotePose } from './emotes.ts';
 import type { Camera } from '../engine/camera.ts';
 import { hexA, mix } from './court.ts';
 
@@ -78,9 +79,12 @@ export class PlayerRenderer {
     const px = feet.x;
     const py = feet.y;
 
-    const skin = SKIN_TONES[p.cfg.skinTone] ?? SKIN_TONES[3];
-    const jersey = p.cfg.jerseyPrimary;
-    const trim = p.cfg.jerseySecondary;
+    // Everything you have on. A player without an appearance (an old save, a
+    // preview stub) falls back to the two jersey colours the sim always carries.
+    const look: Appearance = p.cfg.appearance ?? fallbackAppearance(p);
+    const skin = SKIN_TONES[look.skinTone] ?? SKIN_TONES[3];
+    const jersey = look.jerseyPrimary;
+    const trim = look.jerseySecondary;
 
     const speed = Math.hypot(p.vx, p.vz);
     // Stride phase is accumulated, never derived from time * frequency: with a
@@ -89,12 +93,16 @@ export class PlayerRenderer {
     // twitching. Amplitude is eased too so a stop settles instead of popping.
     const gait = this.gait(p, time, speed);
     const stride = Math.sin(gait.phase) * gait.amplitude;
-    const lean = Math.max(-0.5, Math.min(0.5, (p.vx * Math.cos(p.facing) - p.vz * Math.sin(p.facing)) / 22));
 
     // Pose selection straight off the sim state.
     let armLift = 0;
     let crouch = 0;
     let spread = 1;
+    // Emotes need the arms to do different things, so they get their own
+    // per-side overrides on top of the symmetric pose everything else uses.
+    let armPose: EmotePose | null = null;
+    let bob = 0;
+    let poseLean = 0;
     switch (p.state) {
       case 'shooting': {
         const t = p.shotProfile ? Math.min(1, p.shotElapsed / p.shotProfile.meterDuration) : 0;
@@ -150,12 +158,29 @@ export class PlayerRenderer {
         }
         break;
       }
+      case 'emoting': {
+        // Runs off the sim's own timer, so what you see is exactly as long as
+        // the ball is unstealable — the animation is the tell for the rule.
+        const t = 1 - Math.max(0, Math.min(1, p.emoteTimer / EMOTE_DURATION));
+        const id = look.emoteSlots?.[p.emoteSlot] ?? null;
+        armPose = emotePose(id, t);
+        crouch = armPose.crouch;
+        poseLean = armPose.lean;
+        bob = armPose.bob;
+        break;
+      }
       case 'celebrating':
         armLift = 1.3 + Math.sin(time * 6) * 0.2;
         break;
       default:
         crouch = hasBall ? 0.2 : 0.12;
     }
+
+    // An emote poses the body outright; otherwise the lean comes from momentum.
+    const lean =
+      poseLean !== 0
+        ? poseLean
+        : Math.max(-0.5, Math.min(0.5, (p.vx * Math.cos(p.facing) - p.vz * Math.sin(p.facing)) / 22));
 
     // A fallen player keeps his full length — he is laid out flat rather than
     // squashed into a very short standing figure.
@@ -170,7 +195,7 @@ export class PlayerRenderer {
     const at = (yFt: number, dx = 0, dz = 0) =>
       down
         ? cam.project(p.x + yFt * 0.82 + dz * 0.4, 0.28 + Math.abs(dx) * 0.35, p.z + dx * 0.7)
-        : cam.project(p.x + dx, p.y + yFt, p.z + dz);
+        : cam.project(p.x + dx, p.y + yFt + bob, p.z + dz);
 
     const hip = at(hipY, lean * 0.3);
     const shoulder = at(shoulderY, lean * 0.55);
@@ -180,6 +205,7 @@ export class PlayerRenderer {
     ctx.save();
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
+    if (armPose && armPose.alpha < 1) ctx.globalAlpha = armPose.alpha;
 
     // Legs.
     ctx.strokeStyle = mix(skin, '#000000', 0.18);
@@ -203,13 +229,36 @@ export class PlayerRenderer {
       ctx.stroke();
     }
 
-    // Shoes.
-    ctx.fillStyle = trim;
+    // Tights and long shorts run down over the leg before the shoe goes on.
+    if (look.clothingId === 'cloth-compression' || look.clothingId === 'cloth-longshorts') {
+      const toKnee = look.clothingId === 'cloth-compression' ? 0.06 : hipY * 0.42;
+      ctx.strokeStyle = look.clothingPrimary;
+      ctx.lineWidth = lineW * 0.99;
+      for (const sign of [-1, 1]) {
+        const { swing, lift } = footAt(sign);
+        const knee = at(hipY * 0.5 + lift * 0.4, sign * footSpread * 0.6 + swing * 0.45, swing * 0.3);
+        const end = at(Math.max(toKnee, 0.06 + lift), sign * footSpread + swing * (toKnee > 0.1 ? 0.7 : 1), swing * 0.6);
+        ctx.beginPath();
+        ctx.moveTo(hip.x, hip.y);
+        ctx.lineTo(knee.x, knee.y);
+        ctx.lineTo(end.x, end.y);
+        ctx.stroke();
+      }
+    }
+
+    // Shoes, in the colours of the pair you actually bought.
     for (const sign of [-1, 1]) {
       const { node } = footAt(sign);
+      ctx.fillStyle = look.shoePrimary;
       ctx.beginPath();
       ctx.ellipse(node.x, node.y, s * 0.3, s * 0.15, 0, 0, Math.PI * 2);
       ctx.fill();
+      // Midsole stripe, so a two-tone shoe reads as two-tone at this size.
+      ctx.strokeStyle = look.shoeSecondary;
+      ctx.lineWidth = Math.max(1, s * 0.07);
+      ctx.beginPath();
+      ctx.ellipse(node.x, node.y + s * 0.07, s * 0.29, s * 0.09, 0, 0, Math.PI);
+      ctx.stroke();
     }
 
     // Torso as a jersey slab.
@@ -233,31 +282,126 @@ export class PlayerRenderer {
     ctx.lineWidth = Math.max(1, s * 0.07);
     ctx.stroke();
 
-    // Arms.
-    ctx.strokeStyle = skin;
+    // Your number, on the chest, big enough to read from the camera.
+    if (!down && s > 9) {
+      const cx = (tl.x + tr.x + bl.x + br.x) / 4;
+      const cy = (tl.y + tr.y + bl.y + br.y) / 4;
+      ctx.save();
+      ctx.font = `900 ${s * 0.5}px Inter, system-ui, sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = hexA(trim, 0.92);
+      ctx.fillText(String(look.jerseyNumber), cx, cy);
+      ctx.restore();
+    }
+
+    // Arms. A sleeve, a tattoo or bare skin — whichever you have on, per side.
+    const sleeved = look.clothingId === 'cloth-compression' || look.clothingId === 'cloth-hoodie' || look.clothingId === 'cloth-vintage';
+    const inkBoth = look.tattooId === 'tat-sleeve-both' || look.tattooId === 'tat-full';
+    const inkLeft = inkBoth || look.tattooId === 'tat-sleeve-left';
+    const armColor = (sign: number) => {
+      if (sleeved) return look.clothingPrimary;
+      const inked = sign < 0 ? inkLeft : inkBoth;
+      // Ink darkens the arm rather than replacing it, so the skin tone survives.
+      return inked ? mix(skin, '#181818', 0.55) : skin;
+    };
+
     ctx.lineWidth = lineW * 0.78;
+    const hands: { x: number; y: number }[] = [];
     for (const sign of [-1, 1]) {
-      const raise = armLift * (p.state === 'shooting' && sign < 0 ? 0.72 : 1);
-      const elbow = at(shoulderY - 0.34 + raise * 0.42, sign * (shoulderHalf + 0.24) * spread, -raise * 0.12);
-      const hand = at(shoulderY - 0.68 + raise * 1.05, sign * (shoulderHalf + 0.12 + raise * 0.1) * spread, -raise * 0.3);
+      const i = sign < 0 ? 0 : 1;
+      const raise = armPose ? armPose.arm[i] : armLift * (p.state === 'shooting' && sign < 0 ? 0.72 : 1);
+      const out = (armPose ? armPose.out[i] : 1) * spread;
+      // Forward reach is toward the rim, which is where the camera is looking
+      // from, so a point or a mic drop reads as coming out of the screen.
+      const reach = armPose ? armPose.fwd[i] : 0;
+      const elbow = at(shoulderY - 0.34 + raise * 0.42, sign * (shoulderHalf + 0.24) * out, -raise * 0.12 + reach * 0.5);
+      const hand = at(shoulderY - 0.68 + raise * 1.05, sign * (shoulderHalf + 0.12 + raise * 0.1) * out, -raise * 0.3 + reach);
+      hands.push(hand);
+      ctx.strokeStyle = armColor(sign);
       ctx.beginPath();
       ctx.moveTo(sign < 0 ? tl.x : tr.x, sign < 0 ? tl.y : tr.y);
       ctx.lineTo(elbow.x, elbow.y);
       ctx.lineTo(hand.x, hand.y);
       ctx.stroke();
+
+      // A shooting sleeve is one arm only, over whatever is underneath.
+      if (look.accessoryId === 'acc-armsleeve' && sign > 0) {
+        ctx.strokeStyle = look.accessoryPrimary;
+        ctx.lineWidth = lineW * 0.84;
+        ctx.beginPath();
+        ctx.moveTo(sign < 0 ? tl.x : tr.x, sign < 0 ? tl.y : tr.y);
+        ctx.lineTo(elbow.x, elbow.y);
+        ctx.stroke();
+        ctx.lineWidth = lineW * 0.78;
+      }
+      // A forearm band sits between elbow and wrist.
+      if (look.tattooId === 'tat-forearm') {
+        ctx.strokeStyle = mix(skin, '#181818', 0.62);
+        ctx.lineWidth = lineW * 0.82;
+        ctx.beginPath();
+        ctx.moveTo(elbow.x, elbow.y);
+        ctx.lineTo(elbow.x + (hand.x - elbow.x) * 0.45, elbow.y + (hand.y - elbow.y) * 0.45);
+        ctx.stroke();
+        ctx.lineWidth = lineW * 0.78;
+      }
     }
 
-    // Head + hair.
+    // Wristbands go on last so they sit on top of the arm.
+    if (look.accessoryId === 'acc-wristbands') {
+      ctx.fillStyle = look.accessoryPrimary;
+      for (const hand of hands) {
+        ctx.beginPath();
+        ctx.arc(hand.x, hand.y, s * 0.11, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // A chain hangs off the collar and swings with the lean.
+    if (look.accessoryId === 'acc-chain' && !down) {
+      const drop = at(shoulderY - 0.45, lean * 1.5);
+      ctx.strokeStyle = look.accessoryPrimary;
+      ctx.lineWidth = Math.max(1, s * 0.08);
+      ctx.beginPath();
+      ctx.moveTo(tl.x + (tr.x - tl.x) * 0.3, tl.y + (tr.y - tl.y) * 0.3);
+      ctx.quadraticCurveTo(drop.x, drop.y, tl.x + (tr.x - tl.x) * 0.7, tl.y + (tr.y - tl.y) * 0.7);
+      ctx.stroke();
+    }
+
+    // Head.
+    const headR = s * 0.34;
     ctx.beginPath();
-    ctx.arc(head.x, head.y, s * 0.34, 0, Math.PI * 2);
+    ctx.arc(head.x, head.y, headR, 0, Math.PI * 2);
     ctx.fillStyle = skin;
     ctx.fill();
-    if (p.cfg.skinTone !== undefined) {
+
+    // Hair, shaped by the style you have on rather than one arc for everyone.
+    drawHair(ctx, head.x, head.y, headR, look.hairstyleId, look.hairPrimary, skin);
+
+    // Head-worn accessories go over the hair.
+    if (look.accessoryId === 'acc-headband') {
+      ctx.strokeStyle = look.accessorySecondary;
+      ctx.lineWidth = headR * 0.42;
       ctx.beginPath();
-      ctx.arc(head.x, head.y - s * 0.09, s * 0.34, Math.PI * 1.05, Math.PI * 1.95);
-      ctx.strokeStyle = mix(skin, '#120b08', 0.72);
-      ctx.lineWidth = s * 0.2;
+      ctx.arc(head.x, head.y, headR * 0.94, Math.PI * 1.08, Math.PI * 1.92);
       ctx.stroke();
+    }
+    if (look.accessoryId === 'acc-goggles') {
+      ctx.strokeStyle = look.accessoryPrimary;
+      ctx.lineWidth = Math.max(1, headR * 0.16);
+      ctx.beginPath();
+      ctx.arc(head.x - headR * 0.34, head.y - headR * 0.05, headR * 0.3, 0, Math.PI * 2);
+      ctx.moveTo(head.x + headR * 0.64, head.y - headR * 0.05);
+      ctx.arc(head.x + headR * 0.34, head.y - headR * 0.05, headR * 0.3, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    if (look.accessoryId === 'acc-earrings') {
+      ctx.fillStyle = look.accessoryPrimary;
+      for (const sign of [-1, 1]) {
+        ctx.beginPath();
+        ctx.arc(head.x + sign * headR * 0.92, head.y + headR * 0.2, headR * 0.12, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
 
     // Local-player ring so you always know which one you are.
@@ -375,3 +519,139 @@ export class PlayerRenderer {
 }
 
 export const RIM_WORLD = { x: COURT.rimX, y: COURT.rimY, z: COURT.rimZ };
+
+/**
+ * A player the renderer was handed without an appearance still has to be drawn,
+ * so build one out of the two colours the sim always carries.
+ */
+function fallbackAppearance(p: SimPlayer): Appearance {
+  return {
+    skinTone: p.cfg.skinTone,
+    jerseyPrimary: p.cfg.jerseyPrimary,
+    jerseySecondary: p.cfg.jerseySecondary,
+    shoePrimary: '#f2f2f2',
+    shoeSecondary: p.cfg.jerseySecondary,
+    clothingId: 'cloth-shorts-basic',
+    clothingPrimary: '#3a4050',
+    clothingSecondary: '#8a93a6',
+    accessoryId: null,
+    accessoryPrimary: '#3a4050',
+    accessorySecondary: '#3a4050',
+    hairstyleId: 'hair-fade',
+    hairPrimary: '#241a17',
+    tattooId: 'tat-none',
+    jerseyNumber: 0,
+    emoteSlots: [],
+  };
+}
+
+/**
+ * Each hairstyle is a different silhouette on top of the head. At this size the
+ * outline is all you get, so the styles are separated by shape and height
+ * rather than by detail.
+ */
+function drawHair(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  r: number,
+  styleId: string,
+  hair: string,
+  skin: string,
+): void {
+  if (styleId === 'hair-bald') return;
+  ctx.save();
+  ctx.fillStyle = hair;
+  ctx.strokeStyle = hair;
+  ctx.lineCap = 'round';
+
+  switch (styleId) {
+    case 'hair-afro':
+      ctx.beginPath();
+      ctx.arc(x, y - r * 0.2, r * 0.98, Math.PI, Math.PI * 2);
+      ctx.fill();
+      break;
+    case 'hair-curls':
+      // A cap of overlapping curls rather than one smooth dome.
+      for (let i = -2; i <= 2; i++) {
+        ctx.beginPath();
+        ctx.arc(x + i * r * 0.32, y - r * 0.42 + Math.abs(i) * r * 0.14, r * 0.32, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      break;
+    case 'hair-highfade':
+      // Squared off and tall.
+      ctx.fillRect(x - r * 0.74, y - r * 1.28, r * 1.48, r * 0.86);
+      ctx.beginPath();
+      ctx.arc(x, y - r * 0.42, r * 0.8, Math.PI, Math.PI * 2);
+      ctx.fill();
+      break;
+    case 'hair-braids':
+    case 'hair-cornrows': {
+      ctx.beginPath();
+      ctx.arc(x, y - r * 0.06, r * 0.79, Math.PI * 1.02, Math.PI * 1.98);
+      ctx.lineWidth = r * 0.44;
+      ctx.stroke();
+      // Rows running back over the skull, and tails past the neck for braids.
+      ctx.lineWidth = Math.max(1, r * 0.11);
+      ctx.strokeStyle = mix(hair, '#000000', 0.45);
+      for (let i = -2; i <= 2; i++) {
+        ctx.beginPath();
+        ctx.moveTo(x + i * r * 0.26, y - r * 0.78);
+        ctx.lineTo(x + i * r * 0.3, y - r * 0.05);
+        if (styleId === 'hair-braids') ctx.lineTo(x + i * r * 0.34, y + r * 0.6);
+        ctx.stroke();
+      }
+      break;
+    }
+    case 'hair-locs':
+      ctx.beginPath();
+      ctx.arc(x, y - r * 0.06, r * 0.8, Math.PI * 1.02, Math.PI * 1.98);
+      ctx.lineWidth = r * 0.46;
+      ctx.stroke();
+      ctx.lineWidth = r * 0.22;
+      for (let i = -2; i <= 2; i++) {
+        ctx.beginPath();
+        ctx.moveTo(x + i * r * 0.34, y - r * 0.34);
+        ctx.lineTo(x + i * r * 0.44, y + r * 0.9);
+        ctx.stroke();
+      }
+      break;
+    case 'hair-topknot':
+      ctx.beginPath();
+      ctx.arc(x, y - r * 0.04, r * 0.82, Math.PI * 1.05, Math.PI * 1.95);
+      ctx.lineWidth = r * 0.36;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(x, y - r * 1.05, r * 0.3, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+    case 'hair-buzz':
+      ctx.beginPath();
+      ctx.arc(x, y - r * 0.02, r * 0.88, Math.PI * 1.06, Math.PI * 1.94);
+      ctx.lineWidth = r * 0.2;
+      ctx.stroke();
+      break;
+    case 'hair-waves':
+      ctx.beginPath();
+      ctx.arc(x, y - r * 0.02, r * 0.85, Math.PI * 1.05, Math.PI * 1.95);
+      ctx.lineWidth = r * 0.3;
+      ctx.stroke();
+      ctx.strokeStyle = mix(hair, skin, 0.35);
+      ctx.lineWidth = Math.max(0.8, r * 0.07);
+      for (let i = 0; i < 3; i++) {
+        ctx.beginPath();
+        ctx.arc(x, y - r * (0.1 + i * 0.14), r * (0.82 - i * 0.1), Math.PI * 1.1, Math.PI * 1.9);
+        ctx.stroke();
+      }
+      break;
+    default:
+      // Low fade: close on the sides, a little height on top.
+      ctx.beginPath();
+      ctx.arc(x, y - r * 0.03, r * 0.86, Math.PI * 1.05, Math.PI * 1.95);
+      ctx.lineWidth = r * 0.28;
+      ctx.stroke();
+      break;
+  }
+  ctx.restore();
+}

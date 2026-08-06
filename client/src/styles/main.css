@@ -2093,3 +2093,26 @@ input[type='text']:focus {
   background: var(--green);
   min-width: 4px;
 }
+
+/* Full-body preview figures. Taller than wide, because a player is. */
+.preview-figure {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  border-radius: 4px;
+  display: block;
+  border: 1px solid var(--line);
+  background: #0e1220;
+}
+.preview-figure.on { border-color: var(--green); }
+.preview-figure.wide { aspect-ratio: 4 / 3; }
+
+/* The locker rack sits above a full-body view of what you have on. */
+.locker-figure {
+  width: 100%;
+  max-width: 260px;
+  aspect-ratio: 3 / 4;
+  border-radius: 4px;
+  display: block;
+  border: 1px solid var(--line);
+  background: #0e1220;
+}

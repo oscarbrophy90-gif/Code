@@ -1,4 +1,5 @@
 import {
+  EMOTE_COOLDOWN,
   GRADE_COLOR,
   GRADE_LABEL,
   activeShotMeter,
@@ -524,6 +525,22 @@ export class Hud {
     ctx.fillStyle = '#626e86';
     ctx.textAlign = 'left';
     ctx.fillText('STAMINA', sx, sy - 5);
+
+    // Emote cooldown, shown only while it is running — a permanent "EMOTES
+    // READY" readout would be clutter for something you press twice a game.
+    if (p.emoteCooldown > 0) {
+      const ew = 74;
+      const ex = sx;
+      const ey = sy - 20;
+      ctx.fillStyle = 'rgba(8,10,16,0.75)';
+      roundRect(ctx, ex, ey, ew, 8, 3);
+      ctx.fill();
+      ctx.fillStyle = '#8a93a6';
+      roundRect(ctx, ex + 1, ey + 1, (ew - 2) * (1 - p.emoteCooldown / EMOTE_COOLDOWN), 6, 2);
+      ctx.fill();
+      ctx.fillStyle = '#626e86';
+      ctx.fillText(`EMOTE ${Math.ceil(p.emoteCooldown)}s`, ex + ew + 6, ey + 7);
+    }
 
     // Contest read, so the shooter can see pressure building.
     if (state.ball.owner === side && state.ball.state === 'held') {

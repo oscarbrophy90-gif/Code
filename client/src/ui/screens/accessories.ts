@@ -14,7 +14,7 @@ import { store } from '../../state/store.ts';
 import { audio } from '../../engine/audio.ts';
 import { navigate, refresh } from '../../main.ts';
 import { el, fmt, panel, toast } from '../dom.ts';
-import { portraitEl } from '../portrait.ts';
+import { AvatarRenderer, livePreview } from '../avatar.ts';
 import { drawDunkFrame } from '../dunkscene.ts';
 
 /** Grouped so the locker room reads like a wardrobe, not a spreadsheet. */
@@ -64,7 +64,7 @@ export function renderAccessories(): HTMLElement {
       el(
         'div',
         { class: 'pcard' },
-        portraitEl(player, 84),
+        lockerFigure(),
         el(
           'div',
           { class: 'meta' },
@@ -205,6 +205,18 @@ function dunkPreview(): HTMLElement {
 }
 
 /**
+ * You, head to toe, wearing everything currently equipped. This is the same
+ * renderer the court uses, so what the Locker shows is what walks out.
+ */
+function lockerFigure(): HTMLElement {
+  const canvas = el('canvas', { class: 'locker-figure' }) as HTMLCanvasElement;
+  const cfg = store.simConfig();
+  const avatar = new AvatarRenderer();
+  livePreview(canvas, () => avatar.draw(canvas, cfg));
+  return canvas;
+}
+
+/**
  * The six in-game emote slots. Clicking a slot cycles it through everything you
  * own and then back to empty, so setting up a full bar is six taps rather than
  * six dialogs.
@@ -233,9 +245,23 @@ function emoteRack(): HTMLElement {
     setSlot(index, nextAt >= owned.length ? null : owned[nextAt].id);
   };
 
+  // The first filled slot plays on a loop above the rack, so choosing an emote
+  // is done by watching it rather than by reading its name.
+  const showing = slots.find((id): id is string => !!id) ?? null;
+  const stage = el('canvas', { class: 'preview-figure wide', style: 'max-width:320px;margin:0 auto 10px' }) as HTMLCanvasElement;
+  if (showing) {
+    const cfg = store.simConfig();
+    const avatar = new AvatarRenderer();
+    const cycle = 2.6;
+    livePreview(stage, (elapsed) => {
+      avatar.draw(stage, cfg, { emoteId: showing, t: Math.min(1, ((elapsed % cycle) / cycle) * 1.5), zoom: 0.92 });
+    });
+  }
+
   return el(
     'div',
     { style: 'margin-bottom:12px' },
+    showing ? stage : null,
     el(
       'div',
       { class: 'emote-rack' },
@@ -310,6 +336,8 @@ function isEquipped(item: StoreItem): boolean {
       return l.courtId === item.id;
     case 'hairstyle':
       return b.hairstyleId === item.id;
+    case 'tattoo':
+      return l.tattooId === item.id;
     case 'jumpshot':
       return `jumpshot-${l.jumpshotId}` === item.id;
     case 'dunkPackage':
@@ -349,6 +377,9 @@ export function equip(item: StoreItem): void {
         break;
       case 'hairstyle':
         t.body.hairstyleId = item.id;
+        break;
+      case 'tattoo':
+        t.loadout.tattooId = item.id;
         break;
       case 'jumpshot':
         t.loadout.jumpshotId = item.id.replace('jumpshot-', '');

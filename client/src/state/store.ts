@@ -21,6 +21,7 @@ import {
   type Profile,
   type SimPlayerConfig,
   EMOTE_SLOTS,
+  type Appearance,
 } from '@hoops/shared';
 
 const STORAGE_KEY = 'hoops-elite.profile.v1';
@@ -106,6 +107,7 @@ export function createPlayer(slot: number, name: string, build: BuildSpec): MyPl
       shoesId: 'shoes-starter',
       clothingId: 'cloth-shorts-basic',
       accessoryId: 'acc-none',
+      tattooId: 'tat-none',
       jumpshotId: 'base-rise',
       dunkPackageId: 'basic-slam',
       celebrationId: 'celeb-nod',
@@ -191,6 +193,7 @@ class Store {
       p.build.wingspanIn = wingspanFor(p.build.position, p.build.heightIn);
       if (typeof p.build.jerseyNumber !== 'number') p.build.jerseyNumber = 23;
       if (!p.loadout.titleId) p.loadout.titleId = 'title-rookie';
+      if (!p.loadout.tattooId) p.loadout.tattooId = 'tat-none';
       for (const t of DEFAULT_TITLES) if (!p.unlocked.includes(t)) p.unlocked.push(t);
       if (!p.drillBests) p.drillBests = {};
       // Six emote slots replaced the single equipped emote. An older save keeps
@@ -319,7 +322,7 @@ class Store {
 
   /** Builds the config the simulation needs from the active MyPlayer. */
   simConfig(player = this.player): SimPlayerConfig {
-    const jersey = jerseyColors(player.loadout.jerseyId);
+    const jersey = colorsOf(player.loadout.jerseyId, ['#e8eef5', '#8a93a6']);
     return {
       id: player.id,
       name: player.name,
@@ -338,8 +341,48 @@ class Store {
       titleId: player.loadout.titleId,
       winStreak: player.stats.currentWinStreak,
       gear: equippedGear(player),
+      appearance: appearanceFor(player),
     };
   }
+}
+
+/** Colours off a store item, falling back to something sane if it is missing. */
+function colorsOf(id: string | null | undefined, fallback: [string, string]): [string, string] {
+  const item = id ? STORE_BY_ID[id] : undefined;
+  return item ? item.colors : fallback;
+}
+
+/**
+ * Everything you have equipped, resolved into the colours and ids the court
+ * renderer draws from. This is the whole reason cosmetics show up in a game:
+ * before it existed the renderer only ever saw two jersey colours, so shoes,
+ * hair, sleeves and accessories were bought and then never seen.
+ */
+export function appearanceFor(player: MyPlayer): Appearance {
+  const l = player.loadout;
+  const jersey = colorsOf(l.jerseyId, ['#e8eef5', '#8a93a6']);
+  const shoes = colorsOf(l.shoesId, ['#f2f2f2', '#c0c6d0']);
+  const clothing = colorsOf(l.clothingId, ['#3a4050', '#8a93a6']);
+  const accessory = colorsOf(l.accessoryId, ['#3a4050', '#3a4050']);
+  const hair = colorsOf(player.body.hairstyleId, ['#241a17', '#3a2a24']);
+  return {
+    skinTone: player.body.skinTone,
+    jerseyPrimary: jersey[0],
+    jerseySecondary: jersey[1],
+    shoePrimary: shoes[0],
+    shoeSecondary: shoes[1],
+    clothingId: l.clothingId,
+    clothingPrimary: clothing[0],
+    clothingSecondary: clothing[1],
+    accessoryId: l.accessoryId,
+    accessoryPrimary: accessory[0],
+    accessorySecondary: accessory[1],
+    hairstyleId: player.body.hairstyleId,
+    hairPrimary: hair[0],
+    tattooId: l.tattooId ?? 'tat-none',
+    jerseyNumber: player.build.jerseyNumber,
+    emoteSlots: [...(l.emoteSlots ?? [])],
+  };
 }
 
 /** The visible gear on the walkout card, in the order it reads best. */
@@ -355,17 +398,7 @@ function equippedGear(player: MyPlayer): string[] {
 }
 
 function jerseyColors(id: string): [string, string] {
-  const map: Record<string, [string, string]> = {
-    'jersey-starter': ['#e8eef5', '#8a93a6'],
-    'jersey-harbor': ['#1a6f8f', '#5fe3d0'],
-    'jersey-forge': ['#c2452d', '#ffb347'],
-    'jersey-voltage': ['#f0c419', '#4ad9ff'],
-    'jersey-royals': ['#6b3fc4', '#c9a227'],
-    'jersey-elite': ['#a06bff', '#d9bcff'],
-    'jersey-legend': ['#ff5c8a', '#ffd23d'],
-    'jersey-midnight': ['#101018', '#00e5b0'],
-  };
-  return map[id] ?? map['jersey-starter'];
+  return colorsOf(id, ['#e8eef5', '#8a93a6']);
 }
 
 export const store = new Store();

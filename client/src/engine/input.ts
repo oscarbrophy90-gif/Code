@@ -88,11 +88,11 @@ export class InputManager {
   onPause: (() => void) | null = null;
 
   /**
-   * The emote slot asked for since the last call, or null. Emotes are pure
-   * presentation — they never reach the simulation, so they live here rather
-   * than on PlayerInput.
+   * The emote slot asked for since the last sample, or null. It rides on
+   * PlayerInput because an emote is a real action in the sim — you hold the
+   * ball out on a bounce and nobody can take it — not just a HUD flourish.
    */
-  takeEmote(): number | null {
+  private takeEmote(): number | null {
     const slot = this.pendingEmote;
     this.pendingEmote = null;
     return slot;
@@ -169,6 +169,7 @@ export class InputManager {
     input.drive = this.keys.has('KeyE');
     input.steal = this.pressedThisFrame.has('KeyF');
     input.fake = this.pressedThisFrame.has('KeyR');
+    input.emote = this.takeEmote();
 
     for (const code of this.pressedThisFrame) {
       const mapped = KEY_MOVES[code];
