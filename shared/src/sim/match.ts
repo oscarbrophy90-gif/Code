@@ -467,11 +467,19 @@ function updatePlayer(state: MatchState, side: Side, input: PlayerInput, dt: num
       p.vx += toRim.x * def.burst * forward * dt * 6;
       p.vz += toRim.z * def.burst * forward * dt * 6;
     }
+    // Retreat is always away from the rim, and it is a displacement rather than
+    // a shove on the velocity. Nudging the velocity does not work: applyMovement
+    // runs straight afterwards and drags it back toward the stick, which is zero
+    // while you are stepping back, so friction ate the whole thing and a
+    // "stepback" moved you about two inches. Driving the position directly means
+    // the step is exactly def.retreat feet no matter what the friction is doing.
+    // The sine is normalised so it integrates to 1 across the animation.
     if (def.retreat > 0) {
-      // Retreat is always away from the rim.
       const away = normalize(p.x - COURT.rimX, p.z - COURT.rimZ);
-      p.vx += away.x * def.retreat * shape * dt * 9;
-      p.vz += away.z * def.retreat * shape * dt * 9;
+      const hop = ((Math.PI / 2) * Math.max(0, shape) * dt) / p.moveDuration;
+      const stepped = clampToCourt(p.x + away.x * def.retreat * hop, p.z + away.z * def.retreat * hop);
+      p.x = stepped.x;
+      p.z = stepped.z;
     }
     const canCancel = progress >= def.cancelPoint;
     // The stepback is the one move you shoot with its own key. Pressing shoot
@@ -480,7 +488,13 @@ function updatePlayer(state: MatchState, side: Side, input: PlayerInput, dt: num
     // early. Now you hold the stepback key: the meter starts when you clear the
     // step and runs for as long as you keep holding.
     const onMoveKey = p.moveId === 'stepback';
-    if (canCancel && (onMoveKey ? input.moveShoot : input.shoot)) {
+    const shotHeld = onMoveKey ? input.moveShoot : input.shoot;
+    // A move built on a big retreat has to land the step before it rises into
+    // the shot. Cancelling at the cancel point meant going up 35% of the way
+    // through your own stepback, which threw away most of the room it made.
+    // Small moves still cancel early — that is the whole point of them.
+    const risesOnLanding = def.retreat > 3;
+    if (canCancel && shotHeld && !risesOnLanding) {
       startShot(state, side, def.followUp === 'euroLayup' ? 'euroLayup' : (def.followUp as ShotType) ?? 'jumper');
       p.shotOnMoveKey = onMoveKey;
       return;
@@ -505,6 +519,15 @@ function updatePlayer(state: MatchState, side: Side, input: PlayerInput, dt: num
         p.moveId = null;
         p.moveCooldown = moveCooldownFor(p);
         startShot(state, side, 'euroLayup');
+        return;
+      }
+      if (risesOnLanding && shotHeld && hasBall) {
+        // The step has landed and you are still holding it, so now you go up.
+        // The room is already made, so the meter runs from a set base.
+        p.moveId = null;
+        p.moveCooldown = moveCooldownFor(p);
+        startShot(state, side, (def.followUp as ShotType) ?? 'jumper');
+        p.shotOnMoveKey = onMoveKey;
         return;
       }
       p.state = hasBall ? 'dribble' : 'idle';
@@ -792,6 +815,10 @@ function tryFumble(state: MatchState, side: Side, def: DribbleMoveDef, rng: Rng)
   const d = state.players[other(side)];
   const pressure = clamp01(1 - Math.hypot(d.x - p.x, d.z - p.z) / 7);
   chance *= 1 + pressure * 0.8;
+  // A retreat pulls the ball away from the defender rather than across him, so
+  // it is the safest moment in the move set. Without this the stepback carried
+  // the same strip risk as a between-the-legs taken into a defender's chest.
+  chance *= 1 - clamp01(def.retreat / 8) * 0.55;
   chance *= 1 - clamp01(p.stamina) * 0.15;
 
   if (!rng.chance(clamp01(chance))) return false;

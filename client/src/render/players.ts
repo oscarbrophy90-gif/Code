@@ -14,7 +14,7 @@ interface Gait {
 
 export class PlayerRenderer {
   /** Per-player stride state, so the walk cycle is continuous across frames. */
-  private gaits = new Map<number, Gait & { at: number }>();
+  private gaits = new Map<number, Gait & { at: number; x: number; z: number }>();
 
   /**
    * Advances the walk cycle. Frequency rises with speed but the *phase* only
@@ -25,18 +25,26 @@ export class PlayerRenderer {
     const prev = this.gaits.get(p.side);
     const dt = prev ? Math.max(0, Math.min(0.1, time - prev.at)) : 0;
 
+    // Stride off the ground actually covered, not off the velocity. A stepback
+    // is a displacement rather than a shove on the velocity, so a player who is
+    // genuinely moving four feet backwards has vx/vz near zero — read the
+    // velocity and he slides back with his legs still. Capped so a teleport
+    // (inbound, possession reset) does not spin the legs.
+    const moved = prev && dt > 0 ? Math.hypot(p.x - prev.x, p.z - prev.z) / dt : speed;
+    const groundSpeed = Math.min(26, Math.max(speed, moved));
+
     // A real stride is roughly 5.5 ft, so steps per second is speed / 5.5, and
     // a full cycle is two steps. Plus a slow idle shuffle so a standing player
     // is not frozen solid.
-    const stepsPerSecond = speed / 5.5;
+    const stepsPerSecond = groundSpeed / 5.5;
     const frequency = (1.1 + stepsPerSecond) * Math.PI;
-    const target = Math.min(1, speed / 7);
+    const target = Math.min(1, groundSpeed / 7);
 
     const phase = (prev ? prev.phase : p.side * 2) + frequency * dt;
     // Ease the amplitude so starting and stopping does not snap the legs.
     const amplitude = prev ? prev.amplitude + (target - prev.amplitude) * Math.min(1, dt * 9) : target;
 
-    const next = { phase: phase % (Math.PI * 2), amplitude, at: time };
+    const next = { phase: phase % (Math.PI * 2), amplitude, at: time, x: p.x, z: p.z };
     this.gaits.set(p.side, next);
     return next;
   }
@@ -133,6 +141,12 @@ export class PlayerRenderer {
           spread = 1.2 + swell * 0.7;
         } else if (p.moveId === 'spin') {
           spread = 1.1;
+        } else if (p.moveId === 'stepback' || p.moveId === 'snatchBack') {
+          // Load into the plant foot, push off, then land wide and low ready to
+          // rise. The dip is deepest at the push and opens out as he lands.
+          crouch = 0.34 + swell * 0.42;
+          spread = 1.2 + swell * 1.1;
+          armLift = swell * 0.25;
         }
         break;
       }

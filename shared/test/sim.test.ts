@@ -150,29 +150,36 @@ test('a green release always scores, however heavy the contest', () => {
 });
 
 test('a block or a steal hands the ball over; a miss is a live rebound', () => {
-  const state = createMatch(generateOpponent(80, 5), generateOpponent(80, 6), defaultMatchConfig(), 4242);
-  assert.equal(state.config.turnoverOnMiss, false, 'misses go to the glass, not straight over');
+  assert.equal(defaultMatchConfig().turnoverOnMiss, false, 'misses go to the glass, not straight over');
 
-  const ai0 = new AiController(0, 'pro', 1, false);
-  const ai1 = new AiController(1, 'pro', 2, false);
+  // Three games, not one. A takeaway shows up in about 97% of games, so a
+  // single seed asserting "expected at least one block or steal" fails roughly
+  // one time in thirty for no reason anyone can act on. The per-event checks
+  // below still run on every takeaway in every game.
   let sawLooseBallOffMiss = false;
   let sawTakeaway = false;
   let rebounds = 0;
-  let frames = 0;
 
-  while (state.phase !== 'over' && frames < 120 * 60 * 8) {
-    stepMatch(state, [ai0.update(state, SIM_DT), ai1.update(state, SIM_DT)], SIM_DT);
-    for (const e of drainEvents(state)) {
-      if (e.type === 'miss' && state.ball.state === 'loose') sawLooseBallOffMiss = true;
-      if (e.type === 'rebound') rebounds++;
-      if (e.type === 'block' || e.type === 'steal') {
-        // A takeaway still ends the possession outright: the ball is the
-        // taker's, with no scramble for it.
-        assert.equal(state.possession, e.side, 'a block or steal gives the ball to whoever made it');
-        sawTakeaway = true;
+  for (const seed of [4242, 5151, 6060]) {
+    const state = createMatch(generateOpponent(80, 5), generateOpponent(80, 6), defaultMatchConfig(), seed);
+    const ai0 = new AiController(0, 'pro', 1, false);
+    const ai1 = new AiController(1, 'pro', 2, false);
+    let frames = 0;
+
+    while (state.phase !== 'over' && frames < 120 * 60 * 8) {
+      stepMatch(state, [ai0.update(state, SIM_DT), ai1.update(state, SIM_DT)], SIM_DT);
+      for (const e of drainEvents(state)) {
+        if (e.type === 'miss' && state.ball.state === 'loose') sawLooseBallOffMiss = true;
+        if (e.type === 'rebound') rebounds++;
+        if (e.type === 'block' || e.type === 'steal') {
+          // A takeaway still ends the possession outright: the ball is the
+          // taker's, with no scramble for it.
+          assert.equal(state.possession, e.side, 'a block or steal gives the ball to whoever made it');
+          sawTakeaway = true;
+        }
       }
+      frames++;
     }
-    frames++;
   }
   assert.ok(sawLooseBallOffMiss, 'a miss should leave the ball live off the rim');
   assert.ok(rebounds > 0, 'expected rebounds to be contested and won');
@@ -1297,14 +1304,21 @@ test('standing at the corner three clears the ball, and it stays cleared in the 
   }
 });
 
-test('the stepback is thrown and timed on its own key, and shoot never fires one', () => {
-  // The bug: the stepback cancelled into its jumper on the shoot button, so the
-  // same press that started the meter also ended it. It fired the instant the
-  // cancel became legal and always graded very early, with nothing the player
-  // could do about it. Now K throws the step and holds the meter.
+test('the stepback steps back, then rises into a shot you time on its own key', () => {
+  // Two bugs in one move. The retreat was a nudge on the velocity that
+  // applyMovement immediately damped back toward the stick, so a "stepback"
+  // moved you about two inches. And it cancelled into its jumper on the shoot
+  // button at 35% of the animation, so the same press started and ended the
+  // meter — it fired the instant the cancel became legal, always graded very
+  // early, and threw away most of the step on the way. Now the step is a real
+  // displacement that finishes first, and K holds the meter.
   function attempt(holdFrames: number, key: 'moveShoot' | 'shoot') {
+    const a = generateOpponent(75, 3);
+    // Take the strip roll out of it — this test is about the step and the
+    // meter, and a fumble is covered elsewhere.
+    a.attrs.ballHandle = 95;
     const state = createMatch(
-      generateOpponent(75, 3),
+      a,
       generateOpponent(75, 4),
       defaultMatchConfig({ manualCheck: false, instantInbound: true, shotClock: 999 }),
       777,
@@ -1319,33 +1333,40 @@ test('the stepback is thrown and timed on its own key, and shoot never fires one
     state.ball.owner = 0;
     state.ball.state = 'held';
     state.needsClear = false;
+    const z0 = p.z;
+    let back = 0;
 
     for (let i = 0; i < 400; i++) {
-      const held = i < holdFrames;
       const input = {
         ...emptyInput(),
         move: i === 0 ? ('stepback' as const) : null,
         moveDirX: 0,
         moveDirZ: 1,
-        [key]: held,
+        [key]: i < holdFrames,
       };
       stepMatch(state, [input, emptyInput()], SIM_DT);
+      back = Math.max(back, p.z - z0);
       for (const e of drainEvents(state)) {
-        if (e.type === 'shotRelease') return { shotType: e.shotType, grade: e.grade, error: e.timingError };
+        if (e.type === 'shotRelease') return { shotType: e.shotType, grade: e.grade, error: e.timingError, back };
       }
     }
-    return null;
+    return { shotType: null, grade: null, error: null, back };
+  }
+
+  // The step itself: real ground, away from the rim, every time — including on
+  // a tap that never becomes a shot.
+  for (const hold of [30, 60, 120]) {
+    assert.ok(attempt(hold, 'moveShoot').back > 3.5, `holding K for ${hold} frames must actually step back`);
   }
 
   // Holding longer walks the release through the meter instead of pinning it at
   // the front, and somewhere in there is a green.
   const errors: number[] = [];
   let greens = 0;
-  for (let hold = 20; hold <= 100; hold += 2) {
+  for (let hold = 55; hold <= 150; hold += 3) {
     const r = attempt(hold, 'moveShoot');
-    assert.ok(r, `holding K for ${hold} frames should launch a stepback`);
-    assert.equal(r.shotType, 'stepback');
-    errors.push(r.error);
+    assert.equal(r.shotType, 'stepback', `holding K for ${hold} frames should launch a stepback`);
+    errors.push(r.error!);
     if (r.grade === 'green') greens++;
   }
   for (let i = 1; i < errors.length; i++) {
@@ -1356,10 +1377,9 @@ test('the stepback is thrown and timed on its own key, and shoot never fires one
   assert.ok(greens > 0, 'there is a green window you can actually hit');
 
   // Shoot on its own must never produce a stepback. It can still give you an
-  // ordinary pull-up once the step has finished — that is space shooting
+  // ordinary pull-up once the step has landed — that is space shooting
   // normally, which is the point.
-  for (const hold of [30, 60, 90, 140]) {
-    const r = attempt(hold, 'shoot');
-    assert.notEqual(r?.shotType, 'stepback', `space must not fire a stepback (held ${hold})`);
+  for (const hold of [40, 80, 120, 160]) {
+    assert.notEqual(attempt(hold, 'shoot').shotType, 'stepback', `space must not fire a stepback (held ${hold})`);
   }
 });
