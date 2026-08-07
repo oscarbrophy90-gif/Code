@@ -1551,6 +1551,41 @@ test('every section holds fifteen, and all fifteen are gone next window', () => 
   assert.equal(msUntilShopRefresh(base + 60_000), SHOP_WINDOW_MS - ((base + 60_000) % SHOP_WINDOW_MS));
 });
 
+test('a shelf is never all commons — every section shows a spread of tiers', () => {
+  // The bug: drawing all fifteen from one rarity-weighted pool just produces the
+  // average, which is twelve commons. Measured before the fix, the jersey shelf
+  // was 12 common / 2 rare / 1 epic / 0 legendary and emotes were 12/3/0/0.
+  const base = 1_800_000_000_000;
+
+  for (const category of STOCKED_CATEGORIES) {
+    const pool = STORE_ITEMS.filter(
+      (i) => i.category === category && i.price > 0 && !i.requirement && i.rarity !== 'mythic',
+    );
+    // Sections too small to rotate show everything they have; nothing to check.
+    if (pool.length <= SHOP_SLOTS) continue;
+    const has = (r: StoreItem['rarity']) => pool.some((i) => i.rarity === r);
+
+    for (let w = 0; w < 40; w++) {
+      const shelf = categoryStock(base + w * SHOP_WINDOW_MS, category).filter((i) => i.rarity !== 'mythic');
+      const count = (r: StoreItem['rarity']) => shelf.filter((i) => i.rarity === r).length;
+
+      assert.ok(
+        count('common') <= 8,
+        `${category} window ${w}: ${count('common')} of ${shelf.length} were common`,
+      );
+      // Every tier the section actually stocks has to turn up on every shelf.
+      for (const r of ['rare', 'epic', 'legendary'] as const) {
+        if (!has(r)) continue;
+        assert.ok(count(r) > 0, `${category} window ${w}: no ${r} on the shelf`);
+      }
+      assert.ok(
+        new Set(shelf.map((i) => i.rarity)).size >= 3,
+        `${category} window ${w}: only ${new Set(shelf.map((i) => i.rarity)).size} tiers on the shelf`,
+      );
+    }
+  }
+});
+
 test('mythic stock is rare, rotation-only, and unbuyable off the shelf', () => {
   const mythics = STORE_ITEMS.filter((i) => i.rarity === 'mythic');
   assert.ok(mythics.length >= 80, `expected a deep mythic tier, found ${mythics.length}`);
