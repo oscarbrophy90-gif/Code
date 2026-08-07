@@ -22,6 +22,7 @@ import {
   type SimPlayerConfig,
   type Side,
   STORE_BY_ID,
+  ballThroughRim,
   dribbleBounceIndex,
 } from '@hoops/shared';
 
@@ -118,6 +119,8 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
   let shake = 0;
   /** last bounce index heard per side, so each bounce plays exactly once */
   let lastBounce: [number | null, number | null] = [null, null];
+  /** a made shot is in the air and its net has not sounded yet */
+  let swishPending = false;
   let elapsedRealSeconds = 0;
   let localAttempts = 0;
   let localGreens = 0;
@@ -288,6 +291,27 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
     opts.net?.reconcile(state);
     if (drill) updateDrill(dt);
     playDribbleBounce();
+    playNetSwish();
+  };
+
+  /**
+   * The net, fired on the exact frame the ball drops through the ring.
+   *
+   * It used to hang off the `score` event, which is the wrong moment twice over:
+   * scoring happens when the flight *ends*, a foot below the rim, so the sound
+   * always trailed the picture. `ballThroughRim` flips true on the frame the ball
+   * crosses the ring itself — measured one to two sim frames ahead of the score,
+   * with the ball between 9.84 and 10.00 feet. That is the frame you see it go in.
+   *
+   * `score` stays as the fallback for the two cases that have no flight to watch:
+   * free throws, which resolve straight off the meter, and the occasional make
+   * whose crossing and landing fall on the same frame.
+   */
+  const playNetSwish = () => {
+    if (!swishPending || !ballThroughRim(state)) return;
+    swishPending = false;
+    netSwing = 1;
+    audio.swish();
   };
 
   /**
@@ -408,6 +432,8 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
       switch (e.type) {
         case 'shotRelease': {
           const p = state.players[e.side];
+          // Arm the net for this shot. A miss or a block disarms it again.
+          swishPending = e.made;
           if (e.side === localSide) {
             localAttempts++;
             if (e.grade === 'green') localGreens++;
@@ -433,17 +459,24 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
         }
         case 'score': {
           const p = state.players[e.side];
-          netSwing = 1;
-          audio.play('swish');
+          // Normally the net has already sounded, on the frame the ball crossed
+          // the ring. This catches the shots that never had a flight to watch.
+          if (swishPending) {
+            swishPending = false;
+            netSwing = 1;
+            audio.swish();
+          }
           hud.push(`+${e.value}`, '#3ef07a', p.x, p.z, true);
           break;
         }
         case 'miss':
+          swishPending = false;
           audio.play('rim');
           netSwing = 0.35;
           break;
         case 'block': {
           const p = state.players[e.side];
+          swishPending = false;
           audio.play('block');
           shake = Math.min(1, shake + (e.chaseDown ? 1 : 0.6));
           hud.push(e.chaseDown ? 'CHASE-DOWN!' : 'BLOCKED!', '#4aa3ff', p.x, p.z, true);

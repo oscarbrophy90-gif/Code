@@ -2114,6 +2114,25 @@ export function dribbleBounceIndex(state: MatchState, side: Side): number | null
   return Math.floor((state.time * dribbleTempo(p)) / Math.PI);
 }
 
+/**
+ * Whether the ball is right now inside the hoop on a shot that is going in.
+ *
+ * The net is a picture event, not a scoring one. `score` fires when the flight
+ * ends, and the flight ends a touch *below* the rim — so scoring is already a
+ * beat late, and free throws score with no flight at all. This flips false→true
+ * on the frame the ball drops through the rim plane, which is the frame you see
+ * it go in. A caller watches the edge; nothing here has any bearing on the rules.
+ */
+export function ballThroughRim(state: MatchState): boolean {
+  const ball = state.ball;
+  if (ball.state !== 'shot' || !ball.shotWillGoIn) return false;
+  // Every shot arcs over the rim before it comes down — the apex is at least
+  // 2.4 ft above it — so "past the apex and at or below the ring" is the drop
+  // through, and can never catch the ball on the way up from the shooter's hand.
+  if (ball.flightTime < ball.flightDuration * 0.55) return false;
+  return ball.y <= COURT.rimY;
+}
+
 /** Live shot meter data for the HUD. Returns null when no shot is running. */
 export function activeShotMeter(state: MatchState, side: Side): {
   progress: number;

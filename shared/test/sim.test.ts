@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { AiController } from '../src/sim/ai.ts';
-import { createMatch, currentContest, defaultMatchConfig, EMOTE_COOLDOWN, EMOTE_DURATION, SIM_DT, dribbleBounceIndex, dribbleTempo, stepMatch, drainEvents } from '../src/sim/match.ts';
+import { createMatch, currentContest, defaultMatchConfig, EMOTE_COOLDOWN, EMOTE_DURATION, SIM_DT, ballThroughRim, dribbleBounceIndex, dribbleTempo, stepMatch, drainEvents } from '../src/sim/match.ts';
 import { generateOpponent } from '../src/data/opponents.ts';
 import {
   clampHeightToPosition,
@@ -2056,4 +2056,67 @@ test('the dribble bounce index ticks over exactly when the ball is on the floor'
   state.ball.state = 'loose';
   assert.equal(dribbleBounceIndex(state, 0), null, 'a loose ball is not being dribbled');
   assert.equal(dribbleBounceIndex(state, 1), null, 'and nor is it for the other side');
+});
+
+test('the net swish fires as the ball crosses the ring, ahead of the score', () => {
+  // The sound used to hang off the `score` event, which fires when the flight
+  // ends — a foot under the rim, a frame or two after you see the ball go in.
+  // It now fires on this crossing, so the crossing has to lead the score and it
+  // has to happen with the ball at the ring.
+  const leads: number[] = [];
+  const heights: number[] = [];
+  let scores = 0;
+  let noFlight = 0;
+  let falseFires = 0;
+
+  for (let g = 0; g < 6; g++) {
+    const seed = g * 977 + 13;
+    const state = createMatch(generateOpponent(80, seed), generateOpponent(80, seed + 1), defaultMatchConfig(), seed * 3 + 1);
+    const a0 = new AiController(0, 'pro', 1, false);
+    const a1 = new AiController(1, 'pro', 2, false);
+    let pending: { frame: number; y: number } | null = null;
+    let armed = false;
+
+    for (let f = 0; f < 120 * 60 * 8 && state.phase !== 'over'; f++) {
+      stepMatch(state, [a0.update(state, SIM_DT), a1.update(state, SIM_DT)], SIM_DT);
+      if (ballThroughRim(state)) {
+        // It must never fire on a shot that is not going in.
+        if (!armed) falseFires++;
+        if (!pending) pending = { frame: state.frame, y: state.ball.y };
+      }
+      for (const e of drainEvents(state)) {
+        if (e.type === 'shotRelease') armed = e.made;
+        if (e.type === 'miss' || e.type === 'block') { armed = false; pending = null; }
+        if (e.type === 'score') {
+          scores++;
+          if (pending) {
+            leads.push(state.frame - pending.frame);
+            heights.push(pending.y);
+          } else {
+            noFlight++;
+          }
+          armed = false;
+          pending = null;
+        }
+      }
+    }
+  }
+
+  assert.equal(falseFires, 0, 'the net must never sound on a shot that is not going in');
+  assert.ok(scores > 40, `expected a decent sample of baskets, got ${scores}`);
+  assert.ok(leads.length > scores * 0.7, `most baskets should be caught in flight, got ${leads.length} of ${scores}`);
+  // Free throws resolve straight off the meter with no flight at all, so they
+  // will always fall through to the score event — that is what the fallback in
+  // the match screen is for.
+  assert.ok(noFlight < scores * 0.3, `too many baskets had no crossing: ${noFlight} of ${scores}`);
+
+  for (const lead of leads) {
+    assert.ok(lead >= 1, 'the crossing has to come before the score, never after');
+    assert.ok(lead <= 4, `the crossing should hug the score, was ${lead} frames early`);
+  }
+  for (const y of heights) {
+    // The ring is at COURT.rimY and a made shot lands 0.2ft under it, so a fire
+    // anywhere outside that band means it caught the ball somewhere else.
+    assert.ok(y <= COURT.rimY + 1e-6 && y >= COURT.rimY - 0.25, `fired at ${y.toFixed(3)}ft, not at the ring`);
+  }
 });

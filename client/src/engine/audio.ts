@@ -1,8 +1,9 @@
 import { DRIBBLE_WAV_BASE64 } from './dribblesound.ts';
+import { SWISH_WAV_BASE64 } from './swishsound.ts';
 
 /**
- * Audio. Everything except the dribble is synthesised at runtime; the dribble is
- * a ten-kilobyte slice of a supplied recording, inlined as base64 so the
+ * Audio. Everything except the dribble and the net is synthesised at runtime;
+ * those two are small slices of supplied recordings, inlined as base64 so the
  * standalone build still ships as one file.
  */
 export type Sfx =
@@ -22,7 +23,9 @@ export type Sfx =
 class AudioEngine {
   /** The supplied dribble sample, decoded once and reused for every bounce. */
   private dribbleBuf: AudioBuffer | null = null;
-  private dribbleLoading = false;
+  /** The supplied net sample, likewise. */
+  private swishBuf: AudioBuffer | null = null;
+  private samplesLoading = false;
 
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
@@ -50,20 +53,51 @@ class AudioEngine {
   /** Call from a user gesture so autoplay policies let audio through. */
   unlock(): void {
     const ctx = this.ensure();
-    if (!ctx || this.dribbleBuf || this.dribbleLoading) return;
-    this.dribbleLoading = true;
-    const raw = atob(DRIBBLE_WAV_BASE64);
+    if (!ctx || this.samplesLoading) return;
+    this.samplesLoading = true;
+    // A browser that will not decode one of these falls back to the synthesised
+    // version of that sound, so a failure here costs nothing.
+    void this.decode(ctx, DRIBBLE_WAV_BASE64).then((buf) => {
+      this.dribbleBuf = buf;
+    });
+    void this.decode(ctx, SWISH_WAV_BASE64).then((buf) => {
+      this.swishBuf = buf;
+    });
+  }
+
+  private decode(ctx: AudioContext, base64: string): Promise<AudioBuffer | null> {
+    const raw = atob(base64);
     const bytes = new Uint8Array(raw.length);
     for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
-    void ctx
-      .decodeAudioData(bytes.buffer)
-      .then((buf) => {
-        this.dribbleBuf = buf;
-      })
-      .catch(() => {
-        // A browser that will not decode it falls back to the synthesised thump.
-        this.dribbleBuf = null;
-      });
+    return ctx.decodeAudioData(bytes.buffer).catch(() => null);
+  }
+
+  /** Plays a decoded sample now, at `level`, with no scheduling in between. */
+  private shoot(ctx: AudioContext, buf: AudioBuffer, level: number, pitch: number): void {
+    if (!this.sfxGain) return;
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.playbackRate.value = pitch;
+    const gain = ctx.createGain();
+    gain.gain.value = level;
+    src.connect(gain);
+    gain.connect(this.sfxGain);
+    src.start();
+  }
+
+  /**
+   * The net. Called on the frame the ball crosses the rim plane on a make, so
+   * the sample's attack and the ball entering the hoop are the same moment.
+   */
+  swish(pitch = 1): void {
+    const ctx = this.ensure();
+    if (!ctx || !this.sfxGain) return;
+    if (!this.swishBuf) {
+      // Still decoding, or it failed: the old synthesised hiss stands in.
+      this.noise(ctx, ctx.currentTime, 0.22, 2600, 0.3);
+      return;
+    }
+    this.shoot(ctx, this.swishBuf, 0.9, pitch);
   }
 
   /**
@@ -82,15 +116,8 @@ class AudioEngine {
       this.thump(ctx, ctx.currentTime, 130 * pitch, 0.09, 0.22 * level);
       return;
     }
-    const src = ctx.createBufferSource();
-    src.buffer = this.dribbleBuf;
     // A little variation so a long possession does not turn into a metronome.
-    src.playbackRate.value = pitch;
-    const gain = ctx.createGain();
-    gain.gain.value = level;
-    src.connect(gain);
-    gain.connect(this.sfxGain);
-    src.start();
+    this.shoot(ctx, this.dribbleBuf, level, pitch);
   }
 
   play(sound: Sfx, pitch = 1): void {
