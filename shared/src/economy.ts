@@ -113,6 +113,7 @@ export type StoreCategory =
   | 'tattoo'
   | 'animation'
   | 'celebration'
+  | 'threeCelebration'
   | 'emote'
   | 'jumpshot'
   | 'dunkPackage'

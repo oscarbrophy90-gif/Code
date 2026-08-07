@@ -112,6 +112,24 @@ const emotes: StoreItem[] = [
   { id: 'emote-ghost', name: 'Ghost', category: 'emote', price: 38000, rarity: 'mythic', rotationOnly: true, colors: ['#0a0616', '#ff4d8d'], description: 'You fade out completely for a second. Hardly ever in stock.' },
 ];
 
+/**
+ * Fired the moment a three goes down, during the beat before the ball is checked
+ * back in. Separate from the win celebration because they happen at completely
+ * different moments and you want different things at each.
+ */
+const threeCelebrations: StoreItem[] = [
+  { id: 'three-none', name: 'Straight Back', category: 'threeCelebration', price: 0, rarity: 'common', colors: ['#8a93a6', '#dfe8ef'], description: 'Nothing at all. Turn and get back on defence.' },
+  { id: 'three-hold', name: 'Hold the Follow', category: 'threeCelebration', price: 0, rarity: 'common', colors: ['#8a93a6', '#e8eef5'], description: 'Freeze the wrist and admire it.' },
+  { id: 'three-threetothehead', name: 'Three to the Head', category: 'threeCelebration', price: 2400, rarity: 'common', colors: ['#4aa3ff', '#e8f7ff'], description: 'Three fingers, straight to the temple.' },
+  { id: 'three-cold', name: 'Ice Cold', category: 'threeCelebration', price: 3800, rarity: 'rare', colors: ['#3dd6ff', '#e8f7ff'], description: 'Two fingers to the forearm, walking away.' },
+  { id: 'three-goggles', name: 'Night Goggles', category: 'threeCelebration', price: 4600, rarity: 'rare', colors: ['#2a1f6b', '#8fa8ff'], description: 'Both hands to the eyes, framing the shot.' },
+  { id: 'three-bang', name: 'Bang Bang', category: 'threeCelebration', price: 5400, rarity: 'rare', colors: ['#c2452d', '#ffb347'], description: 'Two shots fired down the floor.' },
+  { id: 'three-shimmy', name: 'The Shimmy', category: 'threeCelebration', price: 7200, rarity: 'epic', colors: ['#a86bff', '#e0d0ff'], description: 'Shoulders going, backpedalling the whole way.' },
+  { id: 'three-fromdeep', name: 'From Way Downtown', category: 'threeCelebration', price: 9800, rarity: 'epic', colors: ['#ff7a3d', '#ffd23d'], description: 'Arms out wide, turning to the whole park.' },
+  { id: 'three-toosmall', name: 'Too Small', category: 'threeCelebration', price: 12500, rarity: 'legendary', colors: ['#c9a227', '#f0e0a0'], description: 'Hand flat over his head on the way back.' },
+  { id: 'three-lightsout', name: 'Lights Out', category: 'threeCelebration', price: 44000, rarity: 'mythic', rotationOnly: true, colors: ['#05060a', '#ff4d8d'], description: 'The park goes dark behind you and comes back up. Almost never in stock.' },
+];
+
 const courts: StoreItem[] = [
   { id: 'court-standard', name: 'Standard Blacktop', category: 'court', price: 0, rarity: 'common', colors: ['#4a4f5c', '#e8eef5'], description: 'What every park starts with.' },
   { id: 'court-hardwood', name: 'Polished Hardwood', category: 'court', price: 8000, rarity: 'rare', colors: ['#c08c4a', '#f8f4ec'], description: 'Indoor feel, glossy finish.' },
@@ -179,6 +197,7 @@ export const STORE_ITEMS: StoreItem[] = [
   ...hairstyles,
   ...tattoos,
   ...celebrations,
+  ...threeCelebrations,
   ...emotes,
   ...courts,
   ...jumpshotItems,

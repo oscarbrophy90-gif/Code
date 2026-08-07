@@ -84,7 +84,10 @@ export interface Loadout {
   tattooId: string;
   jumpshotId: string;
   dunkPackageId: string;
+  /** plays when you win the game */
   celebrationId: string;
+  /** plays the moment a three goes down */
+  threeCelebrationId: string;
   /** the emote the store equips on purchase — slot 1's default */
   emoteId: string;
   /**

@@ -56,6 +56,7 @@ function previewBody(item: StoreItem): HTMLElement {
       return titlePreview(item);
     case 'emote':
     case 'celebration':
+    case 'threeCelebration':
       return performancePreview(item);
     default:
       return motifPreview(item);
@@ -115,7 +116,9 @@ function performancePreview(item: StoreItem): HTMLElement {
       { class: 'hint', style: 'margin-top:8px' },
       item.category === 'emote'
         ? 'Put it on one of the six keys in the Locker. In a game you hold the ball out on a bounce while it plays — nobody can take it off you, but the shot clock keeps running.'
-        : 'Plays after a bucket that matters.',
+        : item.category === 'threeCelebration'
+          ? 'Fires the moment a three drops, in the beat before the ball is checked back in.'
+          : 'Fires on the floor the moment you win the game.',
     ),
   );
 }

@@ -97,6 +97,10 @@ export interface Appearance {
   jerseyNumber: number;
   /** what sits on each of the 1-6 keys, so the renderer can perform the right one */
   emoteSlots: (string | null)[];
+  /** performed on winning the game */
+  celebrationId: string;
+  /** performed the moment a three drops */
+  threeCelebrationId: string;
 }
 
 /** Static per-player configuration handed to the sim. */
@@ -187,6 +191,13 @@ export interface SimPlayer {
   emoteSlot: number;
   /** seconds until another emote is allowed */
   emoteCooldown: number;
+  /**
+   * A celebration in progress. Presentation only — no other rule reads it, so
+   * it can never interfere with the state machine the way a real act state
+   * would.
+   */
+  celebration: 'win' | 'three' | null;
+  celebrationTimer: number;
   /** chained-move counter for Tight Handles */
   comboCount: number;
   comboTimer: number;

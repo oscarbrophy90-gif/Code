@@ -106,6 +106,8 @@ export function generateOpponent(targetOverall: number, seed: number): SimPlayer
       jerseyNumber: rng.int(0, 100),
       // Bots taunt too, drawn from the free set.
       emoteSlots: ['emote-wave', 'emote-shrug', 'emote-point', 'emote-clap', 'emote-flex', 'emote-facepalm'],
+      celebrationId: rng.pick(['celeb-nod', 'celeb-shrug', 'celeb-cold', 'celeb-flex', 'celeb-toobig', 'celeb-crown']),
+      threeCelebrationId: rng.pick(['three-none', 'three-hold', 'three-threetothehead', 'three-cold', 'three-bang', 'three-shimmy']),
     },
     position: build.position,
     archetype: template.name,

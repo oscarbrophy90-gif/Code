@@ -17,7 +17,7 @@ import {
 import { store } from '../../state/store.ts';
 import { audio } from '../../engine/audio.ts';
 import { refresh, type RouteParams } from '../../main.ts';
-import { el, fmt, panel, tabs, toast } from '../dom.ts';
+import { el, fmt, panel, toast } from '../dom.ts';
 import { previewItem } from '../preview.ts';
 
 type Tab = StoreCategory | 'featured';
@@ -34,10 +34,22 @@ const CATEGORIES: { id: Tab; label: string }[] = [
   { id: 'jumpshot', label: 'Jump shots' },
   { id: 'dunkPackage', label: 'Dunk packages' },
   { id: 'animation', label: 'Animations' },
-  { id: 'celebration', label: 'Celebrations' },
+  { id: 'threeCelebration', label: '3-point celebrations' },
+  { id: 'celebration', label: 'Win celebrations' },
   { id: 'emote', label: 'Emotes' },
   { id: 'court', label: 'Courts' },
 ];
+
+/** The sidebar, grouped so it reads like a shop rather than a flat list. */
+const SHELVES: { title: string; ids: Tab[] }[] = [
+  { title: '', ids: ['featured'] },
+  { title: 'Wear', ids: ['jersey', 'shoes', 'clothing', 'accessory'] },
+  { title: 'Look', ids: ['hairstyle', 'tattoo', 'title'] },
+  { title: 'Play', ids: ['jumpshot', 'dunkPackage', 'animation'] },
+  { title: 'Flair', ids: ['threeCelebration', 'celebration', 'emote', 'court'] },
+];
+
+const LABEL: Record<string, string> = Object.fromEntries(CATEGORIES.map((c) => [c.id, c.label]));
 
 let category: Tab = 'featured';
 
@@ -56,17 +68,44 @@ export function renderStore(params: RouteParams): HTMLElement {
       { class: 'page-sub' },
       `Everything here is bought with Coins you earned playing. Cosmetics change how you look and how your animations feel — they never change a rating. You have ${fmt(player.currency)} ${CURRENCY_SHORT}.`,
     ),
-    tabs(
-      CATEGORIES.map((c) => ({ id: c.id, label: c.label })),
-      category,
-      (id) => {
-        category = id as Tab;
-        refresh();
-      },
+    // Sections down the left, stock on the right. Fifteen categories in a row
+    // of tabs ran off the edge of the screen and hid half the shop.
+    el(
+      'div',
+      { class: 'shop-layout' },
+      el(
+        'nav',
+        { class: 'shop-nav' },
+        ...SHELVES.flatMap((shelf) => [
+          shelf.title ? el('div', { class: 'shop-nav-head' }, shelf.title) : null,
+          ...shelf.ids.map((id) =>
+            el(
+              'button',
+              {
+                class: `shop-nav-item ${category === id ? 'on' : ''}`,
+                onclick: () => {
+                  category = id;
+                  refresh();
+                },
+              },
+              LABEL[id],
+            ),
+          ),
+        ]),
+      ),
+      el(
+        'div',
+        { class: 'shop-stock' },
+        category === 'featured'
+          ? featuredShelf()
+          : el(
+              'div',
+              {},
+              el('div', { class: 'shop-stock-head' }, LABEL[category]),
+              el('div', { class: 'grid cols-3' }, ...catalogueItems(category).map((i) => renderItem(i))),
+            ),
+      ),
     ),
-    category === 'featured'
-      ? featuredShelf()
-      : el('div', { class: 'grid cols-4' }, ...catalogueItems(category).map((i) => renderItem(i))),
   );
 }
 
@@ -221,6 +260,8 @@ function isEquipped(item: StoreItem): boolean {
       return l.accessoryId === item.id;
     case 'celebration':
       return l.celebrationId === item.id;
+    case 'threeCelebration':
+      return l.threeCelebrationId === item.id;
     case 'emote':
       return l.emoteId === item.id;
     case 'court':
@@ -259,6 +300,9 @@ function equip(item: StoreItem): void {
         break;
       case 'celebration':
         target.loadout.celebrationId = item.id;
+        break;
+      case 'threeCelebration':
+        target.loadout.threeCelebrationId = item.id;
         break;
       case 'emote':
         target.loadout.emoteId = item.id;

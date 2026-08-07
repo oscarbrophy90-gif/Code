@@ -1,4 +1,4 @@
-import { COURT, EMOTE_DURATION, SKIN_TONES, type Appearance, type Ball, type MatchState, type SimPlayer } from '@hoops/shared';
+import { COURT, EMOTE_DURATION, THREE_CELEBRATION_TIME, WIN_CELEBRATION_TIME, SKIN_TONES, type Appearance, type Ball, type MatchState, type SimPlayer } from '@hoops/shared';
 import { emotePose, type EmotePose } from './emotes.ts';
 import type { Camera } from '../engine/camera.ts';
 import { hexA, mix } from './court.ts';
@@ -174,6 +174,20 @@ export class PlayerRenderer {
         break;
       default:
         crouch = hasBall ? 0.2 : 0.12;
+    }
+
+    // A celebration wins over whatever the state machine had the body doing.
+    // It is checked here rather than as an act state so it can never interfere
+    // with the rules — nothing in the simulation reads it.
+    if (p.celebrationTimer > 0 && p.celebration) {
+      const total = p.celebration === 'win' ? WIN_CELEBRATION_TIME : THREE_CELEBRATION_TIME;
+      const id = p.celebration === 'win' ? look.celebrationId : look.threeCelebrationId;
+      // The win celebration loops, because it plays until the results come up.
+      const raw = 1 - Math.max(0, Math.min(1, p.celebrationTimer / total));
+      armPose = emotePose(id, p.celebration === 'win' ? (raw * 3) % 1 : raw);
+      crouch = armPose.crouch;
+      poseLean = armPose.lean;
+      bob = armPose.bob;
     }
 
     // An emote poses the body outright; otherwise the lean comes from momentum.
@@ -542,6 +556,8 @@ function fallbackAppearance(p: SimPlayer): Appearance {
     tattooId: 'tat-none',
     jerseyNumber: 0,
     emoteSlots: [],
+    celebrationId: 'celeb-nod',
+    threeCelebrationId: 'three-none',
   };
 }
 

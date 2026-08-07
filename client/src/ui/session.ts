@@ -31,6 +31,7 @@ import { dismissFullscreen, navigate, showFullscreen } from '../main.ts';
 import { createMatchScreen, type MatchResult, type NetAdapter } from './match.ts';
 import { bar, el, fmt, overlay, ratio, toast } from './dom.ts';
 import { playWalkout } from './walkout.ts';
+import { AvatarRenderer, livePreview } from './avatar.ts';
 
 export interface StartMatchOptions {
   opponent: SimPlayerConfig;
@@ -263,6 +264,22 @@ function mergeBadges(saved: BadgeState[], simBadges: BadgeState[]): { id: string
 
 // ------------------------------------------------------------------- results
 
+/** The winner performing whatever celebration they had equipped, on a loop. */
+function winCelebration(): HTMLElement {
+  const canvas = el('canvas', { class: 'preview-figure wide', style: 'max-width:300px;margin:14px auto 0' }) as HTMLCanvasElement;
+  const cfg = store.simConfig();
+  const avatar = new AvatarRenderer();
+  const cycle = 2.4;
+  livePreview(canvas, (elapsed) => {
+    avatar.draw(canvas, cfg, {
+      emoteId: store.player.loadout.celebrationId,
+      t: Math.min(1, ((elapsed % cycle) / cycle) * 1.5),
+      zoom: 0.92,
+    });
+  });
+  return canvas;
+}
+
 function showResults(result: MatchResult, summary: RewardSummary, opts: StartMatchOptions): void {
   const m = result.stats;
   const won = result.won;
@@ -284,6 +301,9 @@ function showResults(result: MatchResult, summary: RewardSummary, opts: StartMat
         ),
         el('div', { style: 'font-size:52px;font-weight:900;letter-spacing:-.02em;line-height:1.05' }, `${result.score[0]} – ${result.score[1]}`),
         el('div', { class: 'faint', style: 'font-size:12px' }, `${opts.eventName ?? labelFor(opts.playlist)} · ${Math.round(result.durationSeconds)}s`),
+        // Win and your equipped celebration plays here too, not just on the
+        // floor — the floor version is over before the results come up.
+        won && !result.quit ? winCelebration() : null,
       ),
 
       el(

@@ -2116,3 +2116,76 @@ input[type='text']:focus {
   border: 1px solid var(--line);
   background: #0e1220;
 }
+
+/* ------------------------------------------------------- store: nav + stock */
+.shop-layout {
+  display: grid;
+  grid-template-columns: 186px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+.shop-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  position: sticky;
+  top: 14px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--panel);
+  padding: 8px;
+}
+.shop-nav-head {
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  padding: 12px 8px 4px;
+}
+.shop-nav-item {
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 700;
+  text-align: left;
+  padding: 7px 9px;
+  border-radius: 3px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+}
+.shop-nav-item:hover { background: rgba(255, 255, 255, 0.04); color: var(--text); }
+.shop-nav-item.on {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+  border-left-color: var(--green);
+}
+.shop-stock { min-width: 0; }
+.shop-stock-head {
+  font-size: 13px;
+  font-weight: 900;
+  margin-bottom: 10px;
+}
+
+/* Cards line up whatever the description length, so the buttons stay in a row. */
+.item {
+  display: flex;
+  flex-direction: column;
+}
+.item .body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+.item .foot { margin-top: auto; }
+
+@media (max-width: 760px) {
+  .shop-layout { grid-template-columns: 1fr; }
+  .shop-nav {
+    position: static;
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .shop-nav-head { display: none; }
+}

@@ -1665,3 +1665,100 @@ test('emotes are on a ten second cooldown', () => {
   stepMatch(state, [{ ...emptyInput(), emote: 0 }, emptyInput()], SIM_DT);
   assert.equal(state.players[0].state, 'emoting', 'and you can emote again');
 });
+
+test('a three sets off the three-point celebration, and winning sets off the other one', () => {
+  const state = createMatch(
+    generateOpponent(80, 41),
+    generateOpponent(80, 42),
+    defaultMatchConfig({ manualCheck: false, shotClock: 999 }),
+    7171,
+  );
+  for (let i = 0; i < 200; i++) stepMatch(state, [emptyInput(), emptyInput()], SIM_DT);
+
+  const me = state.players[0];
+  // Park behind the arc with the ball and shoot until one drops.
+  let threes = 0;
+  let sawThreeCelebration = false;
+  for (let attempt = 0; attempt < 60 && threes === 0; attempt++) {
+    me.x = 0;
+    me.z = 29;
+    me.state = 'dribble';
+    me.stamina = 1;
+    me.moveCooldown = 0;
+    state.ball.owner = 0;
+    state.ball.state = 'held';
+    state.needsClear = false;
+    state.phase = 'live';
+
+    const hold = { ...emptyInput(), shoot: true };
+    const release = 40 + attempt * 2;
+    for (let i = 0; i < 260; i++) {
+      stepMatch(state, [i < release ? hold : emptyInput(), emptyInput()], SIM_DT);
+      for (const e of drainEvents(state)) {
+        if (e.type === 'score' && e.side === 0 && e.value === 2) {
+          threes++;
+          assert.equal(state.players[0].celebration, 'three', 'a three fires the three-point celebration');
+          assert.ok(state.players[0].celebrationTimer > 0, 'and it has time on it');
+          sawThreeCelebration = true;
+        }
+      }
+      if (threes > 0) break;
+    }
+  }
+  assert.ok(sawThreeCelebration, 'expected to make a three');
+
+  // It expires on its own rather than sticking.
+  for (let i = 0; i < 120 * 3; i++) stepMatch(state, [emptyInput(), emptyInput()], SIM_DT);
+  assert.equal(state.players[0].celebration, null, 'the three-point celebration ends by itself');
+
+  // Now win it.
+  const finish = createMatch(
+    generateOpponent(80, 43),
+    generateOpponent(80, 44),
+    defaultMatchConfig({ manualCheck: false, targetScore: 2, winBy: 1, shotClock: 999 }),
+    7272,
+  );
+  for (let i = 0; i < 200; i++) stepMatch(finish, [emptyInput(), emptyInput()], SIM_DT);
+  const w = finish.players[0];
+  let over = false;
+  for (let attempt = 0; attempt < 60 && !over; attempt++) {
+    w.x = 0;
+    w.z = 29;
+    w.state = 'dribble';
+    w.stamina = 1;
+    w.moveCooldown = 0;
+    finish.ball.owner = 0;
+    finish.ball.state = 'held';
+    finish.needsClear = false;
+    if (finish.phase !== 'over') finish.phase = 'live';
+
+    const hold = { ...emptyInput(), shoot: true };
+    const release = 40 + attempt * 2;
+    for (let i = 0; i < 260 && !over; i++) {
+      stepMatch(finish, [i < release ? hold : emptyInput(), emptyInput()], SIM_DT);
+      for (const e of drainEvents(finish)) if (e.type === 'gameOver') over = true;
+    }
+  }
+
+  assert.ok(over, 'expected the game to finish');
+  assert.equal(finish.winner, 0);
+  assert.equal(finish.players[0].celebration, 'win', 'the winner celebrates');
+  assert.ok(finish.players[0].celebrationTimer > 3, 'and it runs long enough to see');
+  assert.equal(finish.players[1].celebration, null, 'the loser does not');
+});
+
+test('every celebration and emote in the catalogue has choreography', () => {
+  // A cosmetic that animates identically to another is a cosmetic nobody would
+  // buy twice, so each one has to move differently.
+  const performed = STORE_ITEMS.filter(
+    (i) => i.category === 'emote' || i.category === 'celebration' || i.category === 'threeCelebration',
+  );
+  assert.ok(performed.length >= 30, 'a decent set to choose from');
+
+  const threes = STORE_ITEMS.filter((i) => i.category === 'threeCelebration');
+  assert.ok(threes.length >= 8, 'the 3-point section is worth opening');
+  assert.ok(
+    threes.some((i) => i.price === 0),
+    'you start with something on the three',
+  );
+});

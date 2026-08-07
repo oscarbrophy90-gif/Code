@@ -84,6 +84,10 @@ function staminaDrainMult(p: SimPlayer): number {
 export const EMOTE_DURATION = 1.6;
 /** And how long before you are allowed another one. */
 export const EMOTE_COOLDOWN = 10;
+/** How long a three-point celebration runs — it has the dead-ball beat to fit in. */
+export const THREE_CELEBRATION_TIME = 1.2;
+/** The win celebration runs long, because nothing is waiting on it. */
+export const WIN_CELEBRATION_TIME = 6;
 
 // -------------------------------------------------------------- construction
 
@@ -124,6 +128,8 @@ export function makePlayer(side: Side, cfg: SimPlayerConfig): SimPlayer {
     emoteTimer: 0,
     emoteSlot: -1,
     emoteCooldown: 0,
+    celebration: null,
+    celebrationTimer: 0,
     handUp: false,
     contestTimer: 0,
     stealCooldown: 0,
@@ -406,6 +412,10 @@ function updatePlayer(state: MatchState, side: Side, input: PlayerInput, dt: num
   p.moveCooldown = Math.max(0, p.moveCooldown - dt);
   p.fakeTimer = Math.max(0, p.fakeTimer - dt);
   p.emoteCooldown = Math.max(0, p.emoteCooldown - dt);
+  if (p.celebrationTimer > 0) {
+    p.celebrationTimer = Math.max(0, p.celebrationTimer - dt);
+    if (p.celebrationTimer === 0) p.celebration = null;
+  }
   p.comboTimer = Math.max(0, p.comboTimer - dt);
   if (p.comboTimer <= 0) p.comboCount = 0;
 
@@ -1983,6 +1993,13 @@ function scoreBasket(state: MatchState, side: Side, value: 1 | 2): void {
 
   state.events.push({ type: 'score', side, value, score: [state.score[0], state.score[1]] });
 
+  // A three earns the celebration. It runs through the dead-ball beat before
+  // the ball is checked back in, so it costs nothing and never delays play.
+  if (value === 2) {
+    p.celebration = 'three';
+    p.celebrationTimer = THREE_CELEBRATION_TIME;
+  }
+
   const ball = state.ball;
   ball.state = 'dead';
   ball.owner = null;
@@ -2046,6 +2063,11 @@ function finishGame(state: MatchState, winner: Side): void {
   state.phase = 'over';
   state.winner = winner;
   state.players[winner].state = 'celebrating';
+  state.players[winner].celebration = 'win';
+  state.players[winner].celebrationTimer = WIN_CELEBRATION_TIME;
+  // The loser is not celebrating anything.
+  state.players[other(winner)].celebration = null;
+  state.players[other(winner)].celebrationTimer = 0;
   state.events.push({ type: 'gameOver', winner, score: [state.score[0], state.score[1]] });
 }
 

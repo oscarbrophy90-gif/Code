@@ -23,7 +23,7 @@ const SECTIONS: { title: string; blurb: string; categories: StoreCategory[] }[] 
   { title: 'Kit', blurb: 'Worn on court.', categories: ['jersey', 'shoes', 'clothing'] },
   { title: 'Accessories', blurb: 'The small stuff people notice.', categories: ['accessory', 'hairstyle', 'tattoo'] },
   { title: 'Animations', blurb: 'How your shot and your dunks look and feel.', categories: ['jumpshot', 'dunkPackage', 'animation'] },
-  { title: 'Flair', blurb: 'Celebrations, emotes and your home floor.', categories: ['celebration', 'emote', 'court'] },
+  { title: 'Flair', blurb: 'What you do after a three, after a win, and the floor you do it on.', categories: ['threeCelebration', 'celebration', 'emote', 'court'] },
 ];
 
 const CATEGORY_LABEL: Record<StoreCategory, string> = {
@@ -37,7 +37,8 @@ const CATEGORY_LABEL: Record<StoreCategory, string> = {
   jumpshot: 'Jump shots',
   dunkPackage: 'Dunk packages',
   animation: 'Animations',
-  celebration: 'Celebrations',
+  celebration: 'Win celebrations',
+  threeCelebration: '3-point celebrations',
   emote: 'Emotes',
   court: 'Courts',
 };
@@ -330,6 +331,8 @@ function isEquipped(item: StoreItem): boolean {
       return l.accessoryId === item.id;
     case 'celebration':
       return l.celebrationId === item.id;
+    case 'threeCelebration':
+      return l.threeCelebrationId === item.id;
     case 'emote':
       return l.emoteId === item.id;
     case 'court':
@@ -368,6 +371,9 @@ export function equip(item: StoreItem): void {
         break;
       case 'celebration':
         t.loadout.celebrationId = item.id;
+        break;
+      case 'threeCelebration':
+        t.loadout.threeCelebrationId = item.id;
         break;
       case 'emote':
         t.loadout.emoteId = item.id;

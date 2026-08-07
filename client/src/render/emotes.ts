@@ -195,6 +195,64 @@ export function emotePose(id: string | null, t: number): EmotePose {
       p.out = [1 + 0.4 * h, 1 + 0.4 * h];
       break;
 
+    // ---- three-point celebrations, fired the moment one drops ----
+    case 'three-none':
+      // Straight back on defence. A brief look and nothing more.
+      p.lean = 0.12 * h;
+      break;
+    case 'three-hold':
+      // Wrist frozen in the follow-through.
+      p.arm = [0.2 * h, 1.3 * Math.min(1, t * 5)];
+      p.out = [1, 1 - 0.25 * h];
+      break;
+    case 'three-threetothehead':
+      // Three fingers to the temple.
+      p.arm = [0, 1.2 * h];
+      p.out = [1, 1 - 0.72 * h];
+      p.fwd = [0, 0.15 * h];
+      break;
+    case 'three-cold':
+      p.arm = [0.65 * h, 0.35 * h];
+      p.out = [1 - 0.55 * h, 1 - 0.2 * h];
+      p.fwd = [0.55 * h, 0.2 * h];
+      p.lean = -0.2 * h;
+      break;
+    case 'three-goggles':
+      // Both hands framing the eyes.
+      p.arm = [1.15 * h, 1.15 * h];
+      p.out = [1 - 0.68 * h, 1 - 0.68 * h];
+      p.fwd = [0.35 * h, 0.35 * h];
+      break;
+    case 'three-bang':
+      // Two shots fired down the floor, on the beat.
+      p.arm = [0.3 * h, 0.5 * h + 0.25 * Math.max(0, Math.sin(t * Math.PI * 4))];
+      p.fwd = [0.2 * h, 1.35 * h];
+      p.out = [1, 1 + 0.25 * h];
+      break;
+    case 'three-shimmy':
+      // Shoulders going, backpedalling.
+      p.arm = [0.5 * h, 0.5 * h];
+      p.out = [1 + 0.5 * h + Math.sin(t * Math.PI * 9) * 0.3 * h, 1 + 0.5 * h - Math.sin(t * Math.PI * 9) * 0.3 * h];
+      p.lean = Math.sin(t * Math.PI * 9) * 0.22 * h;
+      break;
+    case 'three-fromdeep':
+      // Arms wide to the whole park.
+      p.arm = [0.7 * h, 0.7 * h];
+      p.out = [1 + 1.15 * h, 1 + 1.15 * h];
+      p.lean = -0.25 * h;
+      p.bob = 0.14 * h;
+      break;
+    case 'three-toosmall':
+      p.arm = [0, 1.45 * h];
+      p.out = [1, 1 - 0.35 * h];
+      p.fwd = [0, 0.55 * h];
+      break;
+    case 'three-lightsout':
+      p.alpha = 1 - 0.8 * e;
+      p.arm = [1.15 * h, 1.15 * h];
+      p.out = [1 + 0.35 * h, 1 + 0.35 * h];
+      break;
+
     default:
       // Something new in the catalogue with no choreography yet still moves.
       p.arm = [0.4 * h, 1.1 * h];

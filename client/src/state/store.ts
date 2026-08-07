@@ -111,6 +111,7 @@ export function createPlayer(slot: number, name: string, build: BuildSpec): MyPl
       jumpshotId: 'base-rise',
       dunkPackageId: 'basic-slam',
       celebrationId: 'celeb-nod',
+      threeCelebrationId: 'three-hold',
       emoteId: 'emote-wave',
       emoteSlots: ['emote-wave', 'emote-clap', 'emote-shrug', 'emote-point', null, null],
       courtId: 'court-standard',
@@ -194,6 +195,7 @@ class Store {
       if (typeof p.build.jerseyNumber !== 'number') p.build.jerseyNumber = 23;
       if (!p.loadout.titleId) p.loadout.titleId = 'title-rookie';
       if (!p.loadout.tattooId) p.loadout.tattooId = 'tat-none';
+      if (!p.loadout.threeCelebrationId) p.loadout.threeCelebrationId = 'three-hold';
       for (const t of DEFAULT_TITLES) if (!p.unlocked.includes(t)) p.unlocked.push(t);
       if (!p.drillBests) p.drillBests = {};
       // Six emote slots replaced the single equipped emote. An older save keeps
@@ -382,6 +384,8 @@ export function appearanceFor(player: MyPlayer): Appearance {
     tattooId: l.tattooId ?? 'tat-none',
     jerseyNumber: player.build.jerseyNumber,
     emoteSlots: [...(l.emoteSlots ?? [])],
+    celebrationId: l.celebrationId,
+    threeCelebrationId: l.threeCelebrationId ?? 'three-hold',
   };
 }
 
