@@ -404,10 +404,12 @@ export class AiController {
       if (realDist < 4.5 && this.rng.chance(this.profile.contestIq * 1.1)) input.contest = true;
     }
 
-    // Gamble for a strip, mostly while the handler is mid-animation.
+    // Gamble for a strip, mostly while the handler is mid-animation. Reaches
+    // land much more often than they used to, so the bot picks its moments
+    // harder — otherwise close defence turns every possession into a turnover.
     const vulnerable = opp.state === 'moveLock';
     if (realDist < 3.4 && me.stealCooldown <= 0) {
-      const p = this.profile.stealAggression * (vulnerable ? 3.2 : 0.6) * dt * 8;
+      const p = this.profile.stealAggression * (vulnerable ? 2.4 : 0.3) * dt * 8;
       if (this.rng.chance(p)) input.steal = true;
     }
   }

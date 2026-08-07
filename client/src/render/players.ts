@@ -1,4 +1,4 @@
-import { COURT, EMOTE_DURATION, THREE_CELEBRATION_TIME, WIN_CELEBRATION_TIME, SKIN_TONES, type Appearance, type Ball, type MatchState, type SimPlayer } from '@hoops/shared';
+import { COURT, EMOTE_DURATION, STEAL_TIME, THREE_CELEBRATION_TIME, WIN_CELEBRATION_TIME, SKIN_TONES, type Appearance, type Ball, type MatchState, type SimPlayer } from '@hoops/shared';
 import { emotePose, type EmotePose } from './emotes.ts';
 import type { Camera } from '../engine/camera.ts';
 import { hexA, mix } from './court.ts';
@@ -130,10 +130,34 @@ export class PlayerRenderer {
         spread = 2.6;
         armLift = -0.5;
         break;
-      case 'stealing':
-        armLift = 0.55;
+      case 'stealing': {
+        // A reach, not a shrug. The lead hand shoots out low and forward at the
+        // ball while the body drops and leans in after it, then it all comes
+        // back. The old pose was a static half-raise held for a fifth of a
+        // second, which read as nothing at all.
+        const t = 1 - Math.max(0, Math.min(1, p.stateTimer / STEAL_TIME));
+        const jab = Math.sin(Math.min(1, t * 1.15) * Math.PI);
+        // The swipe goes low and wide rather than straight ahead. Reaching
+        // forward is what a defender actually does, but the figure is a
+        // billboard in front of a camera looking down the floor, so a forward
+        // reach foreshortens into nothing — measured on screen it read as the
+        // arms simply being apart. Across the body at ball height reads.
+        const lead = p.dribbleHand > 0 ? 1 : 0;
+        armPose = {
+          arm: lead === 1 ? [0.3 * jab, -0.5 * jab] : [-0.5 * jab, 0.3 * jab],
+          out: lead === 1 ? [1 - 0.25 * jab, 1 + 1.5 * jab] : [1 + 1.5 * jab, 1 - 0.25 * jab],
+          fwd: lead === 1 ? [0, 0.55 * jab] : [0.55 * jab, 0],
+          crouch: 0.3 + jab * 0.38,
+          lean: 0.5 * jab,
+          alpha: 1,
+          bob: -0.14 * jab,
+        };
+        crouch = armPose.crouch;
+        poseLean = armPose.lean;
+        bob = armPose.bob;
         spread = 1.35;
         break;
+      }
       case 'moveLock': {
         crouch = 0.34;
         spread = 1.2;
@@ -322,7 +346,7 @@ export class PlayerRenderer {
       return inked ? mix(skin, '#181818', 0.55) : skin;
     };
 
-    ctx.lineWidth = lineW * 0.78;
+    ctx.lineWidth = lineW * 0.92;
     const hands: { x: number; y: number }[] = [];
     for (const sign of [-1, 1]) {
       const i = sign < 0 ? 0 : 1;
@@ -331,8 +355,10 @@ export class PlayerRenderer {
       // Forward reach is toward the rim, which is where the camera is looking
       // from, so a point or a mic drop reads as coming out of the screen.
       const reach = armPose ? armPose.fwd[i] : 0;
-      const elbow = at(shoulderY - 0.34 + raise * 0.42, sign * (shoulderHalf + 0.24) * out, -raise * 0.12 + reach * 0.5);
-      const hand = at(shoulderY - 0.68 + raise * 1.05, sign * (shoulderHalf + 0.12 + raise * 0.1) * out, -raise * 0.3 + reach);
+      // Arms are a little longer and a little wider than they were — at preview
+      // size the old ones read as wires coming off the shoulders.
+      const elbow = at(shoulderY - 0.38 + raise * 0.46, sign * (shoulderHalf + 0.3) * out, -raise * 0.12 + reach * 0.5);
+      const hand = at(shoulderY - 0.76 + raise * 1.16, sign * (shoulderHalf + 0.2 + raise * 0.12) * out, -raise * 0.3 + reach);
       hands.push(hand);
       ctx.strokeStyle = armColor(sign);
       ctx.beginPath();
@@ -344,22 +370,22 @@ export class PlayerRenderer {
       // A shooting sleeve is one arm only, over whatever is underneath.
       if (worn === 'armsleeve' && sign > 0) {
         ctx.strokeStyle = look.accessoryPrimary;
-        ctx.lineWidth = lineW * 0.84;
+        ctx.lineWidth = lineW * 0.98;
         ctx.beginPath();
         ctx.moveTo(sign < 0 ? tl.x : tr.x, sign < 0 ? tl.y : tr.y);
         ctx.lineTo(elbow.x, elbow.y);
         ctx.stroke();
-        ctx.lineWidth = lineW * 0.78;
+        ctx.lineWidth = lineW * 0.92;
       }
       // A forearm band sits between elbow and wrist.
       if (look.tattooId === 'tat-forearm') {
         ctx.strokeStyle = mix(skin, '#181818', 0.62);
-        ctx.lineWidth = lineW * 0.82;
+        ctx.lineWidth = lineW * 0.96;
         ctx.beginPath();
         ctx.moveTo(elbow.x, elbow.y);
         ctx.lineTo(elbow.x + (hand.x - elbow.x) * 0.45, elbow.y + (hand.y - elbow.y) * 0.45);
         ctx.stroke();
-        ctx.lineWidth = lineW * 0.78;
+        ctx.lineWidth = lineW * 0.92;
       }
     }
 
@@ -368,7 +394,7 @@ export class PlayerRenderer {
       ctx.fillStyle = look.accessoryPrimary;
       for (const hand of hands) {
         ctx.beginPath();
-        ctx.arc(hand.x, hand.y, s * 0.11, 0, Math.PI * 2);
+        ctx.arc(hand.x, hand.y, s * 0.13, 0, Math.PI * 2);
         ctx.fill();
       }
     }

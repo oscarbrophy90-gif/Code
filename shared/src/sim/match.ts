@@ -80,6 +80,9 @@ function staminaDrainMult(p: SimPlayer): number {
   return lerp(1.4, 0.58, clamp01((p.cfg.attrs.stamina - 25) / 74));
 }
 
+/** How long the reach-in animation runs. */
+export const STEAL_TIME = 0.34;
+
 /** How long an emote holds you up for. */
 export const EMOTE_DURATION = 1.6;
 /** And how long before you are allowed another one. */
@@ -1429,9 +1432,12 @@ function attemptSteal(state: MatchState, defSide: Side, rng: Rng): void {
   if (state.ball.owner !== p.side) return;
 
   const dist = Math.hypot(p.x - d.x, p.z - d.z);
-  d.stealCooldown = 0.85;
+  // Reaching in is now a real decision rather than something you hold down. A
+  // single reach lands far more often than it used to, so the gap between them
+  // has to be long enough that spamming is worse than picking a moment.
+  d.stealCooldown = 1.5;
   d.state = 'stealing';
-  d.stateTimer = 0.22;
+  d.stateTimer = STEAL_TIME;
 
   // The ball is not available mid-emote. Reaching in while someone is showboating
   // gets you nothing but the recovery time, which is the trade: he loses tempo
@@ -1448,11 +1454,16 @@ function attemptSteal(state: MatchState, defSide: Side, rng: Rng): void {
   const pickPocket = badgeLevel(d.cfg.badges, 'pickPocket');
   const unpluckable = badgeLevel(p.cfg.badges, 'unpluckable');
   // Mid-animation handles are the most vulnerable.
-  const exposure = p.state === 'moveLock' ? 1.45 : p.state === 'shooting' ? 0.6 : 1;
+  const exposure = p.state === 'moveLock' ? 1.3 : p.state === 'shooting' ? 0.6 : 1;
   const stealPower = d.cfg.attrs.steal * (1 + pickPocket * 0.3);
   const holdPower = p.cfg.attrs.ballHandle * (1 + unpluckable * 0.35) + p.cfg.attrs.strength * 0.25;
+  // Distance used to fall off linearly to nothing at the edge of the reach,
+  // which made anything past arm's length worth about 1%. It now holds up until
+  // the last foot or so, so closing to within a stride is what matters rather
+  // than being exactly on top of him.
+  const closeness = clamp01(1 - (dist / reach) ** 2 * 0.82);
   const chance = clamp01(
-    (stealPower / (stealPower + holdPower) - 0.34) * 1.5 * exposure * clamp01(1 - dist / reach) * (1 - d.stagger),
+    (stealPower / (stealPower + holdPower) - 0.28) * 1.8 * exposure * closeness * (1 - d.stagger),
   );
 
   if (rng.chance(chance)) {
@@ -1468,11 +1479,16 @@ function attemptSteal(state: MatchState, defSide: Side, rng: Rng): void {
     state.needsClear = true;
     state.shotClock = state.config.shotClock;
     p.greenStreak = 0;
+    // Getting stripped knocks you off balance. Without this the ball simply
+    // changed hands and the handler carried on as if nothing had happened.
+    p.staggerTimer = 0.3;
+    p.stagger = 0.7;
+    p.state = 'staggered';
   } else {
     // Reach-in leaves the defender out of position.
-    d.staggerTimer = 0.32;
+    d.staggerTimer = 0.3;
     d.stagger = 0.8;
-    d.stealCooldown = 1.25;
+    d.stealCooldown = 2.4;
     awardBadgeProgress(p.cfg.badges, p.cfg.attrs, 'stealDefended', 1);
   }
 }

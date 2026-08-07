@@ -1855,3 +1855,120 @@ test('every celebration and emote in the catalogue has choreography', () => {
     'you start with something on the three',
   );
 });
+
+test('a reach-in lands often enough to be worth trying, and not so often it is free', () => {
+  // Before this was tuned, a reach at point-blank range against an even matchup
+  // landed 9% of the time and anything past arm's length was about 1% — so the
+  // button was not worth pressing. It should be a real option without turning
+  // every possession into a turnover.
+  function odds(gap: number, stealRating: number, handleRating: number, midMove: boolean) {
+    let attempts = 0;
+    let steals = 0;
+    for (let seed = 0; seed < 200; seed++) {
+      const a = generateOpponent(78, seed * 3 + 1);
+      a.attrs.ballHandle = handleRating;
+      a.attrs.strength = 60;
+      const b = generateOpponent(78, seed * 3 + 2);
+      b.attrs.steal = stealRating;
+      const state = createMatch(a, b, defaultMatchConfig({ manualCheck: false, shotClock: 999 }), seed * 17 + 5);
+      for (let i = 0; i < 200; i++) stepMatch(state, [emptyInput(), emptyInput()], SIM_DT);
+      const p = state.players[0];
+      const d = state.players[1];
+      p.x = 0;
+      p.z = 20;
+      p.state = 'dribble';
+      p.stamina = 1;
+      p.moveCooldown = 0;
+      p.stagger = 0;
+      d.x = gap;
+      d.z = 20;
+      d.stealCooldown = 0;
+      d.stagger = 0;
+      d.staggerTimer = 0;
+      d.state = 'idle';
+      state.ball.owner = 0;
+      state.ball.state = 'held';
+      state.needsClear = false;
+
+      const setup = midMove
+        ? { ...emptyInput(), move: 'crossover' as const, moveDirX: 1, moveDirZ: 0 }
+        : emptyInput();
+      stepMatch(state, [setup, emptyInput()], SIM_DT);
+      d.x = gap;
+      d.z = 20;
+      d.stealCooldown = 0;
+      stepMatch(state, [emptyInput(), { ...emptyInput(), steal: true }], SIM_DT);
+      attempts++;
+      for (const e of drainEvents(state)) if (e.type === 'steal') steals++;
+    }
+    return steals / attempts;
+  }
+
+  const even = odds(1.5, 50, 50, false);
+  assert.ok(even > 0.15, `an even matchup at arm's length should be worth a try, got ${(even * 100).toFixed(1)}%`);
+  assert.ok(even < 0.35, `and not a coin flip, got ${(even * 100).toFixed(1)}%`);
+
+  // Being a better thief than he is a handler has to show up.
+  const thief = odds(1.5, 75, 55, false);
+  assert.ok(thief > even + 0.05, `a good thief should beat a weak handler more often (${(thief * 100).toFixed(1)}% vs ${(even * 100).toFixed(1)}%)`);
+  assert.ok(thief < 0.55, `but never a gimme, got ${(thief * 100).toFixed(1)}%`);
+
+  // Reaching mid-move is the moment to pick.
+  const onMove = odds(1.5, 75, 55, true);
+  assert.ok(onMove > thief, `mid-dribble-move should be the best time to reach (${(onMove * 100).toFixed(1)}% vs ${(thief * 100).toFixed(1)}%)`);
+
+  // Distance still matters — you have to actually close.
+  const far = odds(3.5, 75, 55, false);
+  assert.ok(far > 0.04, `a long reach should not be hopeless, got ${(far * 100).toFixed(1)}%`);
+  assert.ok(far < thief * 0.6, `but it has to be clearly worse than being on him, got ${(far * 100).toFixed(1)}%`);
+});
+
+test('getting stripped knocks the handler off balance, and a miss costs the defender', () => {
+  const state = createMatch(
+    generateOpponent(80, 61),
+    generateOpponent(80, 62),
+    defaultMatchConfig({ manualCheck: false, shotClock: 999 }),
+    8181,
+  );
+  for (let i = 0; i < 200; i++) stepMatch(state, [emptyInput(), emptyInput()], SIM_DT);
+  const p = state.players[0];
+  const d = state.players[1];
+
+  let sawStrip = false;
+  let sawMiss = false;
+  for (let seed = 0; seed < 200 && !(sawStrip && sawMiss); seed++) {
+    p.x = 0;
+    p.z = 20;
+    p.state = 'dribble';
+    p.stagger = 0;
+    p.staggerTimer = 0;
+    d.x = 1.2;
+    d.z = 20;
+    d.state = 'idle';
+    d.stagger = 0;
+    d.staggerTimer = 0;
+    d.stealCooldown = 0;
+    state.ball.owner = 0;
+    state.ball.state = 'held';
+    state.needsClear = false;
+
+    stepMatch(state, [emptyInput(), { ...emptyInput(), steal: true }], SIM_DT);
+    // Read back through the state so these are the values the sim produced,
+    // not the ones assigned above.
+    const defenderState: string = state.players[1].state;
+    const owner: number | null = state.ball.owner;
+    // The reach itself has to be visible for long enough to animate.
+    assert.ok(defenderState === 'stealing' || owner === 1, 'the reach plays out');
+
+    if (owner === 1) {
+      sawStrip = true;
+      assert.ok(p.staggerTimer > 0, 'the handler is knocked off balance when stripped');
+    } else {
+      sawMiss = true;
+      assert.ok(d.staggerTimer > 0, 'a miss leaves the defender out of position');
+      assert.ok(d.stealCooldown > 2, `and on a long cooldown, got ${d.stealCooldown.toFixed(2)}s`);
+    }
+  }
+  assert.ok(sawStrip, 'expected at least one strip');
+  assert.ok(sawMiss, 'expected at least one miss');
+});
