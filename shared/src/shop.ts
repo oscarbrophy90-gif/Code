@@ -50,9 +50,24 @@ function isStockable(item: StoreItem): boolean {
   return item.price > 0 && !item.requirement && item.rarity !== 'mythic';
 }
 
-/** Everything that can be browsed in the permanent catalogue. */
-export function catalogueItems(category: StoreItem['category']): StoreItem[] {
-  return STORE_ITEMS.filter((i) => i.category === category && !i.rotationOnly);
+/**
+ * The stockable pool for one category, in a fixed order so the shuffle below is
+ * reproducible.
+ */
+function poolFor(category: StoreItem['category']): StoreItem[] {
+  return STORE_ITEMS.filter((i) => i.category === category && isStockable(i));
+}
+
+/**
+ * How many windows an epoch lasts for this category.
+ *
+ * An epoch deals its pool out fifteen at a time, so it can only run for as many
+ * windows as it has fifteens. Jerseys have 135 stockable, which is nine windows
+ * — four and a half hours before the deck is reshuffled. A category with fewer
+ * than fifteen stockable items has nothing to rotate and simply shows them all.
+ */
+function slicesFor(poolSize: number): number {
+  return Math.max(1, Math.floor(poolSize / SHOP_SLOTS));
 }
 
 /** A seeded generator for one epoch or one window. */
@@ -60,40 +75,34 @@ function rngFor(seed: number, salt: number): Rng {
   return new Rng(seed * 2654435761 + salt);
 }
 
-/**
- * Windows per epoch. One epoch is a day of shop windows, and an epoch deals out
- * one long shuffled order which the windows then slice up in turn.
- */
-const WINDOWS_PER_EPOCH = 48;
+/** Stable per-category salt, so two categories never deal the same order. */
+function categorySalt(category: string): number {
+  let n = 2166136261;
+  for (let i = 0; i < category.length; i++) {
+    n ^= category.charCodeAt(i);
+    n = Math.imul(n, 16777619);
+  }
+  return n >>> 0;
+}
+
+const rawCache = new Map<string, StoreItem[]>();
+const sealedCache = new Map<string, StoreItem[]>();
 
 /**
- * Why an epoch-wide shuffle rather than a fresh draw per window.
- *
- * The requirement is that every one of the fifteen is gone next window and
- * fifteen new ones have replaced it. Drawing each window independently and then
- * filtering out the previous one cannot deliver that: the filter has to know the
- * previous *shelf*, the previous shelf was itself filtered, and following that
- * chain back has no end. The first cut did it with one level of filtering, which
- * looked right and quietly let items reappear a window later.
- *
- * Dealing instead fixes it by construction. Each epoch shuffles the stockable
- * pool once, weighted by rarity, and window k takes slice k. Adjacent slices
- * cannot overlap because they are different parts of one list. The only seam is
- * the epoch boundary, and that is handled by having the first slice of an epoch
- * skip anything the last slice of the previous epoch held — which terminates,
- * because it only ever looks back one epoch.
+ * One epoch's order for a category: the whole stockable pool, shuffled with a
+ * weight per rarity so commons come up more often than legendaries.
  */
-function rawEpoch(epoch: number): StoreItem[] {
-  const cached = epochCache.get(epoch);
+function rawEpoch(category: StoreItem['category'], epoch: number): StoreItem[] {
+  const key = `${category}:${epoch}`;
+  const cached = rawCache.get(key);
   if (cached) return cached;
 
-  const rng = rngFor(epoch, 12345);
-  const pool = STORE_ITEMS.filter(isStockable);
+  const rng = rngFor(epoch, categorySalt(category) ^ 12345);
+  const pool = poolFor(category);
   const weights = pool.map((i) => RARITY_WEIGHT[i.rarity]);
   const order: StoreItem[] = [];
-  const want = Math.min(pool.length, WINDOWS_PER_EPOCH * SHOP_SLOTS);
 
-  for (let n = 0; n < want; n++) {
+  for (let n = 0; n < pool.length; n++) {
     let total = 0;
     for (const w of weights) total += w;
     if (total <= 0) break;
@@ -109,12 +118,9 @@ function rawEpoch(epoch: number): StoreItem[] {
     weights[index] = 0;
   }
 
-  epochCache.set(epoch, order);
+  rawCache.set(key, order);
   return order;
 }
-
-const epochCache = new Map<number, StoreItem[]>();
-const sealedCache = new Map<number, StoreItem[]>();
 
 /**
  * The epoch's order with its first slice made safe across the seam.
@@ -126,18 +132,21 @@ const sealedCache = new Map<number, StoreItem[]>();
  * replaced. The last slice is never touched, so the look-back is exact and stops
  * after one epoch instead of chaining back forever.
  */
-function shuffledEpoch(epoch: number): StoreItem[] {
-  const cached = sealedCache.get(epoch);
+function sealedEpoch(category: StoreItem['category'], epoch: number): StoreItem[] {
+  const key = `${category}:${epoch}`;
+  const cached = sealedCache.get(key);
   if (cached) return cached;
 
-  const order = [...rawEpoch(epoch)];
-  const previous = rawEpoch(epoch - 1);
+  const order = [...rawEpoch(category, epoch)];
+  const slices = slicesFor(order.length);
+  const previous = rawEpoch(category, epoch - 1);
+  const prevSlices = slicesFor(previous.length);
   const held = new Set(
-    previous.slice(Math.max(0, previous.length - SHOP_SLOTS)).map((i) => i.id),
+    previous.slice((prevSlices - 1) * SHOP_SLOTS, prevSlices * SHOP_SLOTS).map((i) => i.id),
   );
 
   const middleStart = SHOP_SLOTS;
-  const middleEnd = Math.max(middleStart, order.length - SHOP_SLOTS);
+  const middleEnd = Math.max(middleStart, slices * SHOP_SLOTS - SHOP_SLOTS);
   let swap = middleStart;
   for (let i = 0; i < Math.min(SHOP_SLOTS, order.length); i++) {
     if (!held.has(order[i].id)) continue;
@@ -149,42 +158,97 @@ function shuffledEpoch(epoch: number): StoreItem[] {
     swap++;
   }
 
-  sealedCache.set(epoch, order);
+  sealedCache.set(key, order);
   return order;
 }
 
-/** The fifteen for one window, before the mythic slot is considered. */
-function shelfFor(window: number): StoreItem[] {
-  const epoch = Math.floor(window / WINDOWS_PER_EPOCH);
-  const slot = ((window % WINDOWS_PER_EPOCH) + WINDOWS_PER_EPOCH) % WINDOWS_PER_EPOCH;
-  return shuffledEpoch(epoch).slice(slot * SHOP_SLOTS, slot * SHOP_SLOTS + SHOP_SLOTS);
-}
-
-/** The mythic for a window, or null on the overwhelming majority of them. */
-export function mythicForWindow(now: number): StoreItem | null {
+/** The mythic on a category's shelf right now, or null — almost always null. */
+export function mythicForCategory(now: number, category: StoreItem['category']): StoreItem | null {
   const window = shopWindowIndex(now);
-  const rng = rngFor(window, 99991);
+  const rng = rngFor(window, categorySalt(category) ^ 99991);
   if (rng.next() >= MYTHIC_SLOT_CHANCE) return null;
-  const pool = STORE_ITEMS.filter((i) => i.rarity === 'mythic' && i.price > 0);
+  const pool = STORE_ITEMS.filter((i) => i.category === category && i.rarity === 'mythic' && i.price > 0);
   if (pool.length === 0) return null;
   return pool[rng.int(0, pool.length)];
 }
 
 /**
- * The shelf for a moment in time: fifteen items, plus a mythic on the rare
- * window that has one.
+ * What one category is selling right now: fifteen items, plus a mythic on the
+ * rare window that has one.
  *
- * Seeded off the clock, so the shelf is identical for the whole half hour and
- * cannot be rerolled by reloading.
+ * Every category rotates on its own, so a shop window turns over the whole shop
+ * — fifteen new jerseys, fifteen new pairs of shoes, and so on. Nothing on a
+ * shelf survives into the next window.
+ */
+export function categoryStock(now: number, category: StoreItem['category']): StoreItem[] {
+  const order = sealedEpoch(category, epochFor(category, shopWindowIndex(now)));
+  const slices = slicesFor(order.length);
+  const slot = ((shopWindowIndex(now) % slices) + slices) % slices;
+  const shelf = order.length <= SHOP_SLOTS ? [...order] : order.slice(slot * SHOP_SLOTS, slot * SHOP_SLOTS + SHOP_SLOTS);
+
+  const mythic = mythicForCategory(now, category);
+  if (mythic) shelf.unshift(mythic);
+
+  const rank: StoreItem['rarity'][] = ['mythic', 'legendary', 'epic', 'rare', 'common'];
+  return shelf.sort((a, b) => rank.indexOf(a.rarity) - rank.indexOf(b.rarity));
+}
+
+/**
+ * Below this many slices a category stops reshuffling and just cycles one fixed
+ * order.
+ *
+ * The seam between two shuffled epochs is closed by swapping the fifteen the
+ * previous epoch was still showing out of the new epoch's first slice. That
+ * needs somewhere to swap them to, and a small pool does not have it: dunk
+ * packages hold forty-five sellable items, so the fifteen being avoided are a
+ * third of everything and the swap runs out of room. Cycling one order instead
+ * makes consecutive windows disjoint by construction — adjacent blocks of the
+ * same list, including across the wrap — at the cost of the loop being visible
+ * after a couple of hours. For a forty-five item section that is the honest
+ * trade; a hundred and thirty-five item section keeps the shuffle.
+ */
+const MIN_SLICES_TO_RESHUFFLE = 4;
+
+/** Which epoch a window falls in for this category. */
+function epochFor(category: StoreItem['category'], window: number): number {
+  const slices = slicesFor(poolFor(category).length);
+  if (slices < MIN_SLICES_TO_RESHUFFLE) return 0;
+  return Math.floor(window / slices);
+}
+
+/** Every category that has something to sell, in the order the shop lists them. */
+export const STOCKED_CATEGORIES: StoreItem['category'][] = [
+  'jersey',
+  'shoes',
+  'clothing',
+  'accessory',
+  'hairstyle',
+  'tattoo',
+  'title',
+  'jumpshot',
+  'dunkPackage',
+  'animation',
+  'threeCelebration',
+  'celebration',
+  'emote',
+  'court',
+];
+
+/**
+ * The Featured shelf: the best of what every category happens to be selling this
+ * window. It is a view over the same stock, never a separate draw, so anything
+ * on it can be found in its own section too.
  */
 export function rotatingStock(now: number): StoreItem[] {
-  const stock = [...shelfFor(shopWindowIndex(now))];
-  const mythic = mythicForWindow(now);
-  if (mythic) stock.unshift(mythic);
+  const all = STOCKED_CATEGORIES.flatMap((c) => categoryStock(now, c));
+  const rank: StoreItem['rarity'][] = ['mythic', 'legendary', 'epic', 'rare', 'common'];
+  all.sort((a, b) => rank.indexOf(a.rarity) - rank.indexOf(b.rarity) || a.name.localeCompare(b.name));
+  return all.slice(0, SHOP_SLOTS);
+}
 
-  // Best first, so a mythic is the first thing you see rather than the last.
-  const order: StoreItem['rarity'][] = ['mythic', 'legendary', 'epic', 'rare', 'common'];
-  return stock.sort((a, b) => order.indexOf(a.rarity) - order.indexOf(b.rarity));
+/** Everything a category is selling, for the browse view. */
+export function catalogueItems(category: StoreItem['category']): StoreItem[] {
+  return categoryStock(Date.now(), category);
 }
 
 /**
@@ -193,8 +257,8 @@ export function rotatingStock(now: number): StoreItem[] {
  * category.
  */
 export function isPurchasableNow(item: StoreItem, now: number): boolean {
-  if (!item.rotationOnly) return true;
-  return rotatingStock(now).some((i) => i.id === item.id);
+  if (item.price === 0 || item.requirement) return true;
+  return categoryStock(now, item.category).some((i) => i.id === item.id);
 }
 
 /** "12m 30s" for the countdown under the shelf. */

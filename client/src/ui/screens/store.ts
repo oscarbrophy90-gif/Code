@@ -1,10 +1,12 @@
 import {
   CURRENCY_SHORT,
+  STORE_ITEMS,
   DUNK_PACKAGE_BY_ID,
   RARITY_COLOR,
-  mythicForWindow,
+  categoryStock,
+  mythicForCategory,
+  SHOP_SLOTS,
   STORE_BY_ID,
-  catalogueItems,
   formatCountdown,
   isPurchasableNow,
   msUntilShopRefresh,
@@ -102,18 +104,7 @@ export function renderStore(params: RouteParams): HTMLElement {
           ),
         ]),
       ),
-      el(
-        'div',
-        { class: 'shop-stock' },
-        category === 'featured'
-          ? featuredShelf()
-          : el(
-              'div',
-              {},
-              el('div', { class: 'shop-stock-head' }, LABEL[category]),
-              el('div', { class: 'grid cols-3' }, ...catalogueItems(category).map((i) => renderItem(i))),
-            ),
-      ),
+      el('div', { class: 'shop-stock' }, category === 'featured' ? featuredShelf() : categoryShelf(category)),
     ),
   );
 }
@@ -146,14 +137,14 @@ function refreshClock(): HTMLElement {
 }
 
 /**
- * The rotating shelf. Its contents come from the clock, not from a roll made
- * when you opened the page, so it is the same shelf on every device for the
- * whole half hour and you cannot reroll it by refreshing.
+ * One category's shelf. Fifteen items, and every one of them is replaced when
+ * the window turns over — the whole shop rotates, not just a featured strip.
  */
-function featuredShelf(): HTMLElement {
+function categoryShelf(category: StoreCategory): HTMLElement {
   const now = Date.now();
-  const stock = rotatingStock(now);
-  const mythic = mythicForWindow(now);
+  const stock = categoryStock(now, category);
+  const mythic = mythicForCategory(now, category);
+  const pool = STORE_ITEMS.filter((i) => i.category === category).length;
 
   return el(
     'div',
@@ -167,15 +158,44 @@ function featuredShelf(): HTMLElement {
         el(
           'div',
           { class: 'shop-title' },
-          `${stock.length} in stock`,
+          `${LABEL[category]} · ${stock.length} in stock`,
           mythic ? el('span', { class: 'shop-mythic-tag' }, '+1 MYTHIC') : null,
         ),
         el(
           'div',
           { class: 'hint', style: 'margin:2px 0 0' },
           mythic
-            ? 'A sixteenth slot opened. Mythic stock only ever turns up like this, roughly once a day, and there are eighty-seven of them — you are unlikely to see this one again.'
-            : `Fifteen items, and every one of them is gone in thirty minutes — the next window is fifteen completely different things. Very occasionally a sixteenth slot opens with a mythic in it.`,
+            ? `A sixteenth slot opened here. Mythic stock only ever turns up like this and rarely — there are ${pool} ${LABEL[category].toLowerCase()} in the game and you are unlikely to see this one again.`
+            : `Fifteen of ${pool}, and all fifteen are gone in thirty minutes — the next window is fifteen different ones. Very occasionally a sixteenth slot opens with a mythic in it.`,
+        ),
+      ),
+    ),
+    el('div', { class: 'grid cols-3' }, ...stock.map((i) => renderItem(i, true))),
+  );
+}
+
+/**
+ * Featured is a view over what every section happens to be selling this window,
+ * best first — never a separate draw, so anything here is also in its own
+ * section.
+ */
+function featuredShelf(): HTMLElement {
+  const stock = rotatingStock(Date.now());
+
+  return el(
+    'div',
+    {},
+    el(
+      'div',
+      { class: 'shop-banner' },
+      el(
+        'div',
+        { style: 'min-width:0' },
+        el('div', { class: 'shop-title' }, `Best of what is in stock`),
+        el(
+          'div',
+          { class: 'hint', style: 'margin:2px 0 0' },
+          'Every section is selling its own fifteen right now, and the whole shop turns over every thirty minutes. This is the pick of it.',
         ),
       ),
     ),
