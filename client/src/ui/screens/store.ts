@@ -62,7 +62,16 @@ export function renderStore(params: RouteParams): HTMLElement {
   return el(
     'div',
     { class: 'wrap' },
-    el('h1', { class: 'page' }, 'Store'),
+    // The countdown belongs to the whole shop, not to the Featured tab, so it
+    // sits in the page header and stays visible whichever section you are in —
+    // you want to know how long is left while you are deciding, not only while
+    // you are looking at the shelf.
+    el(
+      'div',
+      { class: 'shop-header' },
+      el('h1', { class: 'page', style: 'margin:0' }, 'Store'),
+      refreshClock(),
+    ),
     el(
       'p',
       { class: 'page-sub' },
@@ -110,27 +119,39 @@ export function renderStore(params: RouteParams): HTMLElement {
 }
 
 /**
+ * The live countdown to the next shelf. It ticks in place rather than
+ * re-rendering the page every second, and rebuilds once when the window
+ * actually turns over so the new stock appears without a manual refresh.
+ */
+function refreshClock(): HTMLElement {
+  const readout = el('span', { class: 'shop-clock' }, formatCountdown(msUntilShopRefresh(Date.now())));
+  const timer = window.setInterval(() => {
+    if (!readout.isConnected) {
+      window.clearInterval(timer);
+      return;
+    }
+    const left = msUntilShopRefresh(Date.now());
+    readout.textContent = formatCountdown(left);
+    if (left > SHOP_WINDOW_TICK) return;
+    window.clearInterval(timer);
+    window.setTimeout(refresh, left + 250);
+  }, 1000);
+
+  return el(
+    'div',
+    { class: 'shop-refresh' },
+    el('span', { class: 'shop-refresh-label' }, 'NEW STOCK IN'),
+    readout,
+  );
+}
+
+/**
  * The rotating shelf. Its contents come from the clock, not from a roll made
  * when you opened the page, so it is the same shelf on every device for the
  * whole half hour and you cannot reroll it by refreshing.
  */
 function featuredShelf(): HTMLElement {
-  const now = Date.now();
-  const stock = rotatingStock(now);
-  const countdown = el('span', { class: 'shop-clock' }, formatCountdown(msUntilShopRefresh(now)));
-
-  // Tick the countdown in place, and rebuild the page when the shelf turns over.
-  const timer = window.setInterval(() => {
-    if (!countdown.isConnected) {
-      window.clearInterval(timer);
-      return;
-    }
-    const left = msUntilShopRefresh(Date.now());
-    countdown.textContent = formatCountdown(left);
-    if (left > SHOP_WINDOW_TICK) return;
-    window.clearInterval(timer);
-    window.setTimeout(refresh, left + 250);
-  }, 1000);
+  const stock = rotatingStock(Date.now());
 
   return el(
     'div',
@@ -148,7 +169,6 @@ function featuredShelf(): HTMLElement {
           'The shelf turns over every 30 minutes. Mythic stock only ever appears here, and almost never — if you see pink, it will probably be gone next time you look.',
         ),
       ),
-      el('div', { style: 'text-align:right;flex-shrink:0' }, el('div', { class: 'faint', style: 'font-size:10px;font-weight:800' }, 'REFRESHES IN'), countdown),
     ),
     el('div', { class: 'grid cols-4' }, ...stock.map((i) => renderItem(i, true))),
   );
