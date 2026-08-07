@@ -151,6 +151,8 @@ export class PlayerRenderer {
           lean: 0.5 * jab,
           alpha: 1,
           bob: -0.14 * jab,
+          spin: 0,
+          stride: 1 + 0.6 * jab,
         };
         crouch = armPose.crouch;
         poseLean = armPose.lean;
@@ -205,6 +207,9 @@ export class PlayerRenderer {
     // A celebration wins over whatever the state machine had the body doing.
     // It is checked here rather than as an act state so it can never interfere
     // with the rules — nothing in the simulation reads it.
+    let poseSpin = armPose ? armPose.spin : 0;
+    let poseStride = armPose ? armPose.stride : 1;
+
     if (p.celebrationTimer > 0 && p.celebration) {
       const total = p.celebration === 'win' ? WIN_CELEBRATION_TIME : THREE_CELEBRATION_TIME;
       const id = p.celebration === 'win' ? look.celebrationId : look.threeCelebrationId;
@@ -214,6 +219,8 @@ export class PlayerRenderer {
       crouch = armPose.crouch;
       poseLean = armPose.lean;
       bob = armPose.bob;
+      poseSpin = armPose.spin;
+      poseStride = armPose.stride;
     }
 
     // An emote poses the body outright; otherwise the lean comes from momentum.
@@ -232,10 +239,14 @@ export class PlayerRenderer {
 
     // Lying down is the standing pose tipped ninety degrees: what was height
     // becomes length along the floor, and everything sits just off the deck.
+    // A small body turn, applied to every offset so the whole figure pivots
+    // rather than only the arms swinging.
+    const turnC = Math.cos(poseSpin);
+    const turnS = Math.sin(poseSpin);
     const at = (yFt: number, dx = 0, dz = 0) =>
       down
         ? cam.project(p.x + yFt * 0.82 + dz * 0.4, 0.28 + Math.abs(dx) * 0.35, p.z + dx * 0.7)
-        : cam.project(p.x + dx, p.y + yFt + bob, p.z + dz);
+        : cam.project(p.x + dx * turnC - dz * turnS, p.y + yFt + bob, p.z + dx * turnS + dz * turnC);
 
     const hip = at(hipY, lean * 0.3);
     const shoulder = at(shoulderY, lean * 0.55);
@@ -250,7 +261,7 @@ export class PlayerRenderer {
     // Legs.
     ctx.strokeStyle = mix(skin, '#000000', 0.18);
     ctx.lineWidth = lineW * 0.92;
-    const footSpread = 0.42 * spread;
+    const footSpread = 0.42 * spread * poseStride;
     // The forward-swinging foot leaves the floor. Without the lift the legs
     // scissor without ever stepping, which reads as sliding rather than running.
     const footAt = (sign: number) => {

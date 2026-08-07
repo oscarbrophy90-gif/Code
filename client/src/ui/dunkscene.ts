@@ -79,6 +79,16 @@ export function playDunkScene(host: HTMLElement, opts: DunkSceneOptions): Promis
  * the rise, the flush, and the hang — driven entirely by `t`, so the same
  * function renders the locker preview and the in-game cutaway.
  */
+/**
+ * One frame of a dunk.
+ *
+ * The layout is deliberately not to scale. A six-and-a-half foot player with a
+ * normal standing reach only needs about sixteen inches of hops to touch a ten
+ * foot rim, so drawn honestly he barely leaves the floor and the whole thing
+ * reads as a tall man putting his hand up — which is exactly how it looked. The
+ * figure is therefore small against a high rim, so the leap is a third of the
+ * frame and he finishes clearly above the ring and in front of it.
+ */
 export function drawDunkFrame(
   ctx: CanvasRenderingContext2D,
   canvas: HTMLCanvasElement,
@@ -97,9 +107,12 @@ export function drawDunkFrame(
 
   const primary = opts.dunker.jerseyPrimary;
   const accent = opts.dunker.jerseySecondary;
-  const floorY = h * 0.86;
-  const rimX = w * 0.68;
-  const rimY = h * 0.24;
+  const floorY = h * 0.9;
+  const rimX = w * 0.6;
+  const rimY = h * 0.3;
+  const u = h / 360;
+  const bodyH = h * FIGURE_H;
+  const style = styleFor(opts.packageId);
 
   // Backdrop.
   const sky = ctx.createLinearGradient(0, 0, 0, h);
@@ -119,55 +132,43 @@ export function drawDunkFrame(
     ctx.stroke();
   }
 
-  // Floor.
   ctx.fillStyle = 'rgba(255,255,255,0.05)';
   ctx.fillRect(0, floorY, w, h - floorY);
 
-  // One unit, relative to a reference height, so the furniture scales with the
-  // canvas — the locker preview is a third the height of the in-game cutaway.
-  const u = h / 360;
-  const flush = Math.max(0, (t - (1 - styleFor(opts.packageId).hangFor)) / 0.2);
+  // ---------------------------------------------------------------- timing
+  const hangStart = 1 - style.hangFor;
+  const riseStart = Math.max(0.18, hangStart - 0.3);
+  const approach = Math.min(1, t / riseStart);
+  const rise = t < riseStart ? 0 : Math.min(1, (t - riseStart) / (hangStart - riseStart));
+  const hang = t < hangStart ? 0 : Math.min(1, (t - hangStart) / style.hangFor);
+  const flush = Math.max(0, Math.min(1, (t - hangStart) / 0.14));
 
-  // Backboard.
+  // Backboard, drawn behind everything the player does.
   ctx.strokeStyle = 'rgba(238,242,248,0.8)';
   ctx.lineWidth = 3 * u;
   ctx.strokeRect(rimX + 26 * u, rimY - 54 * u, 76 * u, 66 * u);
 
-  // Where the dunker is: run-up, gather, rise, then hanging off the rim. How
-  // long each beat lasts is the package's business.
-  const style = styleFor(opts.packageId);
-  const hangStart = 1 - style.hangFor;
-  const riseStart = hangStart - 0.24;
-  const approach = Math.min(1, t / riseStart);
-  const rise = t < riseStart ? 0 : Math.min(1, (t - riseStart) / (hangStart - riseStart));
-  const hang = t < hangStart ? 0 : Math.min(1, (t - hangStart) / style.hangFor);
+  // ------------------------------------------------------------- the leap
+  // Feet at the flush sit a whole body-and-a-third above the rim line, so the
+  // hands clear the ring rather than arriving level with it.
+  const airFeetY = rimY + bodyH * 1.26;
+  const release = Math.max(0, (hang - 0.72) / 0.28);
+  const arc = Math.sin(Math.min(1, rise) * Math.PI * 0.5);
 
-  // The reach: 0.74 up the body plus the arm, which is where drawFigure puts
-  // the grabbing hand. Solving for the feet puts that hand exactly on the rim.
-  const reachUp = 0.35 + rise * 1.1;
-  const bodyH = h * FIGURE_H;
-  const handAbove = bodyH * (0.74 + reachUp * 0.42);
-
-  // Hanging: one hand on the iron, body swinging under it, letting go at the
-  // very end. This is the bit that makes a dunk feel like a dunk.
+  // In front of the ring, on the near side, not underneath it.
+  const gripX = rimX - 16 * u;
+  const startX = style.from < 0 ? w * 0.06 : w * 0.94;
+  const runX = startX + (gripX - startX) * easeOut(approach);
   const swing = hang > 0 ? Math.sin(hang * Math.PI * 2.2) * (1 - hang) * style.swing : 0;
-  const release = Math.max(0, (hang - 0.75) / 0.25);
-  const gripX = rimX + style.finishSide * 4 * u;
 
-  // Run in from whichever side the package uses.
-  const startX = style.from < 0 ? w * 0.08 : w * 0.95;
-  const runX = startX + (gripX - style.from * 26 * u - startX) * easeOut(approach);
-  const px = hang > 0 ? gripX - style.finishSide * 20 * u + swing * 26 * u : runX;
-  const py =
-    hang > 0
-      ? rimY + handAbove + release * (floorY - rimY - handAbove) * 0.9
-      : floorY - Math.sin(rise * Math.PI * 0.5) * (floorY - rimY - handAbove);
+  const px = hang > 0 ? gripX + swing * 22 * u : runX;
+  const py = hang > 0 ? airFeetY + release * (floorY - airFeetY) * 0.95 : floorY - arc * (floorY - airFeetY);
 
   // The rim bends under the weight and springs back as he lets go.
   const rimFlex = hang > 0 ? Math.sin(Math.min(1, hang * 1.6) * Math.PI * 0.7) * (1 - release) * 9 * u * style.flex : 0;
-
-  // Rim and net, bent by whoever is hanging off them.
   const rimYNow = rimY + rimFlex;
+
+  // Rim and net.
   ctx.strokeStyle = '#ff7a3d';
   ctx.lineWidth = 5 * u;
   ctx.beginPath();
@@ -186,42 +187,42 @@ export function drawDunkFrame(
 
   // The victim, planted under the rim and going down.
   if (opts.posterized && opts.victim) {
-    const fall = Math.max(0, (t - 0.6) / 0.4);
-    drawFigure(ctx, rimX - 66 * (h / 360), floorY, h, opts.victim.jerseyPrimary, opts.victim.jerseySecondary, {
+    const fall = Math.max(0, (t - hangStart * 0.9) / 0.4);
+    drawFigure(ctx, rimX - 74 * u, floorY, h, opts.victim.jerseyPrimary, opts.victim.jerseySecondary, {
       armsUp: 1 - fall,
       lean: fall * 1.35,
       scale: 0.92,
     });
   }
 
-  drawFigure(ctx, px, py + (hang > 0 ? rimFlex : 0), h, primary, accent, {
-    armsUp: reachUp,
-    lean: hang > 0 ? swing * 0.9 : -0.25 - rise * 0.35,
+  // ------------------------------------------------------- the dunker
+  // Where the ball is, as an angle swung around the shoulder. This is what
+  // actually separates a windmill from a tomahawk from a cradle: the path the
+  // ball takes on the way to the rim, not how long he hangs afterwards.
+  const swingT = hang > 0 ? 1 : rise;
+  const ballAngle = ballAngleFor(style.motion, swingT, hang);
+  const bodySpin = spinFor(style.motion, rise, hang);
+
+  const hand = drawFigure(ctx, px, py + (hang > 0 ? rimFlex : 0), h, primary, accent, {
+    armsUp: 0.35 + arc * 1.1,
+    lean: hang > 0 ? swing * 0.9 : -0.2 - rise * 0.3,
     scale: 1,
     tuck: hang > 0 ? (1 - release) * 0.8 : 0,
-    // A reverse turns his back to you on the way up and finishes facing away.
-    spin: style.spin * Math.min(1, rise + hang),
+    spin: bodySpin,
     oneHand: style.oneHand,
-    facing: style.from,
+    facing: turnedAway(style.motion, rise, hang) ? ((style.from * -1) as -1 | 1) : style.from,
+    ballAngle,
+    reaching: Math.max(rise, hang > 0 ? 1 : 0),
   });
 
-  // The ball: in the hand, then through the rim.
-  const ballR = h * 0.036;
+  // The ball: in the hand on the way up, through the ring on the flush.
+  const ballR = h * 0.032;
   ctx.fillStyle = '#e0762c';
   ctx.beginPath();
   if (t < hangStart) {
-    // Cocked back and up as he gathers — the bigger the windup, the further
-    // behind the head it travels before it comes over the top.
-    const cock = style.windup * Math.sin(Math.min(1, rise) * Math.PI * 0.9);
-    ctx.arc(
-      px + bodyH * (0.2 + reachUp * 0.16) - style.from * cock * bodyH * 0.55,
-      py - bodyH * (0.72 + reachUp * 0.3) - cock * bodyH * 0.35,
-      ballR,
-      0,
-      Math.PI * 2,
-    );
+    ctx.arc(hand.x, hand.y, ballR, 0, Math.PI * 2);
   } else {
-    const drop = Math.min(1, (t - hangStart) / 0.3);
+    const drop = Math.min(1, (t - hangStart) / 0.32);
     ctx.arc(rimX + 2 * u, rimYNow + drop * (floorY - rimYNow) * 0.92, ballR, 0, Math.PI * 2);
   }
   ctx.fill();
@@ -233,50 +234,137 @@ export function drawDunkFrame(
   }
 }
 
+/**
+ * Which way the ball is held, as an angle from straight overhead. Positive is
+ * behind the head, negative is out in front and low.
+ */
+function ballAngleFor(motion: DunkMotion, rise: number, hang: number): number {
+  const settle = hang > 0 ? 1 - Math.min(1, hang * 4) : 1;
+  switch (motion) {
+    case 'tomahawk':
+      // Cocked right back behind the head, then chopped over the top.
+      return (2.4 * Math.sin(rise * Math.PI * 0.9)) * settle;
+    case 'windmill':
+      // A full circle: down past the hip, out wide, over the top.
+      return (-2.2 + rise * 5.0) * settle;
+    case 'cradle':
+      // Rocked into the chest, held there, and only extended at the last beat.
+      return (-1.8 + Math.max(0, rise - 0.6) * 4.5) * settle;
+    case 'doubleClutch':
+      // Up, pulled back down, and up again.
+      return (1.6 * Math.sin(rise * Math.PI * 2)) * settle;
+    case 'reverse':
+      // Carried across the body to finish on the far side of the ring.
+      return (-1.4 * Math.sin(rise * Math.PI)) * settle;
+    case 'spin':
+      // Held tight while the body does the work.
+      return 0.5 * Math.sin(rise * Math.PI) * settle;
+    case 'hammer':
+      // Straight up and driven straight down, no flourish.
+      return 0.25 * rise * settle;
+    default:
+      return 0;
+  }
+}
 
 /**
- * What makes one package different from another.
+ * How far the body tilts through the leap.
  *
- * Every dunk used to run the identical path — same side, same rise, same hang —
- * so the five packages were five names on one animation. These are the knobs
- * the scene reads, and each package sets them differently.
+ * Deliberately small. The figure rotates about its feet, so a real 360 swings
+ * the whole body out of frame and lands it sideways — which is what the first
+ * cut did. A turn is sold by the figure flipping to show its back instead, and
+ * this is only the lean on top of that.
  */
+function spinFor(motion: DunkMotion, rise: number, hang: number): number {
+  const through = hang > 0 ? 1 : rise;
+  if (motion === 'spin') return Math.sin(through * Math.PI * 2) * 0.4;
+  if (motion === 'reverse') return through * 0.3;
+  if (motion === 'windmill') return through * 0.2;
+  return 0;
+}
+
+/** True while a turning dunk has his back to you. */
+function turnedAway(motion: DunkMotion, rise: number, hang: number): boolean {
+  const through = hang > 0 ? 1 : rise;
+  if (motion === 'spin') return through > 0.35 && through < 0.85;
+  if (motion === 'reverse') return through > 0.55;
+  return false;
+}
+
+/**
+ * The named motions. This is what makes a Windmill a windmill: the packages had
+ * five knobs that changed how long a dunk hung and which side it came from, and
+ * nothing that changed what the arms actually did, so fifty packages ran one
+ * animation at different speeds.
+ */
+export type DunkMotion =
+  | 'flush'
+  | 'tomahawk'
+  | 'windmill'
+  | 'cradle'
+  | 'doubleClutch'
+  | 'reverse'
+  | 'spin'
+  | 'hammer';
+
 interface DunkStyle {
   /** run-up side: -1 comes in from the left, +1 from the right */
   from: -1 | 1;
-  /** how far the ball is cocked back behind the head before the flush */
-  windup: number;
+  /** what the arms do on the way up */
+  motion: DunkMotion;
   /** true for a one-hand finish, false for a two-hand flush */
   oneHand: boolean;
   /** fraction of the scene spent hanging off the rim */
   hangFor: number;
   /** how hard the body swings under the rim */
   swing: number;
-  /**
-   * Radians of extra body turn on the way up. The figure rotates about its
-   * feet, so this stays small — a big angle swings the whole body out of the
-   * frame instead of turning it. The mirrored `from` is what actually sells a
-   * reverse; this is the lean on top of it.
-   */
-  spin: number;
-  /** which side of the rim he finishes on */
-  finishSide: -1 | 1;
   /** how much the rim bends */
   flex: number;
 }
 
 const DUNK_STYLE: Record<string, DunkStyle> = {
-  // Straight on, two hands, down and off. No showmanship.
-  'basic-slam': { from: -1, windup: 0.1, oneHand: false, hangFor: 0.12, swing: 0.25, spin: 0, finishSide: -1, flex: 0.7 },
-  // Long approach from the left, ball cocked right back, one hand over the top.
-  tomahawk: { from: -1, windup: 1, oneHand: true, hangFor: 0.2, swing: 0.5, spin: 0, finishSide: -1, flex: 1 },
-  // The whole point is the hang, so it gets most of the scene.
-  'rim-hang': { from: 1, windup: 0.45, oneHand: true, hangFor: 0.46, swing: 1.15, spin: 0, finishSide: -1, flex: 1.25 },
-  // Straight into contact, two hands, the rim takes a beating.
-  poster: { from: -1, windup: 0.6, oneHand: false, hangFor: 0.24, swing: 0.4, spin: 0, finishSide: -1, flex: 1.6 },
-  // In from the baseline, turning under the rim to finish on the far side.
-  'reverse-flush': { from: 1, windup: 0.25, oneHand: true, hangFor: 0.22, swing: 0.35, spin: 0.3, finishSide: 1, flex: 0.85 },
+  'basic-slam': { from: -1, motion: 'flush', oneHand: false, hangFor: 0.14, swing: 0.25, flex: 0.7 },
+  tomahawk: { from: -1, motion: 'tomahawk', oneHand: true, hangFor: 0.2, swing: 0.5, flex: 1 },
+  'rim-hang': { from: 1, motion: 'flush', oneHand: true, hangFor: 0.44, swing: 1.15, flex: 1.25 },
+  poster: { from: -1, motion: 'hammer', oneHand: false, hangFor: 0.24, swing: 0.4, flex: 1.7 },
+  'reverse-flush': { from: 1, motion: 'reverse', oneHand: true, hangFor: 0.2, swing: 0.35, flex: 0.85 },
 };
+
+/**
+ * Names carry the motion. A package called Windmill windmills, a package called
+ * Cradle Slam rocks the ball into the chest — read straight off the id rather
+ * than hand-assigned, so a new package named after a real dunk gets that dunk.
+ */
+const MOTION_KEYWORDS: [string, DunkMotion][] = [
+  ['windmill', 'windmill'],
+  ['tomahawk', 'tomahawk'],
+  ['cradle', 'cradle'],
+  ['rock-the-baby', 'cradle'],
+  ['double-clutch', 'doubleClutch'],
+  ['clutch', 'doubleClutch'],
+  ['reverse', 'reverse'],
+  ['under-the-rim', 'reverse'],
+  ['turn-back', 'reverse'],
+  ['half-turn', 'spin'],
+  ['full-turn', 'spin'],
+  ['shoulder-roll', 'spin'],
+  ['scissor', 'windmill'],
+  ['split-step', 'windmill'],
+  ['hammer', 'hammer'],
+  ['anvil', 'hammer'],
+  ['sledge', 'hammer'],
+  ['guillotine', 'hammer'],
+  ['battering', 'hammer'],
+  ['freight', 'hammer'],
+  ['cocked-back', 'tomahawk'],
+  ['loaded', 'tomahawk'],
+  ['slingshot', 'tomahawk'],
+  ['catapult', 'tomahawk'],
+  ['trigger', 'doubleClutch'],
+  ['leg-kick', 'windmill'],
+  ['statue', 'cradle'],
+  ['curtain', 'hammer'],
+];
 
 function styleFor(id: string): DunkStyle {
   return DUNK_STYLE[id] ?? derivedStyle(id);
@@ -292,46 +380,38 @@ function hashId(id: string): number {
   return n >>> 0;
 }
 
-/**
- * Choreography built from the package id.
- *
- * Fifty packages is far past what is worth hand-tuning, and the five knobs the
- * scene reads already produce visibly different dunks. The hash sets each one,
- * so two packages animate identically only if they share an id.
- */
 function derivedStyle(id: string): DunkStyle {
   const n = hashId(id);
   const bit = (shift: number, mask: number) => (n >>> shift) & mask;
   const unit = (shift: number, mask: number) => bit(shift, mask) / mask;
-  const from: -1 | 1 = bit(0, 1) ? 1 : -1;
+
+  // The name wins if it describes a real dunk; otherwise the hash picks one.
+  const named = MOTION_KEYWORDS.find(([key]) => id.includes(key));
+  const pool: DunkMotion[] = ['flush', 'tomahawk', 'windmill', 'cradle', 'doubleClutch', 'reverse', 'spin', 'hammer'];
+  const motion = named ? named[1] : pool[bit(0, 7) % pool.length];
+
   return {
-    from,
-    windup: 0.15 + unit(1, 15) * 0.95,
-    oneHand: bit(5, 1) === 1,
-    // The hang is the most visible difference between two dunks, so it gets the
-    // widest spread: some are down and off, some live on the rim.
-    hangFor: 0.12 + unit(6, 15) * 0.36,
+    from: bit(4, 1) ? 1 : -1,
+    motion,
+    oneHand: motion !== 'flush' && motion !== 'hammer' ? true : bit(5, 1) === 1,
+    hangFor: 0.14 + unit(6, 15) * 0.34,
     swing: 0.2 + unit(10, 7) * 1.1,
-    // Rotation pivots about the feet, so it stays small — see the note above.
-    spin: bit(13, 3) === 0 ? 0.3 : 0,
-    finishSide: bit(15, 1) ? 1 : -1,
     flex: 0.6 + unit(16, 15) * 1.1,
   };
 }
 
 /**
- * Figure height as a fraction of the frame. Small enough that the rim sits
- * clearly above a standing player, so hanging off it actually lifts him — at
- * the first size he could touch the rim flat-footed and the hang read as
- * standing with an arm up.
+ * Figure height as a fraction of the frame. Small, on purpose — see the note on
+ * drawDunkFrame about why an honestly scaled player cannot look like he is
+ * dunking.
  */
-const FIGURE_H = 0.33;
+const FIGURE_H = 0.235;
 
 function easeOut(t: number): number {
   return 1 - (1 - t) ** 3;
 }
 
-/** A blocky side-on figure. Enough to read as a body at speed. */
+/** A blocky side-on figure. Returns where the dunking hand ended up. */
 function drawFigure(
   ctx: CanvasRenderingContext2D,
   x: number,
@@ -344,16 +424,15 @@ function drawFigure(
     lean: number;
     scale: number;
     tuck?: number;
-    /** extra body rotation, for reverses */
     spin?: number;
-    /** one-hand finish rather than a two-hand flush */
     oneHand?: boolean;
-    /** -1 faces right, +1 faces left — which way the run-up came from */
     facing?: -1 | 1;
+    /** where the ball hand is, as an angle from straight overhead */
+    ballAngle?: number;
+    /** 0 on the floor, 1 fully extended at the rim */
+    reaching?: number;
   },
-): void {
-  // The figure stands a little under half the frame, so the rim, the ball and
-  // the caption all still read. The first cut of this was ten times too big.
+): { x: number; y: number } {
   const bodyH = h * FIGURE_H * pose.scale;
   ctx.save();
   ctx.translate(x, y);
@@ -363,7 +442,7 @@ function drawFigure(
   // Legs. Hanging off the rim they tuck up rather than dangling straight.
   const tuck = pose.tuck ?? 0;
   ctx.strokeStyle = 'rgba(180,120,80,1)';
-  ctx.lineWidth = bodyH * 0.075;
+  ctx.lineWidth = bodyH * 0.085;
   ctx.lineCap = 'round';
   for (const dir of [-1, 1]) {
     const kneeY = -bodyH * (0.22 + tuck * 0.12);
@@ -385,30 +464,55 @@ function drawFigure(
   ctx.closePath();
   ctx.fill();
   ctx.strokeStyle = accent;
-  ctx.lineWidth = bodyH * 0.012;
+  ctx.lineWidth = bodyH * 0.014;
   ctx.stroke();
 
-  // Arms — the reaching one goes up with the pose.
+  // Arms. The ball arm swings to wherever the motion has put the ball; the off
+  // arm either goes up with it or trails for balance.
   ctx.strokeStyle = 'rgba(190,128,86,1)';
-  ctx.lineWidth = bodyH * 0.06;
-  const reach = pose.armsUp;
+  ctx.lineWidth = bodyH * 0.07;
+  const shoulderY = -bodyH * 0.74;
+  // Arm length is half a body at full extension, which puts the hand about
+  // 1.24 body-heights above the feet — the same figure airFeetY uses to park him
+  // at the rim, so the hand lands on the ring rather than sailing past it. The
+  // first cut had the arm nearly as long as the whole body.
+  const armLen = bodyH * (0.3 + (pose.reaching ?? 0) * 0.2);
+  const angle = pose.ballAngle ?? 0;
+  // Angle zero is straight up; positive swings behind, negative out in front.
+  const handX = bodyH * 0.12 + Math.sin(angle) * armLen;
+  const handY = shoulderY - Math.cos(angle) * armLen;
+  const elbowX = bodyH * 0.12 + Math.sin(angle * 0.65) * armLen * 0.55;
+  const elbowY = shoulderY - Math.cos(angle * 0.65) * armLen * 0.55;
   ctx.beginPath();
-  ctx.moveTo(bodyH * 0.12, -bodyH * 0.74);
-  ctx.lineTo(bodyH * 0.26, -bodyH * (0.74 + reach * 0.18));
-  ctx.lineTo(bodyH * 0.34, -bodyH * (0.74 + reach * 0.42));
+  ctx.moveTo(bodyH * 0.12, shoulderY);
+  ctx.lineTo(elbowX, elbowY);
+  ctx.lineTo(handX, handY);
   ctx.stroke();
-  // The off arm either trails (one-hand) or goes up with it (two-hand flush).
-  const off = pose.oneHand === false ? reach : reach * 0.18;
+
+  const twoHand = pose.oneHand === false;
   ctx.beginPath();
-  ctx.moveTo(-bodyH * 0.12, -bodyH * 0.74);
-  ctx.lineTo(-bodyH * 0.26, -bodyH * (0.68 + off * 0.2));
-  if (pose.oneHand === false) ctx.lineTo(-bodyH * 0.3, -bodyH * (0.74 + off * 0.42));
+  ctx.moveTo(-bodyH * 0.12, shoulderY);
+  if (twoHand) {
+    ctx.lineTo(-elbowX * 0.8, elbowY);
+    ctx.lineTo(-handX * 0.55, handY);
+  } else {
+    ctx.lineTo(-bodyH * 0.28, shoulderY + bodyH * (0.06 - (pose.reaching ?? 0) * 0.18));
+  }
   ctx.stroke();
 
   // Head.
   ctx.fillStyle = 'rgba(200,138,96,1)';
   ctx.beginPath();
-  ctx.arc(0, -bodyH * 0.88, bodyH * 0.09, 0, Math.PI * 2);
+  ctx.arc(0, -bodyH * 0.88, bodyH * 0.1, 0, Math.PI * 2);
   ctx.fill();
   ctx.restore();
+
+  // Hand position back in canvas space, so the ball can sit in it.
+  const flip = (pose.facing ?? -1) > 0 ? -1 : 1;
+  const rot = pose.lean * 0.18 + (pose.spin ?? 0);
+  const hx = handX * flip;
+  return {
+    x: x + hx * Math.cos(rot) - handY * Math.sin(rot),
+    y: y + hx * Math.sin(rot) + handY * Math.cos(rot),
+  };
 }

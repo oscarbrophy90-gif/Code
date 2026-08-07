@@ -19,7 +19,7 @@ import { DEFAULT_TITLES, newlyEarnedTitles, streakBadge } from '../src/data/titl
 import { DRILLS, SHOOT_AROUND, drillMedal, drillReward } from '../src/data/drills.ts';
 import { DEFAULT_UNLOCKS, STORE_BY_ID, STORE_ITEMS } from '../src/data/cosmetics.ts';
 import type { StoreItem } from '../src/economy.ts';
-import { SHOP_SLOTS, SHOP_WINDOW_MS, catalogueItems, isPurchasableNow, msUntilShopRefresh, STOCKED_CATEGORIES, categoryStock, mythicForCategory, rotatingStock } from '../src/shop.ts';
+import { SHOP_SLOTS, SHOP_WINDOW_MS, slotsFor, catalogueItems, isPurchasableNow, msUntilShopRefresh, STOCKED_CATEGORIES, categoryStock, mythicForCategory, rotatingStock } from '../src/shop.ts';
 import { GRADE_COLOR, computeShotProfile, isAutomatic, resolveShot } from '../src/shooting.ts';
 import { freshBadges } from '../src/badges.ts';
 import { isAcceptableMatch, rankLabel, tierForPoints, updateRank, freshRank } from '../src/mmr.ts';
@@ -1510,7 +1510,7 @@ test('every section holds fifteen, and all fifteen are gone next window', () => 
   for (const category of STOCKED_CATEGORIES) {
     const pool = STORE_ITEMS.filter((i) => i.category === category && i.price > 0 && !i.requirement && i.rarity !== 'mythic');
     // Sections with fewer than fifteen sellable items have nothing to rotate.
-    const expected = Math.min(SHOP_SLOTS, pool.length);
+    const expected = Math.min(slotsFor(category), pool.length);
 
     for (let w = 0; w < 60; w++) {
       const now = base + w * SHOP_WINDOW_MS;
@@ -1528,7 +1528,7 @@ test('every section holds fifteen, and all fifteen are gone next window', () => 
       for (const item of stock) assert.equal(item.category, category, 'a section only sells its own things');
 
       // Nothing on this shelf is still here next window.
-      if (pool.length <= SHOP_SLOTS) continue;
+      if (pool.length <= slotsFor(category)) continue;
       const here = new Set(stock.filter((i) => i.rarity !== 'mythic').map((i) => i.id));
       const next = categoryStock(now + SHOP_WINDOW_MS, category).filter((i) => i.rarity !== 'mythic');
       for (const item of next) {
@@ -1562,7 +1562,7 @@ test('a shelf is never all commons — every section shows a spread of tiers', (
       (i) => i.category === category && i.price > 0 && !i.requirement && i.rarity !== 'mythic',
     );
     // Sections too small to rotate show everything they have; nothing to check.
-    if (pool.length <= SHOP_SLOTS) continue;
+    if (pool.length <= slotsFor(category)) continue;
     const has = (r: StoreItem['rarity']) => pool.some((i) => i.rarity === r);
 
     for (let w = 0; w < 40; w++) {
@@ -1570,7 +1570,7 @@ test('a shelf is never all commons — every section shows a spread of tiers', (
       const count = (r: StoreItem['rarity']) => shelf.filter((i) => i.rarity === r).length;
 
       assert.ok(
-        count('common') <= 8,
+        count('common') <= Math.ceil(slotsFor(category) * 0.55),
         `${category} window ${w}: ${count('common')} of ${shelf.length} were common`,
       );
       // Every tier the section actually stocks has to turn up on every shelf.
@@ -1640,8 +1640,8 @@ test('the catalogue is as deep as the shop claims', () => {
     assert.equal(count(c), 150, `${c} should have 150`);
     assert.equal(mythic(c), 15, `${c} should have 15 mythics`);
   }
-  assert.equal(count('emote'), 100);
-  assert.equal(mythic('emote'), 10);
+  assert.equal(count('emote'), 200, 'the hundred-emote pack sits on top of the original hundred');
+  assert.equal(mythic('emote'), 15);
   for (const c of ['dunkPackage', 'celebration', 'threeCelebration']) {
     assert.equal(count(c), 50, `${c} should have 50`);
     assert.equal(mythic(c), 5, `${c} should have 5 mythics`);
@@ -1971,4 +1971,23 @@ test('getting stripped knocks the handler off balance, and a miss costs the defe
   }
   assert.ok(sawStrip, 'expected at least one strip');
   assert.ok(sawMiss, 'expected at least one miss');
+});
+
+test('the emote section shows twenty, and every named emote has its own movement', () => {
+  const base = 1_800_000_000_000;
+  for (let w = 0; w < 20; w++) {
+    const shelf = categoryStock(base + w * SHOP_WINDOW_MS, 'emote').filter((i) => i.rarity !== 'mythic');
+    assert.equal(shelf.length, 20, `emote window ${w} should show twenty, showed ${shelf.length}`);
+  }
+  assert.equal(slotsFor('emote'), 20);
+  assert.equal(slotsFor('jersey'), SHOP_SLOTS, 'everything else is unchanged');
+
+  // The hundred-emote pack is all there and all buyable.
+  const pack = STORE_ITEMS.filter((i) => i.category === 'emote' && i.id.startsWith('emote-p-'));
+  assert.equal(pack.length, 100, 'the whole pack landed');
+  const tiers = new Set(pack.map((i) => i.rarity));
+  for (const r of ['common', 'rare', 'epic', 'legendary', 'mythic'] as const) {
+    assert.ok(tiers.has(r), `the pack should span every tier, missing ${r}`);
+  }
+  for (const item of pack) assert.ok(item.name.length > 2 && item.description.length > 10);
 });

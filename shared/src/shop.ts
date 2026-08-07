@@ -19,8 +19,21 @@ export function msUntilShopRefresh(now: number): number {
   return SHOP_WINDOW_MS - (now % SHOP_WINDOW_MS);
 }
 
-/** How many items are on the featured shelf. Exactly this, every window. */
+/** How many items are on a shelf. Exactly this, every window. */
 export const SHOP_SLOTS = 15;
+
+/**
+ * Sections that show more than the standard fifteen. Emotes carry twice the
+ * catalogue of anything else, so fifteen a window would take days to show you
+ * what is in there.
+ */
+const SLOTS_BY_CATEGORY: Partial<Record<StoreItem['category'], number>> = {
+  emote: 20,
+};
+
+export function slotsFor(category: StoreItem['category']): number {
+  return SLOTS_BY_CATEGORY[category] ?? SHOP_SLOTS;
+}
 
 /**
  * How often a window also gets a mythic, as a bonus sixteenth slot.
@@ -66,6 +79,14 @@ const SHELF_MIX: Record<StoreItem['rarity'], number> = {
   legendary: 1,
   mythic: 0,
 };
+
+/** The mix scaled to a section's slot count, keeping the same proportions. */
+function wantFor(category: StoreItem['category'], rarity: StoreItem['rarity']): number {
+  const slots = slotsFor(category);
+  if (slots === SHOP_SLOTS) return SHELF_MIX[rarity];
+  const scaled = Math.round((SHELF_MIX[rarity] / SHOP_SLOTS) * slots);
+  return scaled;
+}
 
 /** Stable per-category-and-tier salt, so no two bands deal the same order. */
 function saltFor(key: string): number {
@@ -119,16 +140,18 @@ function band(category: StoreItem['category'], rarity: StoreItem['rarity']): Sto
 function mixFor(category: StoreItem['category']): Map<StoreItem['rarity'], number> {
   const take = new Map<StoreItem['rarity'], number>();
   const room = new Map<StoreItem['rarity'], number>();
-  let shortfall = 0;
+  // Rounding the scaled mix can land a slot either side, so the shortfall is
+  // measured against the section's real slot count rather than the mix's total.
+  let shortfall = slotsFor(category);
 
   for (const rarity of BANDS) {
     const size = band(category, rarity).length;
     const cap = size <= 1 ? size : Math.floor(size / 2);
-    const want = SHELF_MIX[rarity];
+    const want = wantFor(category, rarity);
     const got = Math.min(want, cap);
     take.set(rarity, got);
     room.set(rarity, Math.max(0, cap - got));
-    shortfall += want - got;
+    shortfall -= got;
   }
 
   // Spread what is left over the tiers that can take it, working up from the
@@ -186,7 +209,7 @@ export function categoryStock(now: number, category: StoreItem['category']): Sto
   const window = shopWindowIndex(now);
   const shelf: StoreItem[] = [];
 
-  if (pool.length <= SHOP_SLOTS) {
+  if (pool.length <= slotsFor(category)) {
     // Nothing to rotate — a section this small shows everything it has.
     shelf.push(...pool);
   } else {

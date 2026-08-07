@@ -22,9 +22,13 @@ export interface EmotePose {
   alpha: number;
   /** vertical bob in feet */
   bob: number;
+  /** body turn in radians — small, the figure pivots about its feet */
+  spin: number;
+  /** how far apart the feet are, for anything that steps or struts */
+  stride: number;
 }
 
-const REST: EmotePose = { arm: [0, 0], out: [1, 1], fwd: [0, 0], crouch: 0.14, lean: 0, alpha: 1, bob: 0 };
+const REST: EmotePose = { arm: [0, 0], out: [1, 1], fwd: [0, 0], crouch: 0.14, lean: 0, alpha: 1, bob: 0, spin: 0, stride: 1 };
 
 /** Smooth 0→1→0 over the emote, so nothing snaps in or out. */
 function envelope(t: number): number {
@@ -273,74 +277,139 @@ function hashId(id: string): number {
 }
 
 /**
- * A pose built from the id.
+ * The shapes an emote can take.
  *
- * The hash picks a shape (which arms, where they go, what the body does) and
- * then dials it with a handful of continuous parameters, so two items are only
- * ever identical if their ids are. Everything is driven by the same envelope as
- * the hand-written poses, so a derived emote reads the same way — it arrives,
- * holds, and leaves.
+ * The first version of this had eight families that all amounted to "arms
+ * somewhere", so two hundred emotes read as one emote at different heights.
+ * These are separated by what the *body* does as much as the arms — some walk,
+ * some turn their back, some drop into a stance, some hold dead still — and by
+ * timing, because a single held pose and a thing that happens four times look
+ * nothing alike even with identical limbs.
  */
+type Shape =
+  | 'point' | 'pointUp' | 'pointDown' | 'doublePoint' | 'wave' | 'clap' | 'flex'
+  | 'bow' | 'crown' | 'shrug' | 'nod' | 'shake' | 'wag' | 'walk' | 'strut'
+  | 'turn' | 'freeze' | 'heart' | 'camera' | 'shush' | 'sleep' | 'ice'
+  | 'measure' | 'stance' | 'sit' | 'toss' | 'spinBall' | 'beckon' | 'dismiss'
+  | 'chest' | 'tug' | 'kneel' | 'conduct' | 'guitar' | 'fistPump' | 'shoulder';
+
+/**
+ * Names carry the movement. "Finger Wag" wags, "Night Night" goes to sleep,
+ * "Take a Seat" sits down — read straight off the item name so a hundred
+ * hand-named emotes do the hundred things they are named after, rather than
+ * getting whatever a hash felt like.
+ */
+const SHAPE_KEYWORDS: [string, Shape][] = [
+  ['three-fingers', 'pointUp'], ['three-to-the-sky', 'pointUp'], ['point-to-the-sky', 'pointUp'],
+  ['point-down', 'pointDown'], ['floor-tap', 'kneel'], ['shoe-point', 'pointDown'], ['knee-tap', 'kneel'],
+  ['double-point', 'doublePoint'], ['clap-and-point', 'doublePoint'], ['no-look-point', 'point'],
+  ['crowd-point', 'point'], ['bench-point', 'point'], ['camera-point', 'camera'], ['invisible-camera', 'camera'],
+  ['lightning-point', 'point'], ['shoulder-point', 'shoulder'], ['one-finger-point', 'point'], ['point', 'point'],
+  ['wave-to-the-crowd', 'wave'], ['wave-goodbye', 'wave'], ['one-hand-wave', 'wave'], ['wave', 'wave'],
+  ['huddle-clap', 'clap'], ['slow-clap', 'clap'], ['clap-back', 'clap'], ['clap', 'clap'],
+  ['quick-flex', 'flex'], ['mini-flex', 'flex'], ['big-flex', 'flex'], ['slow-motion-flex', 'flex'],
+  ['backpedal-flex', 'flex'], ['flex', 'flex'],
+  ['royal-bow', 'bow'], ['quick-bow', 'bow'], ['bow-to-the-crowd', 'bow'], ['bow', 'bow'],
+  ['crown-the-court', 'crown'], ['invisible-crown', 'crown'], ['crown-gesture', 'crown'],
+  ['court-king', 'crown'], ['championship', 'crown'], ['crown', 'crown'],
+  ['shrug', 'shrug'], ['no-pressure', 'shrug'], ['palm-up', 'shrug'],
+  ['victory-nod', 'nod'], ['backpedal-nod', 'nod'], ['head-nod', 'nod'], ['nod', 'nod'],
+  ['head-shake', 'shake'], ['shake-the-head', 'shake'], ['side-eye', 'shake'],
+  ['finger-wag', 'wag'], ['calm-down', 'wag'], ['too-easy', 'wag'],
+  ['main-character-walk', 'walk'], ['walk-off', 'walk'], ['turn-and-walk', 'walk'],
+  ['hall-of-fame-walk', 'walk'], ['victory-slide', 'walk'], ['short-shuffle', 'walk'],
+  ['superstar-strut', 'strut'], ['side-step-swagger', 'strut'], ['infinite-swagger', 'strut'], ['swagger', 'strut'],
+  ['back-turn', 'turn'], ['circle-the-court', 'turn'], ['360', 'turn'],
+  ['freeze', 'freeze'], ['statue', 'freeze'], ['game-face', 'freeze'], ['lock-in', 'freeze'], ['spotlight', 'freeze'],
+  ['heart-hands', 'heart'], ['double-tap-heart', 'heart'], ['heart', 'heart'],
+  ['silencer', 'shush'], ['talk-to-the-hand', 'shush'], ['lock-the-door', 'shush'], ['turn-the-key', 'shush'],
+  ['night-night', 'sleep'], ['sleep', 'sleep'],
+  ['ice-in-the-veins', 'ice'], ['wrist-tap', 'ice'], ['wrist-flick', 'ice'], ['ice', 'ice'],
+  ['too-small', 'measure'], ['defensive-stance', 'stance'], ['eyes-up', 'stance'],
+  ['take-a-seat', 'sit'], ['sit', 'sit'],
+  ['basketball-toss', 'toss'], ['ball-under-arm', 'toss'], ['mic-drop', 'toss'],
+  ['spin-the-ball', 'spinBall'], ['finger-spin', 'spinBall'],
+  ['come-here', 'beckon'], ['get-loud', 'conduct'], ['crowd-conductor', 'conduct'], ['arena-takeover', 'conduct'],
+  ['air-guitar', 'guitar'],
+  ['double-fist-pump', 'fistPump'], ['fist', 'fistPump'],
+  ['chest-tap', 'chest'], ['chest', 'chest'],
+  ['jersey-tug', 'tug'], ['rock-the-baby', 'sleep'],
+  ['shoulder-shake', 'shoulder'], ['both-hands-up', 'conduct'], ['hands-up', 'conduct'],
+  ['god-mode', 'crown'], ['mythic-court-king', 'crown'], ['cosmic-ice', 'ice'],
+];
+
+const ALL_SHAPES: Shape[] = [
+  'point', 'pointUp', 'pointDown', 'doublePoint', 'wave', 'clap', 'flex', 'bow', 'crown', 'shrug',
+  'nod', 'shake', 'wag', 'walk', 'strut', 'turn', 'freeze', 'heart', 'camera', 'shush', 'sleep',
+  'ice', 'measure', 'stance', 'sit', 'toss', 'spinBall', 'beckon', 'dismiss', 'chest', 'tug',
+  'kneel', 'conduct', 'guitar', 'fistPump', 'shoulder',
+];
+
+/** The pose for an id the switch above did not name explicitly. */
 function derivedPose(id: string | null, t: number, h: number, e: number): EmotePose {
   const p: EmotePose = { ...REST, arm: [0, 0], out: [1, 1], fwd: [0, 0] };
   if (!id) return p;
 
+  const key = id.toLowerCase();
+  const named = SHAPE_KEYWORDS.find(([k]) => key.includes(k));
   const n = hashId(id);
-  const bit = (shift: number, mask: number) => (n >>> shift) & mask;
-  const unit = (shift: number, mask: number) => bit(shift, mask) / mask;
-
-  const shape = bit(0, 7); // eight families of movement
-  const height = 0.55 + unit(3, 15) * 0.9; // how high the arms go
-  const width = unit(7, 15); // how far out from the body
-  const reach = unit(11, 15); // how far toward the camera
-  const beat = 3 + bit(15, 7); // wobble frequency for the ones that wobble
-  const wobble = Math.sin(t * Math.PI * beat);
-  const twoHanded = bit(18, 1) === 1;
-  const lead = bit(19, 1) === 1 ? 1 : 0; // which arm leads a one-armed pose
+  const shape = named ? named[1] : ALL_SHAPES[n % ALL_SHAPES.length];
+  const lead = ((n >>> 8) & 1) === 1 ? 1 : 0;
+  const off = lead === 1 ? 0 : 1;
+  const beats = 3 + ((n >>> 12) & 3);
+  const puls = Math.sin(t * Math.PI * beats);
+  const set = (i: number, arm: number, out: number, fwd = 0) => {
+    p.arm[i] = arm;
+    p.out[i] = out;
+    p.fwd[i] = fwd;
+  };
 
   switch (shape) {
-    case 0: // arms straight up, held
-      p.arm = twoHanded ? [height * h, height * h] : lead ? [0, height * h] : [height * h, 0];
-      p.out = [1 - width * 0.4 * h, 1 - width * 0.4 * h];
+    case 'point': set(lead, 0.45 * h, 1 + 0.2 * h, 1.5 * h); break;
+    case 'pointUp': set(lead, 1.45 * h, 1 - 0.2 * h); break;
+    case 'pointDown': set(lead, -0.6 * h, 1 + 0.5 * h, 0.5 * h); p.lean = 0.35 * h; break;
+    case 'doublePoint': set(0, 0.4 * h, 1 + 0.35 * h, 1.3 * h); set(1, 0.4 * h, 1 + 0.35 * h, 1.3 * h); break;
+    case 'wave': set(lead, 1.25 * h, 1 + puls * 0.5 * h); break;
+    case 'clap':
+      set(0, 0.55 * h, 1 - 0.5 * h * (0.5 + 0.5 * puls), 0.5 * h);
+      set(1, 0.55 * h, 1 - 0.5 * h * (0.5 + 0.5 * puls), 0.5 * h);
       break;
-    case 1: // wide and open
-      p.arm = [height * 0.6 * h, height * 0.6 * h];
-      p.out = [1 + (0.5 + width) * h, 1 + (0.5 + width) * h];
-      p.bob = 0.1 * h;
-      break;
-    case 2: // one arm out front, pointing
-      p.arm = lead ? [0, height * 0.5 * h] : [height * 0.5 * h, 0];
-      p.fwd = lead ? [0, (0.8 + reach) * h] : [(0.8 + reach) * h, 0];
-      break;
-    case 3: // hands in to the chest or face
-      p.arm = [height * h, height * h];
-      p.out = [1 - (0.4 + width * 0.4) * h, 1 - (0.4 + width * 0.4) * h];
-      p.fwd = [reach * 0.5 * h, reach * 0.5 * h];
-      break;
-    case 4: // waving or wagging
-      p.arm = lead ? [0, height * h] : [height * h, 0];
-      p.out = [1 + (lead ? 0 : wobble * (0.3 + width * 0.5) * h), 1 + (lead ? wobble * (0.3 + width * 0.5) * h : 0)];
-      break;
-    case 5: // low and loaded, down into the knees
-      p.crouch = 0.14 + (0.3 + width * 0.5) * h;
-      p.arm = [-0.3 * h, -0.3 * h];
-      p.out = [1 + width * h, 1 + width * h];
-      p.lean = 0.3 * h;
-      break;
-    case 6: // asymmetric: one high, one across
-      p.arm = [height * h, height * 0.35 * h];
-      p.out = [1 + width * 0.6 * h, 1 - 0.45 * h];
-      p.fwd = [reach * 0.4 * h, reach * 0.7 * h];
-      break;
-    default: // shoulders rolling, body working
-      p.arm = [0.5 * h, 0.5 * h];
-      p.out = [1 + (0.4 + wobble * 0.3) * h, 1 + (0.4 - wobble * 0.3) * h];
-      p.lean = wobble * 0.2 * h;
-      break;
+    case 'flex': set(0, 1.05 * h, 1 + 0.8 * h); set(1, 1.05 * h, 1 + 0.8 * h); p.crouch = 0.14 + 0.26 * h; break;
+    case 'bow': p.lean = 1 * h; p.crouch = 0.14 + 0.3 * h; set(lead, 0.2 * h, 1 + 0.4 * h, 0.4 * h); break;
+    case 'crown': set(0, 1.4 * h, 1 - 0.45 * h); set(1, 1.4 * h, 1 - 0.45 * h); p.bob = -0.2 * h; break;
+    case 'shrug': set(0, 0.45 * h, 1 + 0.9 * h); set(1, 0.45 * h, 1 + 0.9 * h); p.bob = 0.14 * h; break;
+    case 'nod': p.lean = 0.3 * puls; break;
+    case 'shake': p.spin = 0.28 * puls; p.lean = 0.08 * h; break;
+    case 'wag': set(lead, 1.35 * h, 1 + puls * 0.65 * h, 0.4 * h); break;
+    case 'walk': p.stride = 1 + 0.9 * h; p.bob = 0.1 * Math.abs(puls) * h; p.lean = 0.2 * h; break;
+    case 'strut': p.stride = 1 + 1.1 * h; p.spin = 0.18 * puls; set(0, 0.3 * h, 1 + 0.5 * h); set(1, 0.3 * h, 1 + 0.5 * h); break;
+    case 'turn': p.spin = 0.5 * h; set(lead, 0.5 * h, 1 + 0.3 * h); break;
+    case 'freeze': p.crouch = 0.14 + 0.1 * h; set(0, 0.9 * h, 1 + 0.15 * h); set(1, 0.9 * h, 1 + 0.15 * h); break;
+    case 'heart': set(0, 0.85 * h, 1 - 0.6 * h, 0.7 * h); set(1, 0.85 * h, 1 - 0.6 * h, 0.7 * h); break;
+    case 'camera': set(0, 1.05 * h, 1 - 0.5 * h, 0.6 * h); set(1, 1.05 * h, 1 - 0.5 * h, 0.6 * h); p.lean = -0.15 * h; break;
+    case 'shush': set(lead, 1.15 * h, 1 - 0.75 * h, 0.35 * h); break;
+    case 'sleep': set(0, 1.05 * h, 1 - 0.65 * h, 0.4 * h); set(1, 1.05 * h, 1 - 0.65 * h, 0.4 * h); p.lean = 0.35 * h; break;
+    case 'ice': set(lead, 0.65 * h, 1 - 0.55 * h, 0.55 * h); set(off, 0.3 * h, 1 - 0.15 * h); p.lean = -0.2 * h; break;
+    case 'measure': set(lead, 1.45 * h, 1 - 0.35 * h, 0.5 * h); break;
+    case 'stance': p.crouch = 0.14 + 0.6 * h; p.stride = 1 + 1.3 * h; set(0, -0.3 * h, 1 + 1.1 * h); set(1, -0.3 * h, 1 + 1.1 * h); break;
+    case 'sit': p.crouch = 0.14 + 0.9 * h; set(0, -0.5 * h, 1 + 0.5 * h); set(1, -0.5 * h, 1 + 0.5 * h); break;
+    case 'toss': set(lead, (0.4 + 0.8 * Math.max(0, puls)) * h, 1 + 0.4 * h); break;
+    case 'spinBall': set(lead, 1.2 * h, 1 - 0.1 * h, 0.3 * h); p.spin = 0.12 * puls; break;
+    case 'beckon': set(lead, 0.35 * h, 1 - 0.2 * h, (0.8 + puls * 0.5) * h); p.lean = -0.12 * h; break;
+    case 'dismiss': set(lead, 0.5 * h, 1 + 0.9 * h); p.spin = -0.25 * h; break;
+    case 'chest': set(lead, 0.7 * h, 1 - 0.7 * h, (0.35 + Math.abs(puls) * 0.3) * h); break;
+    case 'tug': set(0, 0.35 * h, 1 - 0.55 * h, 0.5 * h); set(1, 0.35 * h, 1 - 0.55 * h, 0.5 * h); p.lean = -0.2 * h; break;
+    case 'kneel': p.crouch = 0.14 + 0.75 * h; set(lead, -0.55 * h, 1 + 0.3 * h, 0.4 * h); p.lean = 0.4 * h; break;
+    case 'conduct': set(0, (1 + puls * 0.3) * h, 1 + 0.6 * h); set(1, (1 + puls * 0.3) * h, 1 + 0.6 * h); p.bob = 0.12 * Math.abs(puls) * h; break;
+    case 'guitar': set(0, 0.45 * h, 1 - 0.3 * h, 0.6 * h); set(1, (0.3 + puls * 0.5) * h, 1 + 0.7 * h, 0.4 * h); p.lean = -0.3 * h; break;
+    case 'fistPump': set(0, (0.7 + Math.max(0, puls) * 0.7) * h, 1 + 0.25 * h); set(1, (0.7 + Math.max(0, puls) * 0.7) * h, 1 + 0.25 * h); break;
+    default: set(lead, 0.9 * h, 1 + 0.35 * h); set(off, 0.3 * h, 1 + 0.2 * h); break;
   }
 
-  // A small slice of the catalogue fades rather than poses, and the mythics are
-  // the ones that get it — they are supposed to be the strange ones.
-  if (id.includes('-m-') || bit(22, 31) === 0) p.alpha = 1 - 0.7 * e;
+  // Mythics get to be strange on top of whatever they do.
+  if (key.includes('-m-') || key.includes('mythic') || key.includes('cosmic') || key.includes('god-mode')) {
+    p.alpha = 1 - 0.55 * e;
+    p.bob += 0.45 * e;
+  }
   return p;
 }

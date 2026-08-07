@@ -8,6 +8,7 @@ import {
   GENERATED_SHOES,
   GENERATED_THREE_CELEBRATIONS,
 } from './catalogue.ts';
+import { PACK_EMOTES } from './emotepack.ts';
 import { TITLES } from './titles.ts';
 import { JUMPSHOTS } from '../shooting.ts';
 import type { StoreItem } from '../economy.ts';
@@ -102,7 +103,7 @@ const celebrations: StoreItem[] = [
 
 const emotes: StoreItem[] = [
   { id: 'emote-wave', name: 'Wave', category: 'emote', price: 0, rarity: 'common', colors: ['#8a93a6', '#e8eef5'], description: 'Say hi in the park.' },
-  { id: 'emote-clap', name: 'Slow Clap', category: 'emote', price: 900, rarity: 'common', colors: ['#8a93a6', '#e8eef5'], description: 'Sincerity optional.' },
+  { id: 'emote-clap', name: 'Sarcastic Clap', category: 'emote', price: 900, rarity: 'common', colors: ['#8a93a6', '#e8eef5'], description: 'Sincerity optional.' },
   { id: 'emote-bow', name: 'Take a Bow', category: 'emote', price: 2600, rarity: 'rare', colors: ['#c9a227', '#f0e0a0'], description: 'After a big win only.' },
   { id: 'emote-sit', name: 'Sit Down', category: 'emote', price: 3400, rarity: 'rare', colors: ['#4a4f5c', '#ee6c4d'], description: 'Court-side rest.' },
   { id: 'emote-shrug', name: 'Shrug', category: 'emote', price: 0, rarity: 'common', colors: ['#8a93a6', '#dfe8ef'], description: 'Palms up. No idea how that went in.' },
@@ -219,6 +220,7 @@ export const STORE_ITEMS: StoreItem[] = [
   ...GENERATED_THREE_CELEBRATIONS,
   ...emotes,
   ...GENERATED_EMOTES,
+  ...PACK_EMOTES,
   ...courts,
   ...jumpshotItems,
   ...dunkItems,
