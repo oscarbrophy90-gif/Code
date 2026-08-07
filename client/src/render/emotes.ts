@@ -254,10 +254,93 @@ export function emotePose(id: string | null, t: number): EmotePose {
       break;
 
     default:
-      // Something new in the catalogue with no choreography yet still moves.
-      p.arm = [0.4 * h, 1.1 * h];
-      p.out = [1, 1 + 0.3 * h];
+      // Everything else is choreographed from its own id. There are two hundred
+      // performances in the catalogue and hand-posing them all would produce
+      // worse animation than this does, not better.
+      return derivedPose(id, t, h, e);
+  }
+  return p;
+}
+
+/** Stable hash of an id, so an item animates the same way forever. */
+function hashId(id: string): number {
+  let n = 2166136261;
+  for (let i = 0; i < id.length; i++) {
+    n ^= id.charCodeAt(i);
+    n = Math.imul(n, 16777619);
+  }
+  return n >>> 0;
+}
+
+/**
+ * A pose built from the id.
+ *
+ * The hash picks a shape (which arms, where they go, what the body does) and
+ * then dials it with a handful of continuous parameters, so two items are only
+ * ever identical if their ids are. Everything is driven by the same envelope as
+ * the hand-written poses, so a derived emote reads the same way — it arrives,
+ * holds, and leaves.
+ */
+function derivedPose(id: string | null, t: number, h: number, e: number): EmotePose {
+  const p: EmotePose = { ...REST, arm: [0, 0], out: [1, 1], fwd: [0, 0] };
+  if (!id) return p;
+
+  const n = hashId(id);
+  const bit = (shift: number, mask: number) => (n >>> shift) & mask;
+  const unit = (shift: number, mask: number) => bit(shift, mask) / mask;
+
+  const shape = bit(0, 7); // eight families of movement
+  const height = 0.55 + unit(3, 15) * 0.9; // how high the arms go
+  const width = unit(7, 15); // how far out from the body
+  const reach = unit(11, 15); // how far toward the camera
+  const beat = 3 + bit(15, 7); // wobble frequency for the ones that wobble
+  const wobble = Math.sin(t * Math.PI * beat);
+  const twoHanded = bit(18, 1) === 1;
+  const lead = bit(19, 1) === 1 ? 1 : 0; // which arm leads a one-armed pose
+
+  switch (shape) {
+    case 0: // arms straight up, held
+      p.arm = twoHanded ? [height * h, height * h] : lead ? [0, height * h] : [height * h, 0];
+      p.out = [1 - width * 0.4 * h, 1 - width * 0.4 * h];
+      break;
+    case 1: // wide and open
+      p.arm = [height * 0.6 * h, height * 0.6 * h];
+      p.out = [1 + (0.5 + width) * h, 1 + (0.5 + width) * h];
+      p.bob = 0.1 * h;
+      break;
+    case 2: // one arm out front, pointing
+      p.arm = lead ? [0, height * 0.5 * h] : [height * 0.5 * h, 0];
+      p.fwd = lead ? [0, (0.8 + reach) * h] : [(0.8 + reach) * h, 0];
+      break;
+    case 3: // hands in to the chest or face
+      p.arm = [height * h, height * h];
+      p.out = [1 - (0.4 + width * 0.4) * h, 1 - (0.4 + width * 0.4) * h];
+      p.fwd = [reach * 0.5 * h, reach * 0.5 * h];
+      break;
+    case 4: // waving or wagging
+      p.arm = lead ? [0, height * h] : [height * h, 0];
+      p.out = [1 + (lead ? 0 : wobble * (0.3 + width * 0.5) * h), 1 + (lead ? wobble * (0.3 + width * 0.5) * h : 0)];
+      break;
+    case 5: // low and loaded, down into the knees
+      p.crouch = 0.14 + (0.3 + width * 0.5) * h;
+      p.arm = [-0.3 * h, -0.3 * h];
+      p.out = [1 + width * h, 1 + width * h];
+      p.lean = 0.3 * h;
+      break;
+    case 6: // asymmetric: one high, one across
+      p.arm = [height * h, height * 0.35 * h];
+      p.out = [1 + width * 0.6 * h, 1 - 0.45 * h];
+      p.fwd = [reach * 0.4 * h, reach * 0.7 * h];
+      break;
+    default: // shoulders rolling, body working
+      p.arm = [0.5 * h, 0.5 * h];
+      p.out = [1 + (0.4 + wobble * 0.3) * h, 1 + (0.4 - wobble * 0.3) * h];
+      p.lean = wobble * 0.2 * h;
       break;
   }
+
+  // A small slice of the catalogue fades rather than poses, and the mythics are
+  // the ones that get it — they are supposed to be the strange ones.
+  if (id.includes('-m-') || bit(22, 31) === 0) p.alpha = 1 - 0.7 * e;
   return p;
 }

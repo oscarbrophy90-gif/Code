@@ -2216,3 +2216,14 @@ input[type='text']:focus {
   letter-spacing: 0.1em;
   color: var(--text-faint);
 }
+
+.shop-mythic-tag {
+  margin-left: 8px;
+  padding: 2px 7px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  color: #05060a;
+  background: #ff4d8d;
+}

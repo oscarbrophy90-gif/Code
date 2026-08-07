@@ -1,4 +1,13 @@
 import { DUNK_PACKAGES } from '../sim/moves.ts';
+import {
+  GENERATED_ACCESSORIES,
+  GENERATED_CELEBRATIONS,
+  GENERATED_CLOTHING,
+  GENERATED_EMOTES,
+  GENERATED_JERSEYS,
+  GENERATED_SHOES,
+  GENERATED_THREE_CELEBRATIONS,
+} from './catalogue.ts';
 import { TITLES } from './titles.ts';
 import { JUMPSHOTS } from '../shooting.ts';
 import type { StoreItem } from '../economy.ts';
@@ -17,7 +26,6 @@ const jerseys: StoreItem[] = [
   { id: 'jersey-sundown', name: 'Sundown Classic', category: 'jersey', price: 5200, rarity: 'rare', colors: ['#ff7a3d', '#ffd23d'], description: 'The whole horizon on one chest.' },
   { id: 'jersey-static', name: 'Static Interference', category: 'jersey', price: 8600, rarity: 'epic', colors: ['#1b1f2b', '#b9c6d8'], description: 'Grain pattern that never quite sits still.' },
   { id: 'jersey-glasshouse', name: 'Glass House', category: 'jersey', price: 11000, rarity: 'legendary', colors: ['#cfe8ff', '#3d7fff'], description: 'Translucent panelling over a mirrored trim.' },
-  { id: 'jersey-eclipse', name: 'Total Eclipse', category: 'jersey', price: 34000, rarity: 'mythic', rotationOnly: true, colors: ['#05060a', '#ff4d8d'], description: 'Black with a corona that burns pink under the lights. Almost nobody has one.' },
 ];
 
 const shoes: StoreItem[] = [
@@ -31,7 +39,6 @@ const shoes: StoreItem[] = [
   { id: 'shoes-cutback', name: 'Cutback 2', category: 'shoes', price: 5200, rarity: 'rare', colors: ['#1f4fd8', '#8fd0ff'], description: 'Herringbone tread built for stop-start.' },
   { id: 'shoes-ember', name: 'Ember Sole', category: 'shoes', price: 7600, rarity: 'epic', colors: ['#d43d2a', '#ffb347'], description: 'The sole glows faintly where you push off.' },
   { id: 'shoes-blackice', name: 'Black Ice', category: 'shoes', price: 12500, rarity: 'legendary', colors: ['#0d1018', '#7fe6ff'], description: 'Frosted outsole, zero grip on purpose. It still works.' },
-  { id: 'shoes-comet', name: 'Comet Tail', category: 'shoes', price: 40000, rarity: 'mythic', rotationOnly: true, colors: ['#0a0616', '#ff4d8d'], description: 'Leaves a burning streak on every cut. You will not see these twice.' },
 ];
 
 const clothing: StoreItem[] = [
@@ -91,7 +98,6 @@ const celebrations: StoreItem[] = [
   { id: 'celeb-walkoff', name: 'Walk It Off', category: 'celebration', price: 3600, rarity: 'common', colors: ['#8a93a6', '#dfe8ef'], description: 'Turn and walk. Do not watch it go in.' },
   { id: 'celeb-toobig', name: 'Too Big', category: 'celebration', price: 6200, rarity: 'rare', colors: ['#4aa3ff', '#e8f7ff'], description: 'Hand held flat above your own head.' },
   { id: 'celeb-nightnight', name: 'Night Night', category: 'celebration', price: 11000, rarity: 'epic', colors: ['#2a1f6b', '#8fa8ff'], description: 'Two hands, one cheek, eyes closed.' },
-  { id: 'celeb-blackout', name: 'Blackout', category: 'celebration', price: 46000, rarity: 'mythic', rotationOnly: true, colors: ['#05060a', '#ff4d8d'], description: 'Every light in the park cuts out except the one on you.' },
 ];
 
 const emotes: StoreItem[] = [
@@ -109,7 +115,6 @@ const emotes: StoreItem[] = [
   { id: 'emote-timeout', name: 'Timeout', category: 'emote', price: 2400, rarity: 'rare', colors: ['#dfe8ef', '#8a93a6'], description: 'T with both hands. Purely decorative.' },
   { id: 'emote-crown', name: 'Crown', category: 'emote', price: 7800, rarity: 'epic', colors: ['#c9a227', '#f0e0a0'], description: 'Set it on your own head.' },
   { id: 'emote-mic', name: 'Mic Drop', category: 'emote', price: 8600, rarity: 'epic', colors: ['#a86bff', '#e0d0ff'], description: 'Nothing left to say.' },
-  { id: 'emote-ghost', name: 'Ghost', category: 'emote', price: 38000, rarity: 'mythic', rotationOnly: true, colors: ['#0a0616', '#ff4d8d'], description: 'You fade out completely for a second. Hardly ever in stock.' },
 ];
 
 /**
@@ -127,7 +132,6 @@ const threeCelebrations: StoreItem[] = [
   { id: 'three-shimmy', name: 'The Shimmy', category: 'threeCelebration', price: 7200, rarity: 'epic', colors: ['#a86bff', '#e0d0ff'], description: 'Shoulders going, backpedalling the whole way.' },
   { id: 'three-fromdeep', name: 'From Way Downtown', category: 'threeCelebration', price: 9800, rarity: 'epic', colors: ['#ff7a3d', '#ffd23d'], description: 'Arms out wide, turning to the whole park.' },
   { id: 'three-toosmall', name: 'Too Small', category: 'threeCelebration', price: 12500, rarity: 'legendary', colors: ['#c9a227', '#f0e0a0'], description: 'Hand flat over his head on the way back.' },
-  { id: 'three-lightsout', name: 'Lights Out', category: 'threeCelebration', price: 44000, rarity: 'mythic', rotationOnly: true, colors: ['#05060a', '#ff4d8d'], description: 'The park goes dark behind you and comes back up. Almost never in stock.' },
 ];
 
 const courts: StoreItem[] = [
@@ -157,8 +161,17 @@ const dunkItems: StoreItem[] = DUNK_PACKAGES.map((d) => ({
   name: `Dunk Package: ${d.name}`,
   category: 'dunkPackage' as const,
   price: d.price,
-  rarity: d.price === 0 ? ('common' as const) : d.price > 12000 ? ('legendary' as const) : d.price > 8000 ? ('epic' as const) : ('rare' as const),
-  colors: ['#ff7a3d', '#ffd23d'] as [string, string],
+  rarity: d.mythic
+    ? ('mythic' as const)
+    : d.price === 0
+      ? ('common' as const)
+      : d.price > 12000
+        ? ('legendary' as const)
+        : d.price > 8000
+          ? ('epic' as const)
+          : ('rare' as const),
+  rotationOnly: d.mythic,
+  colors: (d.mythic ? ['#05060a', '#ff4d8d'] : ['#ff7a3d', '#ffd23d']) as [string, string],
   description: `${d.blurb} Requires ${d.requires} Dunk / ${d.requiresVertical} Vertical.`,
 }));
 
@@ -191,14 +204,21 @@ const titleItems: StoreItem[] = TITLES.map((t) => ({
 export const STORE_ITEMS: StoreItem[] = [
   ...titleItems,
   ...jerseys,
+  ...GENERATED_JERSEYS,
   ...shoes,
+  ...GENERATED_SHOES,
   ...clothing,
+  ...GENERATED_CLOTHING,
   ...accessories,
+  ...GENERATED_ACCESSORIES,
   ...hairstyles,
   ...tattoos,
   ...celebrations,
+  ...GENERATED_CELEBRATIONS,
   ...threeCelebrations,
+  ...GENERATED_THREE_CELEBRATIONS,
   ...emotes,
+  ...GENERATED_EMOTES,
   ...courts,
   ...jumpshotItems,
   ...dunkItems,

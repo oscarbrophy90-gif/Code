@@ -2,7 +2,7 @@ import {
   CURRENCY_SHORT,
   DUNK_PACKAGE_BY_ID,
   RARITY_COLOR,
-  SHOP_SLOTS,
+  mythicForWindow,
   STORE_BY_ID,
   catalogueItems,
   formatCountdown,
@@ -151,7 +151,9 @@ function refreshClock(): HTMLElement {
  * whole half hour and you cannot reroll it by refreshing.
  */
 function featuredShelf(): HTMLElement {
-  const stock = rotatingStock(Date.now());
+  const now = Date.now();
+  const stock = rotatingStock(now);
+  const mythic = mythicForWindow(now);
 
   return el(
     'div',
@@ -162,15 +164,22 @@ function featuredShelf(): HTMLElement {
       el(
         'div',
         { style: 'min-width:0' },
-        el('div', { class: 'shop-title' }, `${SHOP_SLOTS} items in stock`),
+        el(
+          'div',
+          { class: 'shop-title' },
+          `${stock.length} in stock`,
+          mythic ? el('span', { class: 'shop-mythic-tag' }, '+1 MYTHIC') : null,
+        ),
         el(
           'div',
           { class: 'hint', style: 'margin:2px 0 0' },
-          'The shelf turns over every 30 minutes. Mythic stock only ever appears here, and almost never — if you see pink, it will probably be gone next time you look.',
+          mythic
+            ? 'A sixteenth slot opened. Mythic stock only ever turns up like this, roughly once a day, and there are eighty-seven of them — you are unlikely to see this one again.'
+            : `Fifteen items, and every one of them is gone in thirty minutes — the next window is fifteen completely different things. Very occasionally a sixteenth slot opens with a mythic in it.`,
         ),
       ),
     ),
-    el('div', { class: 'grid cols-4' }, ...stock.map((i) => renderItem(i, true))),
+    el('div', { class: 'grid cols-3' }, ...stock.map((i) => renderItem(i, true))),
   );
 }
 

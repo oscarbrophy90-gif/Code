@@ -279,7 +279,44 @@ const DUNK_STYLE: Record<string, DunkStyle> = {
 };
 
 function styleFor(id: string): DunkStyle {
-  return DUNK_STYLE[id] ?? DUNK_STYLE['basic-slam'];
+  return DUNK_STYLE[id] ?? derivedStyle(id);
+}
+
+/** Stable hash of a package id, so a dunk always animates the same way. */
+function hashId(id: string): number {
+  let n = 2166136261;
+  for (let i = 0; i < id.length; i++) {
+    n ^= id.charCodeAt(i);
+    n = Math.imul(n, 16777619);
+  }
+  return n >>> 0;
+}
+
+/**
+ * Choreography built from the package id.
+ *
+ * Fifty packages is far past what is worth hand-tuning, and the five knobs the
+ * scene reads already produce visibly different dunks. The hash sets each one,
+ * so two packages animate identically only if they share an id.
+ */
+function derivedStyle(id: string): DunkStyle {
+  const n = hashId(id);
+  const bit = (shift: number, mask: number) => (n >>> shift) & mask;
+  const unit = (shift: number, mask: number) => bit(shift, mask) / mask;
+  const from: -1 | 1 = bit(0, 1) ? 1 : -1;
+  return {
+    from,
+    windup: 0.15 + unit(1, 15) * 0.95,
+    oneHand: bit(5, 1) === 1,
+    // The hang is the most visible difference between two dunks, so it gets the
+    // widest spread: some are down and off, some live on the rim.
+    hangFor: 0.12 + unit(6, 15) * 0.36,
+    swing: 0.2 + unit(10, 7) * 1.1,
+    // Rotation pivots about the feet, so it stays small — see the note above.
+    spin: bit(13, 3) === 0 ? 0.3 : 0,
+    finishSide: bit(15, 1) ? 1 : -1,
+    flex: 0.6 + unit(16, 15) * 1.1,
+  };
 }
 
 /**

@@ -18,7 +18,7 @@ import { scoutReport } from '../src/scouting.ts';
 import { DEFAULT_TITLES, newlyEarnedTitles, streakBadge } from '../src/data/titles.ts';
 import { DRILLS, SHOOT_AROUND, drillMedal, drillReward } from '../src/data/drills.ts';
 import { DEFAULT_UNLOCKS, STORE_BY_ID, STORE_ITEMS } from '../src/data/cosmetics.ts';
-import { SHOP_SLOTS, SHOP_WINDOW_MS, catalogueItems, isPurchasableNow, msUntilShopRefresh, rotatingStock } from '../src/shop.ts';
+import { SHOP_SLOTS, SHOP_WINDOW_MS, catalogueItems, isPurchasableNow, msUntilShopRefresh, mythicForWindow, rotatingStock } from '../src/shop.ts';
 import { GRADE_COLOR, computeShotProfile, isAutomatic, resolveShot } from '../src/shooting.ts';
 import { freshBadges } from '../src/badges.ts';
 import { isAcceptableMatch, rankLabel, tierForPoints, updateRank, freshRank } from '../src/mmr.ts';
@@ -1503,7 +1503,7 @@ test('a dunk over a defender in your way is a poster, an open one is not', () =>
   assert.equal(trailing.posters, 0, 'a defender behind you is not in your way');
 });
 
-test('the shop shelf is stable inside a window and turns over between them', () => {
+test('the shelf holds fifteen, turns over completely, and never repeats a window', () => {
   const base = 1_800_000_000_000;
   const ids = (t: number) => rotatingStock(t).map((i) => i.id).join(',');
 
@@ -1512,22 +1512,37 @@ test('the shop shelf is stable inside a window and turns over between them', () 
   assert.equal(ids(base), ids(base + SHOP_WINDOW_MS - 1));
   assert.notEqual(ids(base), ids(base + SHOP_WINDOW_MS), 'the next window is a different shelf');
 
-  const stock = rotatingStock(base);
-  assert.equal(stock.length, SHOP_SLOTS);
-  assert.equal(new Set(stock.map((i) => i.id)).size, stock.length, 'no item twice on one shelf');
-  for (const item of stock) {
-    assert.ok(item.price > 0, 'rewards are earned, not stocked');
-    assert.ok(!item.requirement, 'prestige items are earned, not stocked');
+  for (let w = 0; w < 200; w++) {
+    const now = base + w * SHOP_WINDOW_MS;
+    const stock = rotatingStock(now);
+    const mythic = mythicForWindow(now);
+
+    // Exactly fifteen, or sixteen on the rare window that also has a mythic.
+    assert.equal(stock.length, SHOP_SLOTS + (mythic ? 1 : 0), `window ${w} should hold ${SHOP_SLOTS}${mythic ? ' + 1' : ''}`);
+    assert.equal(new Set(stock.map((i) => i.id)).size, stock.length, 'no item twice on one shelf');
+    assert.equal(stock.filter((i) => i.rarity === 'mythic').length, mythic ? 1 : 0, 'mythic only ever arrives in its own slot');
+    if (mythic) assert.equal(stock[0].id, mythic.id, 'and it is the first thing you see');
+
+    for (const item of stock) {
+      assert.ok(item.price > 0, 'rewards are earned, not stocked');
+      assert.ok(!item.requirement, 'prestige items are earned, not stocked');
+    }
+
+    // Every one of the fifteen is gone next window.
+    const nowIds = new Set(stock.filter((i) => i.rarity !== 'mythic').map((i) => i.id));
+    const next = rotatingStock(now + SHOP_WINDOW_MS).filter((i) => i.rarity !== 'mythic');
+    for (const item of next) {
+      assert.ok(!nowIds.has(item.id), `${item.name} carried over into the next window`);
+    }
   }
 
   // The countdown always points at the next turnover.
   assert.equal(msUntilShopRefresh(base + 60_000), SHOP_WINDOW_MS - ((base + 60_000) % SHOP_WINDOW_MS));
-  assert.ok(msUntilShopRefresh(base) > 0 && msUntilShopRefresh(base) <= SHOP_WINDOW_MS);
 });
 
 test('mythic stock is rare, rotation-only, and unbuyable off the shelf', () => {
   const mythics = STORE_ITEMS.filter((i) => i.rarity === 'mythic');
-  assert.ok(mythics.length >= 5, 'there is a mythic tier to chase');
+  assert.ok(mythics.length >= 80, `expected a deep mythic tier, found ${mythics.length}`);
   for (const m of mythics) {
     assert.equal(m.rotationOnly, true, 'mythic never sits in the permanent catalogue');
     assert.ok(
@@ -1536,29 +1551,61 @@ test('mythic stock is rare, rotation-only, and unbuyable off the shelf', () => {
     );
   }
 
-  // Walk a month of windows and count how often one actually shows up.
+  // Walk a month of windows and count how often the sixteenth slot appears.
   const base = 1_800_000_000_000;
   const windows = (30 * 24 * 60 * 60 * 1000) / SHOP_WINDOW_MS;
-  let windowsWithMythic = 0;
+  let sixteen = 0;
+  const seen = new Set<string>();
   for (let w = 0; w < windows; w++) {
-    const stock = rotatingStock(base + w * SHOP_WINDOW_MS);
-    if (stock.some((i) => i.rarity === 'mythic')) windowsWithMythic++;
+    const m = mythicForWindow(base + w * SHOP_WINDOW_MS);
+    if (m) {
+      sixteen++;
+      seen.add(m.id);
+    }
   }
-  const rate = windowsWithMythic / windows;
-  assert.ok(rate > 0, 'a mythic has to be reachable, or it is not an item');
-  assert.ok(rate < 0.06, `mythic should be a rare sight, showed in ${(rate * 100).toFixed(1)}% of windows`);
+  const rate = sixteen / windows;
+  assert.ok(rate > 0.005, `a mythic has to be reachable, showed in ${(rate * 100).toFixed(2)}% of windows`);
+  assert.ok(rate < 0.06, `mythic should be a rare sight, showed in ${(rate * 100).toFixed(2)}% of windows`);
+  // With this many mythics, a month should not come close to showing them all.
+  assert.ok(seen.size < mythics.length * 0.9, 'no chance of collecting the set in a month');
 
-  // And it cannot be bought in a window it is not stocked in.
-  const m = mythics[0];
+  // And one cannot be bought in a window it is not stocked in.
   let stockedAt: number | null = null;
+  let which: string | null = null;
   for (let w = 0; w < windows && stockedAt === null; w++) {
     const t = base + w * SHOP_WINDOW_MS;
-    if (rotatingStock(t).some((i) => i.id === m.id)) stockedAt = t;
+    const m = mythicForWindow(t);
+    if (m) {
+      stockedAt = t;
+      which = m.id;
+    }
   }
-  if (stockedAt !== null) {
-    assert.equal(isPurchasableNow(m, stockedAt), true, 'buyable while it is on the shelf');
-    assert.equal(isPurchasableNow(m, stockedAt + SHOP_WINDOW_MS), false, 'and not once it is gone');
+  assert.ok(stockedAt !== null && which, 'expected at least one mythic window in a month');
+  const item = STORE_BY_ID[which as string];
+  assert.equal(isPurchasableNow(item, stockedAt as number), true, 'buyable while it is on the shelf');
+  assert.equal(isPurchasableNow(item, (stockedAt as number) + SHOP_WINDOW_MS), false, 'and not once it is gone');
+});
+
+test('the catalogue is as deep as the shop claims', () => {
+  const count = (c: string) => STORE_ITEMS.filter((i) => i.category === c).length;
+  const mythic = (c: string) => STORE_ITEMS.filter((i) => i.category === c && i.rarity === 'mythic').length;
+
+  for (const c of ['jersey', 'shoes', 'clothing', 'accessory']) {
+    assert.equal(count(c), 150, `${c} should have 150`);
+    assert.equal(mythic(c), 15, `${c} should have 15 mythics`);
   }
+  assert.equal(count('emote'), 100);
+  assert.equal(mythic('emote'), 10);
+  for (const c of ['dunkPackage', 'celebration', 'threeCelebration']) {
+    assert.equal(count(c), 50, `${c} should have 50`);
+    assert.equal(mythic(c), 5, `${c} should have 5 mythics`);
+  }
+
+  // Nothing shares an id, and nothing shares a name inside its own category.
+  const ids = STORE_ITEMS.map((i) => i.id);
+  assert.equal(new Set(ids).size, ids.length, 'ids are unique');
+  const named = STORE_ITEMS.map((i) => `${i.category}|${i.name}`);
+  assert.equal(new Set(named).size, named.length, 'names are unique within a category');
 });
 
 test('every emote slot can be filled and the catalogue supports six', () => {

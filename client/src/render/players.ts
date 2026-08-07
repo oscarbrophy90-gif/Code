@@ -83,6 +83,8 @@ export class PlayerRenderer {
     // preview stub) falls back to the two jersey colours the sim always carries.
     const look: Appearance = p.cfg.appearance ?? fallbackAppearance(p);
     const skin = SKIN_TONES[look.skinTone] ?? SKIN_TONES[3];
+    const wearing = clothingKind(look.clothingId);
+    const worn = accessoryKind(look.accessoryId);
     const jersey = look.jerseyPrimary;
     const trim = look.jerseySecondary;
 
@@ -244,8 +246,8 @@ export class PlayerRenderer {
     }
 
     // Tights and long shorts run down over the leg before the shoe goes on.
-    if (look.clothingId === 'cloth-compression' || look.clothingId === 'cloth-longshorts') {
-      const toKnee = look.clothingId === 'cloth-compression' ? 0.06 : hipY * 0.42;
+    if (wearing === 'compression' || wearing === 'longshorts') {
+      const toKnee = wearing === 'compression' ? 0.06 : hipY * 0.42;
       ctx.strokeStyle = look.clothingPrimary;
       ctx.lineWidth = lineW * 0.99;
       for (const sign of [-1, 1]) {
@@ -310,7 +312,7 @@ export class PlayerRenderer {
     }
 
     // Arms. A sleeve, a tattoo or bare skin — whichever you have on, per side.
-    const sleeved = look.clothingId === 'cloth-compression' || look.clothingId === 'cloth-hoodie' || look.clothingId === 'cloth-vintage';
+    const sleeved = wearing === 'compression' || wearing === 'hoodie' || wearing === 'tracksuit';
     const inkBoth = look.tattooId === 'tat-sleeve-both' || look.tattooId === 'tat-full';
     const inkLeft = inkBoth || look.tattooId === 'tat-sleeve-left';
     const armColor = (sign: number) => {
@@ -340,7 +342,7 @@ export class PlayerRenderer {
       ctx.stroke();
 
       // A shooting sleeve is one arm only, over whatever is underneath.
-      if (look.accessoryId === 'acc-armsleeve' && sign > 0) {
+      if (worn === 'armsleeve' && sign > 0) {
         ctx.strokeStyle = look.accessoryPrimary;
         ctx.lineWidth = lineW * 0.84;
         ctx.beginPath();
@@ -362,7 +364,7 @@ export class PlayerRenderer {
     }
 
     // Wristbands go on last so they sit on top of the arm.
-    if (look.accessoryId === 'acc-wristbands') {
+    if (worn === 'wristbands') {
       ctx.fillStyle = look.accessoryPrimary;
       for (const hand of hands) {
         ctx.beginPath();
@@ -372,7 +374,7 @@ export class PlayerRenderer {
     }
 
     // A chain hangs off the collar and swings with the lean.
-    if (look.accessoryId === 'acc-chain' && !down) {
+    if (worn === 'chain' && !down) {
       const drop = at(shoulderY - 0.45, lean * 1.5);
       ctx.strokeStyle = look.accessoryPrimary;
       ctx.lineWidth = Math.max(1, s * 0.08);
@@ -393,14 +395,14 @@ export class PlayerRenderer {
     drawHair(ctx, head.x, head.y, headR, look.hairstyleId, look.hairPrimary, skin);
 
     // Head-worn accessories go over the hair.
-    if (look.accessoryId === 'acc-headband') {
+    if (worn === 'headband') {
       ctx.strokeStyle = look.accessorySecondary;
       ctx.lineWidth = headR * 0.42;
       ctx.beginPath();
       ctx.arc(head.x, head.y, headR * 0.94, Math.PI * 1.08, Math.PI * 1.92);
       ctx.stroke();
     }
-    if (look.accessoryId === 'acc-goggles') {
+    if (worn === 'goggles') {
       ctx.strokeStyle = look.accessoryPrimary;
       ctx.lineWidth = Math.max(1, headR * 0.16);
       ctx.beginPath();
@@ -409,7 +411,7 @@ export class PlayerRenderer {
       ctx.arc(head.x + headR * 0.34, head.y - headR * 0.05, headR * 0.3, 0, Math.PI * 2);
       ctx.stroke();
     }
-    if (look.accessoryId === 'acc-earrings') {
+    if (worn === 'earrings') {
       ctx.fillStyle = look.accessoryPrimary;
       for (const sign of [-1, 1]) {
         ctx.beginPath();
@@ -670,4 +672,49 @@ function drawHair(
       break;
   }
   ctx.restore();
+}
+
+/**
+ * What a clothing or accessory id actually is, so the renderer can draw it.
+ *
+ * Generated ids carry their kind in the second segment (`cloth-compression-g12`,
+ * `acc-chain-m-relic`) precisely so this stays a string split rather than a
+ * lookup table that has to grow with the catalogue. The originals predate the
+ * convention and are matched by their whole id.
+ */
+function kindOf(id: string | null | undefined, legacy: Record<string, string>, fallback: string): string {
+  if (!id) return fallback;
+  if (legacy[id]) return legacy[id];
+  const parts = id.split('-');
+  return parts.length > 1 ? parts[1] : fallback;
+}
+
+const LEGACY_CLOTHING: Record<string, string> = {
+  'cloth-shorts-basic': 'shorts',
+  'cloth-compression': 'compression',
+  'cloth-hoodie': 'hoodie',
+  'cloth-vintage': 'hoodie',
+  'cloth-cutoff': 'cutoff',
+  'cloth-longshorts': 'longshorts',
+  'cloth-tracksuit': 'tracksuit',
+};
+
+const LEGACY_ACCESSORY: Record<string, string> = {
+  'acc-none': 'none',
+  'acc-headband': 'headband',
+  'acc-armsleeve': 'armsleeve',
+  'acc-chain': 'chain',
+  'acc-goggles': 'goggles',
+  'acc-wristbands': 'wristbands',
+  'acc-kneepad': 'kneepad',
+  'acc-mouthguard': 'mouthguard',
+  'acc-earrings': 'earrings',
+};
+
+export function clothingKind(id: string | null | undefined): string {
+  return kindOf(id, LEGACY_CLOTHING, 'shorts');
+}
+
+export function accessoryKind(id: string | null | undefined): string {
+  return kindOf(id, LEGACY_ACCESSORY, 'none');
 }

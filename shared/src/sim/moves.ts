@@ -1,4 +1,5 @@
 import type { AttributeKey } from '../types.ts';
+import { GENERATED_DUNKS } from '../data/catalogue.ts';
 
 export type DribbleMoveId =
   | 'crossover'
@@ -72,15 +73,20 @@ export interface DunkPackageDef {
   price: number;
   /** seconds of animation */
   duration: number;
+  /** rotation-only top tier */
+  mythic?: boolean;
 }
 
-export const DUNK_PACKAGES: DunkPackageDef[] = [
+const CORE_DUNKS: DunkPackageDef[] = [
   { id: 'basic-slam', name: 'Basic Slam', blurb: 'Two-hand flush. Available to every build.', requires: 0, requiresVertical: 0, contactCapable: false, price: 0, duration: 0.62 },
   { id: 'tomahawk', name: 'Tomahawk', blurb: 'One-hand wind-up off two feet.', requires: 72, requiresVertical: 70, contactCapable: false, price: 6500, duration: 0.72 },
   { id: 'rim-hang', name: 'Rim Hang', blurb: 'Cocked back with a hang on the rim.', requires: 78, requiresVertical: 74, contactCapable: true, price: 11000, duration: 0.86 },
   { id: 'poster', name: 'Poster Pack', blurb: 'Full contact finishes over a set defender.', requires: 85, requiresVertical: 80, contactCapable: true, price: 18000, duration: 0.95 },
   { id: 'reverse-flush', name: 'Reverse Flush', blurb: 'Baseline reverses and under-the-rim spins.', requires: 74, requiresVertical: 68, contactCapable: false, price: 8500, duration: 0.7 },
 ];
+
+/** The five originals plus the generated rest. */
+export const DUNK_PACKAGES: DunkPackageDef[] = [...CORE_DUNKS, ...GENERATED_DUNKS];
 
 export const DUNK_PACKAGE_BY_ID: Record<string, DunkPackageDef> = Object.fromEntries(
   DUNK_PACKAGES.map((d) => [d.id, d]),
