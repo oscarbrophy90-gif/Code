@@ -1,6 +1,9 @@
+import { DRIBBLE_WAV_BASE64 } from './dribblesound.ts';
+
 /**
- * Procedural audio. Every sound is synthesised at runtime, so the build ships
- * no audio assets and nothing needs licensing.
+ * Audio. Everything except the dribble is synthesised at runtime; the dribble is
+ * a ten-kilobyte slice of a supplied recording, inlined as base64 so the
+ * standalone build still ships as one file.
  */
 export type Sfx =
   | 'dribble'
@@ -17,6 +20,10 @@ export type Sfx =
   | 'buzzer';
 
 class AudioEngine {
+  /** The supplied dribble sample, decoded once and reused for every bounce. */
+  private dribbleBuf: AudioBuffer | null = null;
+  private dribbleLoading = false;
+
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
   private sfxGain: GainNode | null = null;
@@ -42,7 +49,48 @@ class AudioEngine {
 
   /** Call from a user gesture so autoplay policies let audio through. */
   unlock(): void {
-    this.ensure();
+    const ctx = this.ensure();
+    if (!ctx || this.dribbleBuf || this.dribbleLoading) return;
+    this.dribbleLoading = true;
+    const raw = atob(DRIBBLE_WAV_BASE64);
+    const bytes = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i);
+    void ctx
+      .decodeAudioData(bytes.buffer)
+      .then((buf) => {
+        this.dribbleBuf = buf;
+      })
+      .catch(() => {
+        // A browser that will not decode it falls back to the synthesised thump.
+        this.dribbleBuf = null;
+      });
+  }
+
+  /**
+   * One dribble bounce. Called the instant the ball reaches the bottom of its
+   * bounce, so the sample's attack and the ball touching the floor are the same
+   * moment — no scheduling, no lookahead, nothing to drift.
+   *
+   * `distance` is how far away the bouncer is, which only sets the level.
+   */
+  dribble(distance = 0, pitch = 1): void {
+    const ctx = this.ensure();
+    if (!ctx || !this.sfxGain) return;
+    const level = 0.85 / (1 + distance * 0.06);
+    if (!this.dribbleBuf) {
+      // Still decoding, or it failed: the old synthesised thump keeps the beat.
+      this.thump(ctx, ctx.currentTime, 130 * pitch, 0.09, 0.22 * level);
+      return;
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = this.dribbleBuf;
+    // A little variation so a long possession does not turn into a metronome.
+    src.playbackRate.value = pitch;
+    const gain = ctx.createGain();
+    gain.gain.value = level;
+    src.connect(gain);
+    gain.connect(this.sfxGain);
+    src.start();
   }
 
   play(sound: Sfx, pitch = 1): void {

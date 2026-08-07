@@ -22,6 +22,7 @@ import {
   type SimPlayerConfig,
   type Side,
   STORE_BY_ID,
+  dribbleBounceIndex,
 } from '@hoops/shared';
 
 import { Camera } from '../engine/camera.ts';
@@ -115,7 +116,8 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
   let cutscene = false;
   let netSwing = 0;
   let shake = 0;
-  let dribbleTimer = 0;
+  /** last bounce index heard per side, so each bounce plays exactly once */
+  let lastBounce: [number | null, number | null] = [null, null];
   let elapsedRealSeconds = 0;
   let localAttempts = 0;
   let localGreens = 0;
@@ -285,6 +287,47 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
     stepWorld(inputs, dt);
     opts.net?.reconcile(state);
     if (drill) updateDrill(dt);
+    playDribbleBounce();
+  };
+
+  /**
+   * The dribble sound, fired on the exact frame the ball reaches the floor.
+   *
+   * It used to run off a fixed 0.34s timer in the render loop, which had no
+   * relationship at all to the ball on screen — the ball bounces at a rate set
+   * by the handler's Speed With Ball, so the sound and the picture drifted apart
+   * immediately and never lined back up.
+   *
+   * The ball's height is |sin(time × tempo)|, so it is on the floor every time
+   * that sine crosses zero. Counting those crossings gives an index that ticks
+   * over on one specific simulation frame, and the sample is played then. This
+   * runs inside step rather than render, so it is on the 120 Hz fixed timestep
+   * and cannot be early or late by a variable frame.
+   */
+  const playDribbleBounce = () => {
+    if (state.phase !== 'live') {
+      lastBounce = [null, null];
+      return;
+    }
+    for (const side of [0, 1] as Side[]) {
+      const index = dribbleBounceIndex(state, side);
+      if (index === null) {
+        lastBounce[side] = null;
+        continue;
+      }
+      if (lastBounce[side] === index) continue;
+      const first = lastBounce[side] === null;
+      lastBounce[side] = index;
+      // Do not fire on the first frame of a possession: the count is picked up
+      // mid-bounce, so that one would land wherever the ball happens to be.
+      if (first) continue;
+      const me = state.players[localSide];
+      const them = state.players[side];
+      const distance = side === localSide ? 0 : Math.hypot(me.x - them.x, me.z - them.z);
+      // A touch of pitch drift keyed to the bounce number rather than random, so
+      // it is the same match every time it is replayed.
+      audio.dribble(distance, 0.95 + ((index * 37) % 11) / 100);
+    }
   };
 
   /**
@@ -534,17 +577,6 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
     hud.drawCallouts(ctx, state, localSide, width, height);
     drawFooter(ctx, width, height, loop.fps, opts.net?.latencyMs() ?? null, settings.touchControls);
 
-    // Dribble sound cadence.
-    dribbleTimer -= dt;
-    if (dribbleTimer <= 0 && state.ball.state === 'held' && state.phase === 'live') {
-      const p = state.ball.owner !== null ? state.players[state.ball.owner] : null;
-      if (p && p.state === 'dribble') {
-        audio.play('dribble', 0.9 + Math.random() * 0.25);
-        dribbleTimer = 0.34;
-      } else {
-        dribbleTimer = 0.16;
-      }
-    }
   };
 
   const loop = new GameLoop(step, render, SIM_DT);

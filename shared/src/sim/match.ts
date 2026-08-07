@@ -2089,6 +2089,31 @@ function finishGame(state: MatchState, winner: Side): void {
 
 // ------------------------------------------------------------------- helpers
 
+/**
+ * How fast this player pounds the ball, in radians per second. The bob in
+ * placeHeldBall is built from this, so anything that wants to line up with the
+ * bounce reads it from here rather than guessing.
+ */
+export function dribbleTempo(p: SimPlayer): number {
+  return 6.5 + (p.cfg.attrs.speedWithBall / 99) * 6;
+}
+
+/**
+ * Which bounce a dribbling player is on, counting from the start of the match,
+ * or null when they are not dribbling.
+ *
+ * The ball's height is |sin(time × tempo)|, so it touches the floor every time
+ * that sine crosses zero — once per half period. Returning the index rather
+ * than a boolean means a caller can spot the exact frame a new bounce began
+ * without a threshold to tune or a crossing to miss, however long the frame was.
+ */
+export function dribbleBounceIndex(state: MatchState, side: Side): number | null {
+  const p = state.players[side];
+  if (p.state !== 'dribble') return null;
+  if (state.ball.owner !== side || state.ball.state !== 'held') return null;
+  return Math.floor((state.time * dribbleTempo(p)) / Math.PI);
+}
+
 /** Live shot meter data for the HUD. Returns null when no shot is running. */
 export function activeShotMeter(state: MatchState, side: Side): {
   progress: number;

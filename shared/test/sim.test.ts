@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import { AiController } from '../src/sim/ai.ts';
-import { createMatch, currentContest, defaultMatchConfig, EMOTE_COOLDOWN, EMOTE_DURATION, SIM_DT, stepMatch, drainEvents } from '../src/sim/match.ts';
+import { createMatch, currentContest, defaultMatchConfig, EMOTE_COOLDOWN, EMOTE_DURATION, SIM_DT, dribbleBounceIndex, dribbleTempo, stepMatch, drainEvents } from '../src/sim/match.ts';
 import { generateOpponent } from '../src/data/opponents.ts';
 import {
   clampHeightToPosition,
@@ -1990,4 +1990,70 @@ test('the emote section shows twenty, and every named emote has its own movement
     assert.ok(tiers.has(r), `the pack should span every tier, missing ${r}`);
   }
   for (const item of pack) assert.ok(item.name.length > 2 && item.description.length > 10);
+});
+
+test('the dribble bounce index ticks over exactly when the ball is on the floor', () => {
+  // The sound used to run off a fixed 0.34s timer with no relationship to the
+  // ball on screen. It now fires on this index changing, so the index has to
+  // land on the frame the ball is at the bottom of its bounce.
+  for (const speedWithBall of [30, 65, 99]) {
+    const a = generateOpponent(78, 5);
+    a.attrs.speedWithBall = speedWithBall;
+    const state = createMatch(a, generateOpponent(78, 6), defaultMatchConfig({ manualCheck: false, shotClock: 999 }), 321);
+    for (let i = 0; i < 200; i++) stepMatch(state, [emptyInput(), emptyInput()], SIM_DT);
+    const p = state.players[0];
+    p.x = 0;
+    p.z = 22;
+    p.state = 'dribble';
+    p.stamina = 1;
+    state.ball.owner = 0;
+    state.ball.state = 'held';
+    state.needsClear = false;
+
+    const heights: number[] = [];
+    const fired: number[] = [];
+    let last: number | null = null;
+    for (let i = 0; i < 120 * 8; i++) {
+      stepMatch(state, [emptyInput(), emptyInput()], SIM_DT);
+      if (state.players[0].state !== 'dribble' || state.ball.owner !== 0) break;
+      heights.push(state.ball.y);
+      const index = dribbleBounceIndex(state, 0);
+      if (index !== null && index !== last) {
+        if (last !== null) fired.push(heights.length - 1);
+        last = index;
+      }
+    }
+
+    assert.ok(fired.length > 10, `expected a stream of bounces, got ${fired.length}`);
+
+    // Every fire has to sit on a genuine low point of the ball's height.
+    const lows: number[] = [];
+    for (let i = 1; i < heights.length - 1; i++) {
+      if (heights[i] <= heights[i - 1] && heights[i] <= heights[i + 1]) lows.push(i);
+    }
+    let worst = 0;
+    for (const f of fired) {
+      let nearest = Infinity;
+      for (const l of lows) nearest = Math.min(nearest, Math.abs(l - f));
+      worst = Math.max(worst, nearest);
+    }
+    // One simulation frame is the floor on this: the index can only change on a
+    // frame boundary. Anything beyond that is drift.
+    assert.ok(worst <= 1, `speedWithBall ${speedWithBall}: sound was ${worst} frames off the bounce`);
+
+    // The rate has to track how fast that build actually pounds the ball.
+    const expected = Math.PI / dribbleTempo(state.players[0]);
+    const gaps = fired.slice(1).map((f, i) => (f - fired[i]) * SIM_DT);
+    for (const gap of gaps) {
+      assert.ok(Math.abs(gap - expected) < 0.02, `bounce gap ${gap.toFixed(3)}s should be about ${expected.toFixed(3)}s`);
+    }
+  }
+
+  // It only counts while you are actually dribbling.
+  const state = createMatch(generateOpponent(78, 5), generateOpponent(78, 6), defaultMatchConfig({ manualCheck: false }), 321);
+  for (let i = 0; i < 200; i++) stepMatch(state, [emptyInput(), emptyInput()], SIM_DT);
+  state.ball.owner = null;
+  state.ball.state = 'loose';
+  assert.equal(dribbleBounceIndex(state, 0), null, 'a loose ball is not being dribbled');
+  assert.equal(dribbleBounceIndex(state, 1), null, 'and nor is it for the other side');
 });
