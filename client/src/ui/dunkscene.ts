@@ -161,8 +161,27 @@ export function drawDunkFrame(
   const runX = startX + (gripX - startX) * easeOut(approach);
   const swing = hang > 0 ? Math.sin(hang * Math.PI * 2.2) * (1 - hang) * style.swing : 0;
 
-  const px = hang > 0 ? gripX + swing * 22 * u : runX;
-  const py = hang > 0 ? airFeetY + release * (floorY - airFeetY) * 0.95 : floorY - arc * (floorY - airFeetY);
+  // The approach has a shape of its own. A hop step is a bounce off one foot
+  // before the gather; a eurostep is two long strides that carry sideways. Both
+  // used to be a straight glide identical to every other package.
+  let entryLift = 0;
+  let entryShift = 0;
+  if (t < riseStart) {
+    if (style.entry === 'hop') {
+      entryLift = Math.abs(Math.sin(approach * Math.PI * 2)) * bodyH * 0.16;
+    } else if (style.entry === 'euro') {
+      // Two strides, the second one long and across the body.
+      const stride = Math.sin(approach * Math.PI * 2);
+      entryShift = -style.from * stride * 30 * u;
+      entryLift = Math.abs(stride) * bodyH * 0.07;
+    }
+  }
+
+  const px = hang > 0 ? gripX + swing * 22 * u : runX + entryShift;
+  const py =
+    hang > 0
+      ? airFeetY + release * (floorY - airFeetY) * 0.95
+      : floorY - arc * (floorY - airFeetY) - entryLift;
 
   // The rim bends under the weight and springs back as he lets go.
   const rimFlex = hang > 0 ? Math.sin(Math.min(1, hang * 1.6) * Math.PI * 0.7) * (1 - release) * 9 * u * style.flex : 0;
@@ -215,11 +234,17 @@ export function drawDunkFrame(
     reaching: Math.max(rise, hang > 0 ? 1 : 0),
   });
 
-  // The ball: in the hand on the way up, through the ring on the flush.
+  // The ball. On a running dunk it is in his hand the whole way up; on an oop, a
+  // board or a putback it is in the air first and he takes it out of the air,
+  // which is the entire difference between those packages and a plain slam.
   const ballR = h * 0.032;
+  const catchAt = riseStart * 0.92;
+  const loose = looseBall(style.entry, t, catchAt, style.from, startX, gripX, floorY, rimX, rimY, u);
   ctx.fillStyle = '#e0762c';
   ctx.beginPath();
-  if (t < hangStart) {
+  if (loose) {
+    ctx.arc(loose.x, loose.y, ballR, 0, Math.PI * 2);
+  } else if (t < hangStart) {
     ctx.arc(hand.x, hand.y, ballR, 0, Math.PI * 2);
   } else {
     const drop = Math.min(1, (t - hangStart) / 0.32);
@@ -262,6 +287,21 @@ function ballAngleFor(motion: DunkMotion, rise: number, hang: number): number {
     case 'hammer':
       // Straight up and driven straight down, no flourish.
       return 0.25 * rise * settle;
+    case 'betweenLegs':
+      // All the way down past the waist, through, and up the far side. The big
+      // negative swing is the point — the ball has to get below the hips.
+      return (-3.4 * Math.sin(Math.min(1, rise * 1.35) * Math.PI) + rise * 2.2) * settle;
+    case 'behindBack':
+      // Swung out and round the back, so it disappears behind the body before
+      // it comes over the top.
+      return (3.6 * Math.sin(Math.min(1, rise * 1.2) * Math.PI * 0.8)) * settle;
+    case 'doublePump':
+      // Three beats rather than the double clutch's two, and shallower.
+      return (1.2 * Math.sin(rise * Math.PI * 3)) * settle;
+    case 'spin360':
+    case 'spin540':
+      // Held tight to the chest — on a rotating dunk the body does all of it.
+      return 0.3 * Math.sin(rise * Math.PI) * settle;
     default:
       return 0;
   }
@@ -278,17 +318,97 @@ function ballAngleFor(motion: DunkMotion, rise: number, hang: number): number {
 function spinFor(motion: DunkMotion, rise: number, hang: number): number {
   const through = hang > 0 ? 1 : rise;
   if (motion === 'spin') return Math.sin(through * Math.PI * 2) * 0.4;
+  if (motion === 'spin360') return Math.sin(through * Math.PI * 2) * 0.5;
+  // One and a half turns, so it wobbles more on the way round.
+  if (motion === 'spin540') return Math.sin(through * Math.PI * 3) * 0.5;
   if (motion === 'reverse') return through * 0.3;
   if (motion === 'windmill') return through * 0.2;
+  if (motion === 'behindBack') return through * 0.26;
   return 0;
 }
 
-/** True while a turning dunk has his back to you. */
+/**
+ * True while a turning dunk has his back to you.
+ *
+ * This is how a rotation is actually sold. The figure pivots about its feet, so
+ * turning it far enough to read as a spin throws it out of frame — flipping which
+ * way it faces does the job and stays where it is put. The number of flips is
+ * what separates a 360 from a 540.
+ */
 function turnedAway(motion: DunkMotion, rise: number, hang: number): boolean {
   const through = hang > 0 ? 1 : rise;
   if (motion === 'spin') return through > 0.35 && through < 0.85;
+  // A full turn: away and back again by the flush.
+  if (motion === 'spin360') return through > 0.3 && through < 0.8;
+  // One and a half: away, back, away, and it stays turned at the rim.
+  if (motion === 'spin540') return through % 0.66 > 0.33;
   if (motion === 'reverse') return through > 0.55;
+  if (motion === 'behindBack') return through > 0.4 && through < 0.75;
   return false;
+}
+
+/**
+ * Where the ball is before he has it, as a point in the frame, or null while it
+ * is simply in his hand.
+ *
+ * `oop`, `glass` and `putback` all start with the ball somewhere other than the
+ * hand, which is the whole difference between them and a running dunk.
+ */
+function looseBall(
+  entry: DunkEntry,
+  t: number,
+  catchAt: number,
+  from: -1 | 1,
+  startX: number,
+  gripX: number,
+  floorY: number,
+  rimX: number,
+  rimY: number,
+  u: number,
+): { x: number; y: number } | null {
+  if (entry !== 'oop' && entry !== 'glass' && entry !== 'putback') return null;
+  if (t >= catchAt) return null;
+  const k = Math.min(1, t / Math.max(0.001, catchAt));
+  // Where he will be when he takes it: up in front of the ring.
+  const catchX = gripX + from * 10 * u;
+  const catchY = rimY + 26 * u;
+
+  if (entry === 'putback') {
+    // It came off the iron: up off the ring, then down into his hands.
+    const x = rimX + 6 * u + (catchX - rimX - 6 * u) * k;
+    const up = Math.sin(k * Math.PI * 0.9) * 30 * u;
+    const y = rimY - 14 * u - up + (catchY - (rimY - 14 * u)) * (k * k);
+    return { x, y };
+  }
+
+  if (entry === 'glass') {
+    // Thrown at the board, off it, and back out to him.
+    const boardX = rimX + 44 * u;
+    const boardY = rimY - 26 * u;
+    if (k < 0.55) {
+      const j = k / 0.55;
+      return {
+        x: startX + (boardX - startX) * j,
+        y: floorY - bodyOffset(u) - Math.sin(j * Math.PI * 0.5) * (floorY - boardY - bodyOffset(u)),
+      };
+    }
+    const j = (k - 0.55) / 0.45;
+    return { x: boardX + (catchX - boardX) * j, y: boardY + (catchY - boardY) * j };
+  }
+
+  // Self alley-oop: tossed up ahead of himself and taken out of the air.
+  const x = startX + (catchX - startX) * k;
+  const peak = rimY - 34 * u;
+  const y =
+    k < 0.5
+      ? floorY - bodyOffset(u) + (peak - (floorY - bodyOffset(u))) * (k / 0.5)
+      : peak + (catchY - peak) * ((k - 0.5) / 0.5);
+  return { x, y };
+}
+
+/** Roughly chest height, for where a toss leaves the hands. */
+function bodyOffset(u: number): number {
+  return 60 * u;
 }
 
 /**
@@ -305,13 +425,36 @@ export type DunkMotion =
   | 'doubleClutch'
   | 'reverse'
   | 'spin'
-  | 'hammer';
+  | 'hammer'
+  | 'betweenLegs'
+  | 'behindBack'
+  | 'doublePump'
+  | 'spin360'
+  | 'spin540';
+
+/**
+ * How the dunker gets to the rim, and where the ball is while he does.
+ *
+ * Separate from the motion because they are genuinely different things: a Self
+ * Alley-Oop Windmill is a windmill whose ball is in the air rather than in a
+ * hand for the first half, and the arms do the same thing either way. Folding
+ * them together would have needed a motion per pairing.
+ */
+export type DunkEntry =
+  | 'run'
+  | 'hop'
+  | 'euro'
+  | 'putback'
+  | 'oop'
+  | 'glass';
 
 interface DunkStyle {
   /** run-up side: -1 comes in from the left, +1 from the right */
   from: -1 | 1;
   /** what the arms do on the way up */
   motion: DunkMotion;
+  /** how he arrives, and where the ball comes from */
+  entry: DunkEntry;
   /** true for a one-hand finish, false for a two-hand flush */
   oneHand: boolean;
   /** fraction of the scene spent hanging off the rim */
@@ -323,11 +466,11 @@ interface DunkStyle {
 }
 
 const DUNK_STYLE: Record<string, DunkStyle> = {
-  'basic-slam': { from: -1, motion: 'flush', oneHand: false, hangFor: 0.14, swing: 0.25, flex: 0.7 },
-  tomahawk: { from: -1, motion: 'tomahawk', oneHand: true, hangFor: 0.2, swing: 0.5, flex: 1 },
-  'rim-hang': { from: 1, motion: 'flush', oneHand: true, hangFor: 0.44, swing: 1.15, flex: 1.25 },
-  poster: { from: -1, motion: 'hammer', oneHand: false, hangFor: 0.24, swing: 0.4, flex: 1.7 },
-  'reverse-flush': { from: 1, motion: 'reverse', oneHand: true, hangFor: 0.2, swing: 0.35, flex: 0.85 },
+  'basic-slam': { from: -1, motion: 'flush', entry: 'run', oneHand: false, hangFor: 0.14, swing: 0.25, flex: 0.7 },
+  tomahawk: { from: -1, motion: 'tomahawk', entry: 'run', oneHand: true, hangFor: 0.2, swing: 0.5, flex: 1 },
+  'rim-hang': { from: 1, motion: 'flush', entry: 'run', oneHand: true, hangFor: 0.44, swing: 1.15, flex: 1.25 },
+  poster: { from: -1, motion: 'hammer', entry: 'run', oneHand: false, hangFor: 0.24, swing: 0.4, flex: 1.7 },
+  'reverse-flush': { from: 1, motion: 'reverse', entry: 'run', oneHand: true, hangFor: 0.2, swing: 0.35, flex: 0.85 },
 };
 
 /**
@@ -336,6 +479,13 @@ const DUNK_STYLE: Record<string, DunkStyle> = {
  * than hand-assigned, so a new package named after a real dunk gets that dunk.
  */
 const MOTION_KEYWORDS: [string, DunkMotion][] = [
+  // Order matters: the first key found in the id wins, so the compound names go
+  // above the plain ones. 'between-the-legs-windmill' is a between-the-legs.
+  ['between-the-legs', 'betweenLegs'],
+  ['behind-the-back', 'behindBack'],
+  ['540', 'spin540'],
+  ['360', 'spin360'],
+  ['double-pump', 'doublePump'],
   ['windmill', 'windmill'],
   ['tomahawk', 'tomahawk'],
   ['cradle', 'cradle'],
@@ -389,16 +539,38 @@ function derivedStyle(id: string): DunkStyle {
   const named = MOTION_KEYWORDS.find(([key]) => id.includes(key));
   const pool: DunkMotion[] = ['flush', 'tomahawk', 'windmill', 'cradle', 'doubleClutch', 'reverse', 'spin', 'hammer'];
   const motion = named ? named[1] : pool[bit(0, 7) % pool.length];
+  const entry = ENTRY_KEYWORDS.find(([key]) => id.includes(key))?.[1] ?? 'run';
+  // A contact finish hangs on and bends the iron; that is what the word means.
+  const contact = id.includes('contact') || id.includes('poster');
 
   return {
     from: bit(4, 1) ? 1 : -1,
     motion,
+    entry,
     oneHand: motion !== 'flush' && motion !== 'hammer' ? true : bit(5, 1) === 1,
-    hangFor: 0.14 + unit(6, 15) * 0.34,
-    swing: 0.2 + unit(10, 7) * 1.1,
-    flex: 0.6 + unit(16, 15) * 1.1,
+    hangFor: contact ? 0.3 + unit(6, 15) * 0.18 : 0.14 + unit(6, 15) * 0.34,
+    swing: contact ? 0.7 + unit(10, 7) * 0.8 : 0.2 + unit(10, 7) * 1.1,
+    flex: contact ? 1.5 + unit(16, 15) * 0.5 : 0.6 + unit(16, 15) * 1.1,
   };
 }
+
+/**
+ * How he arrives. Same idea as the motion keywords: a package called Off-Backboard
+ * throws it off the glass, a Putback takes it off the iron, a Self Alley-Oop
+ * throws it to itself.
+ */
+const ENTRY_KEYWORDS: [string, DunkEntry][] = [
+  ['off-backboard', 'glass'],
+  ['off-the-glass', 'glass'],
+  ['self-alley-oop', 'oop'],
+  ['alley-oop', 'oop'],
+  ['putback', 'putback'],
+  ['hop-step', 'hop'],
+  ['hop-dunk', 'hop'],
+  ['euro', 'euro'],
+  ['gather-step', 'hop'],
+  ['long-stride', 'euro'],
+];
 
 /**
  * Figure height as a fraction of the frame. Small, on purpose — see the note on

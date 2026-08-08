@@ -10,6 +10,8 @@ import {
 } from './catalogue.ts';
 import { PACK_EMOTES } from './emotepack.ts';
 import { TITLES } from './titles.ts';
+import { PACK_TITLES } from './titlepack.ts';
+import { PACK_TATTOOS } from './tattoopack.ts';
 import { JUMPSHOTS } from '../shooting.ts';
 import type { StoreItem } from '../economy.ts';
 
@@ -162,15 +164,19 @@ const dunkItems: StoreItem[] = DUNK_PACKAGES.map((d) => ({
   name: `Dunk Package: ${d.name}`,
   category: 'dunkPackage' as const,
   price: d.price,
-  rarity: d.mythic
-    ? ('mythic' as const)
-    : d.price === 0
-      ? ('common' as const)
-      : d.price > 12000
-        ? ('legendary' as const)
-        : d.price > 8000
-          ? ('epic' as const)
-          : ('rare' as const),
+  // A package that states its tier is taken at its word; the older ones without
+  // one fall back to reading it off the price.
+  rarity:
+    d.rarity ??
+    (d.mythic
+      ? ('mythic' as const)
+      : d.price === 0
+        ? ('common' as const)
+        : d.price > 12000
+          ? ('legendary' as const)
+          : d.price > 8000
+            ? ('epic' as const)
+            : ('rare' as const)),
   rotationOnly: d.mythic,
   colors: (d.mythic ? ['#05060a', '#ff4d8d'] : ['#ff7a3d', '#ffd23d']) as [string, string],
   description: `${d.blurb} Requires ${d.requires} Dunk / ${d.requiresVertical} Vertical.`,
@@ -191,12 +197,14 @@ const animations: StoreItem[] = [
 
 // Every title is a store item so the locker can list them all — the two
 // starters are free and ungated, so they land in DEFAULT_UNLOCKS.
-const titleItems: StoreItem[] = TITLES.map((t) => ({
+const titleItems: StoreItem[] = [...TITLES, ...PACK_TITLES].map((t) => ({
   id: t.id,
   name: t.name,
   category: 'title' as const,
   price: t.price,
   rarity: t.rarity,
+  // Mythics are never on a normal shelf, in every other category too.
+  rotationOnly: t.rarity === 'mythic' || undefined,
   colors: [t.color, '#101018'] as [string, string],
   requirement: t.price === 0 ? t.earn : undefined,
   description: t.description,
@@ -214,6 +222,7 @@ export const STORE_ITEMS: StoreItem[] = [
   ...GENERATED_ACCESSORIES,
   ...hairstyles,
   ...tattoos,
+  ...PACK_TATTOOS,
   ...celebrations,
   ...GENERATED_CELEBRATIONS,
   ...threeCelebrations,

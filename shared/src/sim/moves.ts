@@ -1,5 +1,7 @@
 import type { AttributeKey } from '../types.ts';
+import type { StoreItem } from '../economy.ts';
 import { GENERATED_DUNKS } from '../data/catalogue.ts';
+import { PACK_DUNKS } from '../data/dunkpack.ts';
 
 export type DribbleMoveId =
   | 'crossover'
@@ -75,6 +77,15 @@ export interface DunkPackageDef {
   duration: number;
   /** rotation-only top tier */
   mythic?: boolean;
+  /**
+   * Shop tier, when the package states one.
+   *
+   * The older packages leave it off and their tier is inferred from price, which
+   * only works while every package costs something — a free package would infer
+   * as common and land in the default unlocks. The pack states it outright so a
+   * cheap common stays a common.
+   */
+  rarity?: StoreItem['rarity'];
 }
 
 const CORE_DUNKS: DunkPackageDef[] = [
@@ -85,8 +96,8 @@ const CORE_DUNKS: DunkPackageDef[] = [
   { id: 'reverse-flush', name: 'Reverse Flush', blurb: 'Baseline reverses and under-the-rim spins.', requires: 74, requiresVertical: 68, contactCapable: false, price: 8500, duration: 0.7 },
 ];
 
-/** The five originals plus the generated rest. */
-export const DUNK_PACKAGES: DunkPackageDef[] = [...CORE_DUNKS, ...GENERATED_DUNKS];
+/** The five originals, the generated rest, and the pack. */
+export const DUNK_PACKAGES: DunkPackageDef[] = [...CORE_DUNKS, ...GENERATED_DUNKS, ...PACK_DUNKS];
 
 export const DUNK_PACKAGE_BY_ID: Record<string, DunkPackageDef> = Object.fromEntries(
   DUNK_PACKAGES.map((d) => [d.id, d]),

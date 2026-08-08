@@ -2,6 +2,7 @@ import { COURT, EMOTE_DURATION, STEAL_TIME, THREE_CELEBRATION_TIME, WIN_CELEBRAT
 import { emotePose, type EmotePose } from './emotes.ts';
 import type { Camera } from '../engine/camera.ts';
 import { hexA, mix } from './court.ts';
+import { drawInk, inkedAt, tattooLook, type InkSpot } from './tattoos.ts';
 
 /**
  * Players are drawn as articulated billboards: a stick-and-slab figure whose
@@ -85,6 +86,7 @@ export class PlayerRenderer {
     const skin = SKIN_TONES[look.skinTone] ?? SKIN_TONES[3];
     const wearing = clothingKind(look.clothingId);
     const worn = accessoryKind(look.accessoryId);
+    const ink = tattooLook(look.tattooId);
     const jersey = look.jerseyPrimary;
     const trim = look.jerseySecondary;
 
@@ -280,20 +282,55 @@ export class PlayerRenderer {
       ctx.stroke();
     }
 
-    // Tights and long shorts run down over the leg before the shoe goes on.
-    if (wearing === 'compression' || wearing === 'longshorts') {
-      const toKnee = wearing === 'compression' ? 0.06 : hipY * 0.42;
+    // Legwear, over the bare leg and under the shoe. Everything you can wear has
+    // a bottom half — a hoodie or a cut-off tee is a top, and you are still in
+    // shorts underneath — so this runs for every kind and only the hem moves.
+    // It used to run for tights and long shorts alone, which meant plain shorts,
+    // by far the most common thing in the store, drew nothing at all.
+    const hem = LEG_HEM[wearing] ?? 0.62;
+    {
+      // A hem above the knee is a loose garment and hangs wider than the leg it
+      // covers; tights are a second skin and barely wider.
+      const loose = hem > 0.5;
+      const toY = hem >= 1 ? 0.06 : hipY * hem;
       ctx.strokeStyle = look.clothingPrimary;
-      ctx.lineWidth = lineW * 0.99;
+      ctx.lineWidth = lineW * (loose ? 1.34 : 1.0);
       for (const sign of [-1, 1]) {
         const { swing, lift } = footAt(sign);
         const knee = at(hipY * 0.5 + lift * 0.4, sign * footSpread * 0.6 + swing * 0.45, swing * 0.3);
-        const end = at(Math.max(toKnee, 0.06 + lift), sign * footSpread + swing * (toKnee > 0.1 ? 0.7 : 1), swing * 0.6);
+        const end = at(Math.max(toY, 0.06 + lift), sign * footSpread + swing * (toY > 0.1 ? 0.7 : 1), swing * 0.6);
         ctx.beginPath();
         ctx.moveTo(hip.x, hip.y);
-        ctx.lineTo(knee.x, knee.y);
+        // Loose shorts stop above the knee, so they never bend with it.
+        if (!loose) ctx.lineTo(knee.x, knee.y);
         ctx.lineTo(end.x, end.y);
         ctx.stroke();
+      }
+      // The waist, so the two legs read as one garment rather than two tubes.
+      const waistL = at(hipY, -footSpread * 0.95 + lean * 0.3);
+      const waistR = at(hipY, footSpread * 0.95 + lean * 0.3);
+      ctx.lineWidth = lineW * (loose ? 1.1 : 0.9);
+      ctx.beginPath();
+      ctx.moveTo(waistL.x, waistL.y);
+      ctx.lineTo(waistR.x, waistR.y);
+      ctx.stroke();
+      // Trim stripe down the outside seam, so a two-tone pair reads as two-tone.
+      // Inset from the edge and stopping short of the hem, so it sits on the
+      // fabric rather than hanging off it.
+      if (s > 11) {
+        ctx.strokeStyle = hexA(look.clothingSecondary, 0.85);
+        ctx.lineWidth = Math.max(1, s * 0.06);
+        for (const sign of [-1, 1]) {
+          const { swing, lift } = footAt(sign);
+          const hemY = Math.max(toY, 0.06 + lift);
+          const stopY = hemY + (hipY * 0.9 - hemY) * 0.12;
+          const top = at(hipY * 0.88, sign * (footSpread + 0.09) + lean * 0.3);
+          const end = at(stopY, sign * (footSpread + 0.08) + swing * (toY > 0.1 ? 0.7 : 1), swing * 0.6);
+          ctx.beginPath();
+          ctx.moveTo(top.x, top.y);
+          ctx.lineTo(end.x, end.y);
+          ctx.stroke();
+        }
       }
     }
 
@@ -348,17 +385,19 @@ export class PlayerRenderer {
 
     // Arms. A sleeve, a tattoo or bare skin — whichever you have on, per side.
     const sleeved = wearing === 'compression' || wearing === 'hoodie' || wearing === 'tracksuit';
-    const inkBoth = look.tattooId === 'tat-sleeve-both' || look.tattooId === 'tat-full';
-    const inkLeft = inkBoth || look.tattooId === 'tat-sleeve-left';
     const armColor = (sign: number) => {
       if (sleeved) return look.clothingPrimary;
-      const inked = sign < 0 ? inkLeft : inkBoth;
-      // Ink darkens the arm rather than replacing it, so the skin tone survives.
-      return inked ? mix(skin, '#181818', 0.55) : skin;
+      const inked = inkedAt(ink, sign < 0 ? 'armL' : 'armR');
+      // Heavy ink darkens the arm it is on, and the glyph goes on top of that.
+      // The darkening on its own was the whole of the old tattoo system.
+      return inked ? mix(skin, '#181818', 0.34) : skin;
     };
 
     ctx.lineWidth = lineW * 0.92;
     const hands: { x: number; y: number }[] = [];
+    // Where each glyph goes, collected as the limbs are drawn and inked at the
+    // end so the linework always sits on top of the body, never under it.
+    const inkSpots: InkSpot[] = [];
     for (const sign of [-1, 1]) {
       const i = sign < 0 ? 0 : 1;
       const raise = armPose ? armPose.arm[i] : armLift * (p.state === 'shooting' && sign < 0 ? 0.72 : 1);
@@ -388,15 +427,16 @@ export class PlayerRenderer {
         ctx.stroke();
         ctx.lineWidth = lineW * 0.92;
       }
-      // A forearm band sits between elbow and wrist.
-      if (look.tattooId === 'tat-forearm') {
-        ctx.strokeStyle = mix(skin, '#181818', 0.62);
-        ctx.lineWidth = lineW * 0.96;
-        ctx.beginPath();
-        ctx.moveTo(elbow.x, elbow.y);
-        ctx.lineTo(elbow.x + (hand.x - elbow.x) * 0.45, elbow.y + (hand.y - elbow.y) * 0.45);
-        ctx.stroke();
-        ctx.lineWidth = lineW * 0.92;
+      // Arm ink runs along the upper arm, angled to the limb it is on, so it
+      // turns with a raised arm instead of staying stubbornly upright.
+      if (!sleeved && inkedAt(ink, sign < 0 ? 'armL' : 'armR')) {
+        const shoulderPt = sign < 0 ? tl : tr;
+        inkSpots.push({
+          x: (shoulderPt.x + elbow.x) / 2,
+          y: (shoulderPt.y + elbow.y) / 2,
+          size: Math.hypot(elbow.x - shoulderPt.x, elbow.y - shoulderPt.y) * 1.05,
+          angle: Math.atan2(elbow.y - shoulderPt.y, elbow.x - shoulderPt.x) - Math.PI / 2,
+        });
       }
     }
 
@@ -421,15 +461,55 @@ export class PlayerRenderer {
       ctx.stroke();
     }
 
-    // Head.
     const headR = s * 0.34;
+
+    // A hoodie is sleeves and a hood, and nothing else — the jersey still shows
+    // on the chest and you are still in shorts under it. The sleeves go on with
+    // the arms above; the hood goes on here.
+    //
+    // It has to be drawn *under* the head, not over it. Drawn over, the fill is
+    // a crescent poking out from behind the face and it reads as a halo.
+    const hooded = wearing === 'hoodie' || wearing === 'tracksuit';
+    if (hooded) {
+      // Generously bigger than the head. At 1.3x the margin came out about three
+      // pixels at match scale and the whole thing read as a halo rather than a
+      // hood, so it now rises well clear of the crown and drapes to the collar.
+      const hoodR = headR * 1.62;
+      ctx.fillStyle = mix(look.clothingPrimary, '#000000', 0.08);
+      ctx.beginPath();
+      // Up over the crown, then down and out past the jaw to the shoulders, so
+      // it hangs off the body instead of balancing on the head.
+      ctx.moveTo(head.x - hoodR * 0.92, head.y + hoodR * 0.86);
+      ctx.quadraticCurveTo(head.x - hoodR * 1.04, head.y - hoodR * 0.72, head.x, head.y - hoodR * 0.98);
+      ctx.quadraticCurveTo(head.x + hoodR * 1.04, head.y - hoodR * 0.72, head.x + hoodR * 0.92, head.y + hoodR * 0.86);
+      ctx.quadraticCurveTo(head.x, head.y + hoodR * 1.24, head.x - hoodR * 0.92, head.y + hoodR * 0.86);
+      ctx.closePath();
+      ctx.fill();
+      // The inside of the hood, darker, so the face sits in a recess.
+      ctx.fillStyle = mix(look.clothingPrimary, '#000000', 0.52);
+      ctx.beginPath();
+      ctx.ellipse(head.x, head.y + headR * 0.04, headR * 1.2, headR * 1.26, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Head.
     ctx.beginPath();
     ctx.arc(head.x, head.y, headR, 0, Math.PI * 2);
     ctx.fillStyle = skin;
     ctx.fill();
 
-    // Hair, shaped by the style you have on rather than one arc for everyone.
-    drawHair(ctx, head.x, head.y, headR, look.hairstyleId, look.hairPrimary, skin);
+    if (hooded) {
+      // The opening, drawn on top of the face's edge so the fabric reads as
+      // wrapping around it. Only the top arc — the chin stays clear.
+      ctx.strokeStyle = hexA(look.clothingSecondary, 0.95);
+      ctx.lineWidth = Math.max(1.2, headR * 0.2);
+      ctx.beginPath();
+      ctx.arc(head.x, head.y - headR * 0.06, headR * 1.02, Math.PI * 0.95, Math.PI * 2.05);
+      ctx.stroke();
+    } else {
+      // Hair, shaped by the style you have on rather than one arc for everyone.
+      drawHair(ctx, head.x, head.y, headR, look.hairstyleId, look.hairPrimary, skin);
+    }
 
     // Head-worn accessories go over the hair.
     if (worn === 'headband') {
@@ -455,6 +535,80 @@ export class PlayerRenderer {
         ctx.arc(head.x + sign * headR * 0.92, head.y + headR * 0.2, headR * 0.12, 0, Math.PI * 2);
         ctx.fill();
       }
+    }
+
+    // The rest of the ink. Collected here, drawn below, so every glyph lands on
+    // top of the body part it belongs to rather than under the next thing drawn.
+    if (ink.spots.size > 0 && !down) {
+      const midX = (tl.x + tr.x) / 2;
+      const chestW = Math.hypot(tr.x - tl.x, tr.y - tl.y);
+
+      // A jersey is a tank top: a chest piece shows in the neckline and across
+      // the collarbones, not over the middle of the shirt.
+      if (inkedAt(ink, 'chest')) {
+        inkSpots.push({
+          x: midX,
+          y: tl.y + (bl.y - tl.y) * 0.16,
+          size: chestW * 0.46,
+          angle: 0,
+        });
+      }
+
+      // A back piece is only there to be seen from behind, and on offence you
+      // are facing the rim, which is away from the camera — so when your back is
+      // turned it goes on full size, and from the front you get the bit that
+      // comes over the traps, which is all you would really see.
+      if (inkedAt(ink, 'back')) {
+        const backTurned = Math.cos(p.facing) < 0;
+        inkSpots.push({
+          x: midX,
+          y: backTurned ? (tl.y + bl.y) / 2 : tl.y + (bl.y - tl.y) * 0.08,
+          size: backTurned ? chestW * 0.82 : chestW * 0.34,
+          angle: 0,
+        });
+      }
+
+      if (inkedAt(ink, 'neck')) {
+        // Tucked under the jaw. Any lower and the jersey collar swallows it.
+        inkSpots.push({
+          x: head.x + headR * 0.34,
+          y: head.y + headR * 0.76,
+          size: headR * 0.82,
+          angle: 0.2,
+        });
+      }
+
+      if (inkedAt(ink, 'head')) {
+        inkSpots.push({
+          x: head.x + headR * 0.42,
+          y: head.y + headR * 0.06,
+          size: headR * 1.05,
+          angle: 0,
+        });
+      }
+
+      // Leg ink goes on the shin. The thigh is mostly under the shorts and the
+      // gap between hem and knee is a few pixels at match scale.
+      for (const sign of [-1, 1]) {
+        if (!inkedAt(ink, sign < 0 ? 'legL' : 'legR')) continue;
+        const { swing, lift, node } = footAt(sign);
+        const knee = at(hipY * 0.5 + lift * 0.4, sign * footSpread * 0.6 + swing * 0.45, swing * 0.3);
+        // Biased up the shin, and short of its full length, so the art stays on
+        // the leg instead of spilling over the shoe and onto the floor.
+        inkSpots.push({
+          x: knee.x + (node.x - knee.x) * 0.42,
+          y: knee.y + (node.y - knee.y) * 0.42,
+          size: Math.hypot(node.x - knee.x, node.y - knee.y) * 0.76,
+          angle: Math.atan2(node.y - knee.y, node.x - knee.x) - Math.PI / 2,
+        });
+      }
+    }
+
+    // Ink, all of it, last. Fainter on a small figure so a whole-body piece does
+    // not turn a distant player into a black smudge.
+    if (inkSpots.length > 0) {
+      const alpha = Math.min(0.92, 0.42 + s * 0.03);
+      for (const spot of inkSpots) drawInk(ctx, ink, spot, alpha);
     }
 
     // Local-player ring so you always know which one you are.
@@ -725,6 +879,22 @@ function kindOf(id: string | null | undefined, legacy: Record<string, string>, f
   const parts = id.split('-');
   return parts.length > 1 ? parts[1] : fallback;
 }
+
+/**
+ * Where each kind of legwear stops, as a fraction of hip height — so a bigger
+ * number is a shorter garment. 1 or more means it runs all the way to the shoe.
+ *
+ * Anything not listed is a top (a hoodie, a cut-off tee) and you are still in
+ * shorts under it, which is what the default covers.
+ */
+const LEG_HEM: Record<string, number> = {
+  compression: 1,
+  tracksuit: 1,
+  longshorts: 0.4,
+  shorts: 0.62,
+  cutoff: 0.62,
+  hoodie: 0.62,
+};
 
 const LEGACY_CLOTHING: Record<string, string> = {
   'cloth-shorts-basic': 'shorts',

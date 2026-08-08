@@ -18,6 +18,10 @@ import { scoutReport } from '../src/scouting.ts';
 import { DEFAULT_TITLES, newlyEarnedTitles, streakBadge } from '../src/data/titles.ts';
 import { DRILLS, SHOOT_AROUND, drillMedal, drillReward } from '../src/data/drills.ts';
 import { DEFAULT_UNLOCKS, STORE_BY_ID, STORE_ITEMS } from '../src/data/cosmetics.ts';
+import { PACK_TITLES } from '../src/data/titlepack.ts';
+import { PACK_TATTOOS, TATTOO_DESIGNS } from '../src/data/tattoopack.ts';
+import { PACK_DUNKS } from '../src/data/dunkpack.ts';
+import { DUNK_PACKAGE_BY_ID } from '../src/sim/moves.ts';
 import type { StoreItem } from '../src/economy.ts';
 import { SHOP_SLOTS, SHOP_WINDOW_MS, slotsFor, catalogueItems, isPurchasableNow, msUntilShopRefresh, STOCKED_CATEGORIES, categoryStock, mythicForCategory, rotatingStock } from '../src/shop.ts';
 import { GRADE_COLOR, computeShotProfile, isAutomatic, resolveShot } from '../src/shooting.ts';
@@ -1642,9 +1646,18 @@ test('the catalogue is as deep as the shop claims', () => {
   }
   assert.equal(count('emote'), 200, 'the hundred-emote pack sits on top of the original hundred');
   assert.equal(mythic('emote'), 15);
-  for (const c of ['dunkPackage', 'celebration', 'threeCelebration']) {
+  for (const c of ['celebration', 'threeCelebration']) {
     assert.equal(count(c), 50, `${c} should have 50`);
     assert.equal(mythic(c), 5, `${c} should have 5 mythics`);
+  }
+
+  // The three packs sit on top of what was already there rather than replacing
+  // it, so these are originals-plus-pack totals, not the pack size.
+  assert.equal(count('dunkPackage'), 144, '50 originals plus the 94 new names');
+  assert.equal(count('title'), 105, '23 originals plus the 82 new names');
+  assert.equal(count('tattoo'), 108, '8 originals plus the 100 new designs');
+  for (const c of ['dunkPackage', 'title', 'tattoo']) {
+    assert.ok(mythic(c) >= 5, `${c} should carry mythics`);
   }
 
   // Nothing shares an id, and nothing shares a name inside its own category.
@@ -2118,5 +2131,68 @@ test('the net swish fires as the ball crosses the ring, ahead of the score', () 
     // The ring is at COURT.rimY and a made shot lands 0.2ft under it, so a fire
     // anywhere outside that band means it caught the ball somewhere else.
     assert.ok(y <= COURT.rimY + 1e-6 && y >= COURT.rimY - 0.25, `fired at ${y.toFixed(3)}ft, not at the ring`);
+  }
+});
+
+test('every expanded section still shows fifteen items a window', () => {
+  // The point of a rotating shop is that a hundred-item section shows fifteen of
+  // them, not a hundred. Emotes are the one deliberate exception at twenty.
+  const base = 1_760_000_000_000;
+  for (const category of STOCKED_CATEGORIES) {
+    const slots = slotsFor(category);
+    const stockable = STORE_ITEMS.filter(
+      (i) => i.category === category && i.price > 0 && !i.requirement && i.rarity !== 'mythic',
+    ).length;
+    // A section with fewer items than slots has nothing to rotate and shows what
+    // it has; only the ones deep enough to rotate are held to the slot count.
+    if (stockable <= slots) continue;
+
+    for (let w = 0; w < 60; w++) {
+      const now = base + w * SHOP_WINDOW_MS;
+      const shelf = categoryStock(now, category);
+      const mythics = shelf.filter((i) => i.rarity === 'mythic').length;
+      assert.ok(mythics <= 1, `${category}: at most one mythic on a shelf`);
+      assert.equal(
+        shelf.length,
+        slots + mythics,
+        `${category} window ${w}: expected ${slots} (+${mythics} mythic), got ${shelf.length}`,
+      );
+      // Nothing on a shelf may be there again next window.
+      const next = categoryStock(now + SHOP_WINDOW_MS, category);
+      const nextIds = new Set(next.filter((i) => i.rarity !== 'mythic').map((i) => i.id));
+      for (const item of shelf) {
+        if (item.rarity === 'mythic') continue;
+        assert.ok(!nextIds.has(item.id), `${category}: ${item.name} survived into the next window`);
+      }
+    }
+  }
+});
+
+test('the three packs are wired all the way through to the shop', () => {
+  // A pack that is generated but not reachable from the shop is dead data, and
+  // an id the renderer cannot resolve draws nothing at all.
+  for (const t of PACK_TITLES) {
+    assert.ok(STORE_BY_ID[t.id], `${t.name} should be a store item`);
+    assert.ok(t.price > 0, 'pack titles are bought, never earned');
+  }
+  for (const item of PACK_TATTOOS) {
+    assert.ok(STORE_BY_ID[item.id], `${item.name} should be a store item`);
+    const design = TATTOO_DESIGNS[item.id];
+    assert.ok(design, `${item.name} needs a design or it draws nothing`);
+    assert.ok(design.spots.length > 0, `${item.name} has to go somewhere`);
+  }
+  // Every legacy tattoo id still resolves, so an old save keeps its ink.
+  for (const id of ['tat-sleeve-left', 'tat-sleeve-both', 'tat-chest', 'tat-neck', 'tat-forearm', 'tat-back', 'tat-full']) {
+    assert.ok(TATTOO_DESIGNS[id], `${id} is on old saves and must still draw`);
+  }
+  for (const d of PACK_DUNKS) {
+    assert.ok(DUNK_PACKAGE_BY_ID[d.id], `${d.name} should be an equippable package`);
+    assert.ok(STORE_BY_ID[`dunk-${d.id}`], `${d.name} should be a store item`);
+    assert.ok(d.rarity, 'pack dunks state their tier rather than inferring it from price');
+  }
+  // No pack item is free, so none of them land in the starting unlocks.
+  const packIds = new Set([...PACK_TITLES.map((t) => t.id), ...PACK_TATTOOS.map((i) => i.id), ...PACK_DUNKS.map((d) => `dunk-${d.id}`)]);
+  for (const id of DEFAULT_UNLOCKS) {
+    assert.ok(!packIds.has(id), `${id} should be bought, not given away`);
   }
 });

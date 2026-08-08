@@ -20,5 +20,7 @@ export * from './data/teams.ts';
 export * from './data/parks.ts';
 export * from './data/cosmetics.ts';
 export * from './data/titles.ts';
+export * from './data/titlepack.ts';
+export * from './data/tattoopack.ts';
 export * from './data/drills.ts';
 export * from './data/opponents.ts';
