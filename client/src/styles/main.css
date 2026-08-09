@@ -2358,6 +2358,15 @@ input[type='text']:focus {
   border-bottom-color: transparent;
 }
 
+/* The jump between the top of the board and the part of it you are standing in. */
+.lb-gap {
+  padding: 6px 10px;
+  text-align: center;
+  letter-spacing: 0.3em;
+  color: var(--text-faint);
+  border-bottom: 1px solid rgba(42, 51, 70, 0.5);
+}
+
 .lb-pos {
   font-weight: 800;
   color: var(--text-dim);

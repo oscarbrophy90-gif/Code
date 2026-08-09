@@ -8,7 +8,7 @@ import {
 } from '@hoops/shared';
 
 import { el } from './dom.ts';
-import { boardSize } from '../state/accounts.ts';
+import { boardSize } from '../state/board.ts';
 
 /**
  * The online rank, drawn as a badge.

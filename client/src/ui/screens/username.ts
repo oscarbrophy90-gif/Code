@@ -1,8 +1,8 @@
 import { USERNAME_MAX, USERNAME_MIN, validateUsername } from '@hoops/shared';
 
 import { store } from '../../state/store.ts';
-import { usernameTaken } from '../../state/accounts.ts';
-import { refresh } from '../../main.ts';
+import { nameTaken } from '../../state/board.ts';
+import { navigate } from '../../main.ts';
 import { el } from '../dom.ts';
 
 /**
@@ -37,7 +37,7 @@ export function renderUsername(): HTMLElement {
       return false;
     }
     // Two people on the same board with the same name is a board nobody can read.
-    if (usernameTaken(value, store.accountId)) {
+    if (nameTaken(value, store.accountId)) {
       message.textContent = 'Somebody else on this board already has that one';
       message.style.color = 'var(--red)';
       submit.disabled = true;
@@ -67,7 +67,11 @@ export function renderUsername(): HTMLElement {
       p.usernameChangedAt = 0;
       p.displayName = value;
     });
-    refresh();
+    // Straight off this screen. Re-rendering in place left the form sitting
+    // there looking like it had failed, when the name had in fact been saved —
+    // going somewhere is how a form says it worked. New accounts have no build
+    // yet, so the shell sends them on to the builder from here.
+    navigate('home');
   };
 
   return el(

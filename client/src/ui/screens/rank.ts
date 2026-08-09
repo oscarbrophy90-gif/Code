@@ -7,10 +7,11 @@ import {
   hashString,
   onlineRank,
   rankedOpponent,
+  tierPopulation,
 } from '@hoops/shared';
 
 import { store } from '../../state/store.ts';
-import { boardSize } from '../../state/accounts.ts';
+import { boardSize, worldElapsedMs } from '../../state/board.ts';
 import { navigate } from '../../main.ts';
 import { el, panel } from '../dom.ts';
 import { startMatch } from '../session.ts';
@@ -54,9 +55,7 @@ export function renderRank(): HTMLElement {
         ? el(
             'p',
             { class: 'hint', style: 'margin:12px 0 0' },
-            boardSize() > 1
-              ? `You are #${position} of ${boardSize()} on the board.`
-              : 'You are the only player on the board so far. Anyone else who makes a username here and plays will join it.',
+            `You are #${position.toLocaleString()} of ${boardSize().toLocaleString()} on the board, with ${tierPopulation(rank.tier.id, worldElapsedMs()).toLocaleString()} other players in ${rank.tier.name}.`,
           )
         : el(
             'p',

@@ -8,7 +8,7 @@ import {
 } from '@hoops/shared';
 
 import { store } from '../../state/store.ts';
-import { usernameTaken } from '../../state/accounts.ts';
+import { nameTaken } from '../../state/board.ts';
 import { audio } from '../../engine/audio.ts';
 import { refresh } from '../../main.ts';
 import { confirmDialog, el, panel, segmented, slider, toast } from '../dom.ts';
@@ -327,7 +327,7 @@ function usernameEditor(): HTMLElement {
       message.style.color = 'var(--red)';
       return;
     }
-    if (usernameTaken(next, store.accountId)) {
+    if (nameTaken(next, store.accountId)) {
       message.textContent = 'Somebody else on this board already has that one';
       message.style.color = 'var(--red)';
       return;

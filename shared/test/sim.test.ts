@@ -15,6 +15,7 @@ import {
   wingspanFor,
 } from '../src/ratings.ts';
 import { scoutReport } from '../src/scouting.ts';
+import { WORLD_SIZE, tierPopulation, worldLadder } from '../src/world.ts';
 import { DEFAULT_TITLES, newlyEarnedTitles, streakBadge } from '../src/data/titles.ts';
 import { DRILLS, SHOOT_AROUND, drillMedal, drillReward } from '../src/data/drills.ts';
 import { DEFAULT_UNLOCKS, STORE_BY_ID, STORE_ITEMS } from '../src/data/cosmetics.ts';
@@ -2343,4 +2344,71 @@ test('usernames are checked, and changing one is locked for thirty days', () => 
   assert.equal(usernameCooldownLeft(now, now), USERNAME_COOLDOWN_MS, 'just changed: full wait');
   assert.equal(usernameCooldownLeft(now - USERNAME_COOLDOWN_MS, now), 0, 'exactly thirty days later it is free');
   assert.ok(usernameCooldownLeft(now - USERNAME_COOLDOWN_MS / 2, now) > 0, 'halfway through it is still locked');
+});
+
+
+test('the world is a pyramid, ordered so a higher rank is a higher place', () => {
+  const board = worldLadder(0);
+  assert.equal(board.length, WORLD_SIZE, 'the whole world is on it');
+
+  // Ordered by wins, and positions stamped to match. A board where row 40 has
+  // more wins than row 39 is a board that has stopped meaning anything.
+  for (let i = 1; i < board.length; i++) {
+    assert.ok(board[i - 1].wins >= board[i].wins, `wins went up at ${i}`);
+    assert.equal(board[i].position, i + 1);
+  }
+
+  // Higher rank is higher up: since the rank is the win count, sorting by wins
+  // sorts by rank, and that has to hold for every neighbouring pair.
+  for (let i = 1; i < board.length; i++) {
+    const above = onlineRank(board[i - 1].wins);
+    const below = onlineRank(board[i].wins);
+    const tierAbove = ONLINE_TIERS.findIndex((t) => t.id === above.tier.id);
+    const tierBelow = ONLINE_TIERS.findIndex((t) => t.id === below.tier.id);
+    assert.ok(tierAbove >= tierBelow, `a ${below.tier.name} outranked a ${above.tier.name} at ${i}`);
+  }
+
+  // A pyramid, not a top-heavy blob: the top tier is the smallest one.
+  const gc = tierPopulation('grandchamp');
+  const bronze = tierPopulation('bronze');
+  assert.ok(gc < bronze / 2, `${gc} Grand Champs against ${bronze} Bronze is not a ladder`);
+  assert.ok(gc > 0 && bronze > 0);
+
+  // Names are unique, or the board reads as a bug.
+  assert.equal(new Set(board.map((p) => p.username)).size, board.length);
+
+  // And the same seed gives the same world, so #312 is the same player tomorrow.
+  assert.deepEqual(worldLadder(0).map((p) => p.username), board.map((p) => p.username));
+});
+
+test('world players gain wins over time, but the ladder stays catchable', () => {
+  const day = 24 * 60 * 60 * 1000;
+  const start = worldLadder(0);
+  const week = worldLadder(7 * day);
+  const year = worldLadder(365 * day);
+
+  const total = (b: typeof start) => b.reduce((s, p) => s + p.wins, 0);
+  assert.ok(total(week) > total(start), 'a week away and nobody played a game');
+  assert.ok(total(year) > total(week), 'and it keeps moving');
+
+  // Bounded: everyone approaches a ceiling, so a year away does not put the
+  // board out of reach. Ten times the wins would make the climb pointless.
+  assert.ok(total(year) < total(start) * 2.2, 'the world ran away from the player');
+
+  // Losses keep pace with wins, or a month of growth leaves the board full of
+  // players who apparently never lost a game.
+  const month = worldLadder(30 * day);
+  const byId = new Map(start.map((p) => [p.id, p]));
+  for (const p of month) {
+    const was = byId.get(p.id);
+    assert.ok(was, 'the same people, grown');
+    assert.ok(p.wins >= was.wins, 'nobody went backwards');
+    // A player who picked up one or two wins can honestly have lost nothing;
+    // one who picked up a handful cannot.
+    if (p.wins - was.wins >= 3) assert.ok(p.losses > was.losses, `${p.username} played and never lost`);
+    assert.ok(p.wins <= p.ceilingWins, 'nobody passed their ceiling');
+  }
+
+  // Same elapsed time in, same board out — the caller owns the clock.
+  assert.deepEqual(worldLadder(7 * day).map((p) => p.wins), week.map((p) => p.wins));
 });

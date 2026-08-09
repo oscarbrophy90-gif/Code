@@ -3,10 +3,10 @@ import { computeOverall, type Profile } from '@hoops/shared';
 /**
  * Everyone who plays on this copy of the game.
  *
- * The leaderboard is real people or it is nothing. There is no server, so the
- * only players this game can ever know about are the ones who sat down at it:
- * each creates a username, plays ranked matches, and takes a place on the board
- * against the others. Nobody is invented to fill it out.
+ * These are the real accounts: somebody sat down, made a username and played.
+ * They share the leaderboard with the generated world (see `board.ts`), but this
+ * file only ever knows about people, so a real record can never be confused for
+ * a generated one.
  *
  * Each account is a whole profile under its own key, and the registry is the
  * index of them plus which one is playing. Keeping the profiles separate rather
@@ -22,6 +22,16 @@ const LEGACY_KEY = 'hoops-elite.profile.v1';
 export interface Registry {
   activeId: string;
   ids: string[];
+  /**
+   * When this device first saw the ranked world, in epoch milliseconds.
+   *
+   * The generated players climb over real elapsed time, and time has to be
+   * measured from something. Stamping it once on the device rather than per
+   * account means everyone who plays here sees the same board — two accounts
+   * disagreeing about what the world looks like would be worse than a world
+   * that never moved.
+   */
+  worldEpoch?: number;
 }
 
 /** What the leaderboard needs about one account, without loading all of it. */
@@ -67,6 +77,13 @@ export function loadRegistry(): Registry {
     if (raw) {
       const parsed = JSON.parse(raw) as Registry;
       if (parsed && typeof parsed.activeId === 'string' && Array.isArray(parsed.ids) && parsed.ids.length > 0) {
+        // Saves from before the world climbed have no epoch. Stamped now rather
+        // than backdated, so an existing player sees the board they left and
+        // watches it move from there.
+        if (typeof parsed.worldEpoch !== 'number' || !Number.isFinite(parsed.worldEpoch)) {
+          parsed.worldEpoch = Date.now();
+          saveRegistry(parsed);
+        }
         return parsed;
       }
     }
@@ -83,9 +100,14 @@ export function loadRegistry(): Registry {
     localStorage.setItem(profileKey(id), legacy);
     localStorage.removeItem(LEGACY_KEY);
   }
-  const registry: Registry = { activeId: id, ids: [id] };
+  const registry: Registry = { activeId: id, ids: [id], worldEpoch: Date.now() };
   saveRegistry(registry);
   return registry;
+}
+
+/** When this device first saw the ranked world. */
+export function worldEpoch(): number {
+  return loadRegistry().worldEpoch ?? Date.now();
 }
 
 export function saveRegistry(registry: Registry): void {
@@ -113,8 +135,8 @@ function readProfile(id: string): Profile | null {
 /**
  * Every account on this device, best first.
  *
- * `rankedOnly` is what the leaderboard passes: an account that has been created
- * but never finished a ranked match has no standing to show, so it is not on the
+ * `rankedOnly` is what the board passes: an account that has been created but
+ * never finished a ranked match has no standing to show, so it is not on the
  * board. Making a username does not put you on it; playing does.
  */
 export function allAccounts(rankedOnly = false): AccountSummary[] {
@@ -169,25 +191,6 @@ function summariseBuild(player: Profile['players'][number]): AccountBuild {
   };
 }
 
-/**
- * Where an account sits on the board, 1-based, or null when it has not played.
- *
- * Derived from the same ordering the board uses rather than stored, so the
- * number on the rank badge and the number on the row can never disagree.
- */
-export function positionOf(id: string): number | null {
-  const board = allAccounts(true);
-  const at = board.findIndex((a) => a.id === id);
-  return at < 0 ? null : at + 1;
-}
-
-/** How many accounts have played a ranked match — the size of the board. */
-export function boardSize(): number {
-  return allAccounts(true).length;
-}
-
-/** Whether a username is already taken by another account on this device. */
-export function usernameTaken(name: string, exceptId?: string): boolean {
-  const wanted = name.trim().toLowerCase();
-  return allAccounts().some((a) => a.id !== exceptId && a.username.toLowerCase() === wanted);
-}
+// Positions, board size and name collisions all live in `board.ts` now: they are
+// questions about the whole ladder, generated players included, and answering
+// them from the account list alone would put a Grand Champ at #1 of 1.

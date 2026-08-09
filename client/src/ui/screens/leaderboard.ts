@@ -1,7 +1,8 @@
 import { ONLINE_TIERS, WINS_PER_DIVISION, grandChampLabel, onlineRank } from '@hoops/shared';
 
 import { store } from '../../state/store.ts';
-import { allAccounts, type AccountBuild, type AccountSummary } from '../../state/accounts.ts';
+import { allAccounts, type AccountBuild } from '../../state/accounts.ts';
+import { fullBoard, type BoardEntry } from '../../state/board.ts';
 import { el, panel } from '../dom.ts';
 import { rankPanel, drawRankBadge } from '../rankbadge.ts';
 import { navigate, refresh } from '../../main.ts';
@@ -9,16 +10,23 @@ import { navigate, refresh } from '../../main.ts';
 /**
  * The leaderboard.
  *
- * Real players only. Everyone on it created a username on this copy of the game
- * and finished at least one ranked match — nothing is generated to pad it out,
- * so a board with one name on it means one person has played.
+ * Everyone on it — the ranked world and everyone who has played on this copy —
+ * on one list, ordered by ranked wins. Since the rank is the win count, that
+ * ordering is the rank ordering: nobody is ever listed above somebody who
+ * outranks them.
  *
- * Because there is no server, "everyone" means everyone who has played *here*.
- * A second person adds themselves by creating an account and playing, and then
- * the two of you are ranked against each other.
+ * The world plays while you are away, so the names above you creep up over real
+ * days. Climbing past one is worth something because it did not stand still to
+ * let you.
  */
+
+/** How many of the top are always shown. */
+const TOP_ROWS = 50;
+/** How many either side of you, when you are below that. */
+const WINDOW = 4;
+
 export function renderLeaderboard(): HTMLElement {
-  const board = allAccounts(true);
+  const board = fullBoard();
   const record = store.profile.online;
   const myPosition = store.position();
 
@@ -28,19 +36,19 @@ export function renderLeaderboard(): HTMLElement {
     el(
       'p',
       { class: 'page-sub' },
-      'Everyone who has made a username here and played a ranked match, ordered by wins. Nobody is invented to fill it out — if it is short, that is how many people have played.',
+      'Every ranked player, ordered by wins — so the higher your rank, the higher you sit. The rest of the ladder keeps playing while you are away, so the names above you are moving too.',
     ),
 
     panel('Your place', rankPanel(record, myPosition)),
     el('div', { style: 'height:14px' }),
-    board.length === 0 ? emptyBoard() : renderBoard(board, myPosition),
+    renderBoard(board, myPosition),
     el('div', { style: 'height:14px' }),
     panel(
       'Add another player',
       el(
         'p',
         { class: 'hint', style: 'margin:0 0 12px' },
-        'Passing the game to somebody else? Give them their own account and their own rank. Everyone who plays here shares this board.',
+        'Passing the game to somebody else? Give them their own account and their own rank. Everyone who plays here takes their own place on the board.',
       ),
       accountSwitcher(),
     ),
@@ -49,21 +57,38 @@ export function renderLeaderboard(): HTMLElement {
   return root;
 }
 
-function emptyBoard(): HTMLElement {
-  return panel(
-    'Nobody has played yet',
-    el(
-      'p',
-      { class: 'hint', style: 'margin:0 0 12px' },
-      'The board fills up as people play ranked matches. One game puts you on it.',
-    ),
-    el('button', { class: 'btn sm primary', onclick: () => navigate('rank') }, 'Play a ranked match'),
-  );
+/**
+ * The rows worth drawing.
+ *
+ * Six hundred rows is a scroll nobody finishes, so it is the top fifty plus a
+ * window around wherever you are. Being #418 and having to scroll past four
+ * hundred strangers to find yourself is the one thing a leaderboard must not do.
+ */
+function visibleRows(board: BoardEntry[], myPosition: number | null): (BoardEntry | 'gap')[] {
+  const rows: (BoardEntry | 'gap')[] = board.slice(0, TOP_ROWS);
+  if (myPosition === null || myPosition <= TOP_ROWS) return rows;
+
+  const from = Math.max(TOP_ROWS, myPosition - 1 - WINDOW);
+  const to = Math.min(board.length, myPosition + WINDOW);
+  if (from > TOP_ROWS) rows.push('gap');
+  rows.push(...board.slice(from, to));
+  return rows;
 }
 
-function renderBoard(board: AccountSummary[], myPosition: number | null): HTMLElement {
+function renderBoard(board: BoardEntry[], myPosition: number | null): HTMLElement {
+  const rows = visibleRows(board, myPosition);
+  const played = myPosition !== null;
+
   return panel(
-    board.length === 1 ? '1 player' : `${board.length} players`,
+    `${board.length.toLocaleString()} ranked players`,
+    played
+      ? null
+      : el(
+          'p',
+          { class: 'hint', style: 'margin:0 0 12px' },
+          el('span', {}, 'You are not on it yet — one ranked match puts you on. '),
+          el('button', { class: 'btn sm primary', onclick: () => navigate('rank') }, 'Play a ranked match'),
+        ),
     el(
       'div',
       { class: 'lb-head' },
@@ -73,7 +98,7 @@ function renderBoard(board: AccountSummary[], myPosition: number | null): HTMLEl
       el('span', { style: 'text-align:right' }, 'Wins'),
       el('span', { style: 'text-align:right' }, 'Losses'),
     ),
-    ...board.map((account, i) => row(account, i + 1, i + 1 === myPosition)),
+    ...rows.map((entry) => (entry === 'gap' ? gapRow() : row(entry, entry.position === myPosition))),
     el(
       'p',
       { class: 'hint', style: 'margin:12px 0 0' },
@@ -82,24 +107,28 @@ function renderBoard(board: AccountSummary[], myPosition: number | null): HTMLEl
   );
 }
 
-function row(account: AccountSummary, position: number, isMe: boolean): HTMLElement {
-  const rank = onlineRank(account.wins);
-  const label = rank.grandChamp ? grandChampLabel(position) : rank.label;
+function gapRow(): HTMLElement {
+  return el('div', { class: 'lb-gap' }, '···');
+}
+
+function row(entry: BoardEntry, isMe: boolean): HTMLElement {
+  const rank = onlineRank(entry.wins);
+  const label = rank.grandChamp ? grandChampLabel(entry.position) : rank.label;
 
   return el(
     'div',
     { class: `lb-row ${isMe ? 'me' : ''}` },
-    el('span', { class: 'lb-pos' }, String(position)),
+    el('span', { class: 'lb-pos' }, String(entry.position)),
     el(
       'button',
-      { class: 'lb-name lb-link', onclick: () => showAccount(account, position) },
-      account.username,
+      { class: 'lb-name lb-link', onclick: () => showPlayer(entry) },
+      entry.username,
       isMe ? el('span', { class: 'lb-you' }, 'you') : null,
-      account.streak >= 3 ? el('span', { class: 'lb-streak' }, `${account.streak} in a row`) : null,
+      entry.streak >= 3 ? el('span', { class: 'lb-streak' }, `${entry.streak} in a row`) : null,
     ),
     el('span', { class: 'lb-rank', style: `color:${rank.tier.color}` }, label),
-    el('span', { class: 'lb-num' }, String(account.wins)),
-    el('span', { class: 'lb-num faint' }, String(account.losses)),
+    el('span', { class: 'lb-num' }, String(entry.wins)),
+    el('span', { class: 'lb-num faint' }, String(entry.losses)),
   );
 }
 
@@ -152,15 +181,15 @@ function accountSwitcher(): HTMLElement {
 /**
  * One player's card: their rank and every build they have played.
  *
- * These are real career numbers off that account's saves, so the per-build lines
- * are the same ones the owner sees on their own Records screen.
+ * The same card for a real account and a world player, because the numbers mean
+ * the same thing either way — these are the builds that earned that record.
  */
-function showAccount(account: AccountSummary, position: number): void {
-  const rank = onlineRank(account.wins);
-  const label = rank.grandChamp ? grandChampLabel(position) : rank.label;
+function showPlayer(entry: BoardEntry): void {
+  const rank = onlineRank(entry.wins);
+  const label = rank.grandChamp ? grandChampLabel(entry.position) : rank.label;
 
   const badge = el('canvas', { class: 'rank-badge', style: 'width:72px;height:80px' }) as HTMLCanvasElement;
-  requestAnimationFrame(() => drawRankBadge(badge, account.wins, position));
+  requestAnimationFrame(() => drawRankBadge(badge, entry.wins, entry.position));
 
   const overlay = el(
     'div',
@@ -175,17 +204,17 @@ function showAccount(account: AccountSummary, position: number): void {
         el(
           'div',
           {},
-          el('div', { class: 'player-name' }, account.username),
+          el('div', { class: 'player-name' }, entry.username),
           el('div', { class: 'player-rank', style: `color:${rank.tier.color}` }, label),
           el(
             'div',
             { class: 'player-line' },
-            `#${position} on the board · ${account.wins}W ${account.losses}L · ${account.lifetimeWins} ranked wins all time · ${account.builds.length} build${account.builds.length === 1 ? '' : 's'}`,
+            `#${entry.position} on the board · ${entry.wins}W ${entry.losses}L · ${entry.builds.length} build${entry.builds.length === 1 ? '' : 's'}`,
           ),
         ),
       ),
-      account.builds.length > 0
-        ? el('div', { class: 'player-builds' }, ...account.builds.map(buildCard))
+      entry.builds.length > 0
+        ? el('div', { class: 'player-builds' }, ...entry.builds.map(buildCard))
         : el('p', { class: 'hint', style: 'margin:0 0 16px' }, 'No builds yet.'),
       el('button', { class: 'btn', onclick: () => overlay.remove() }, 'Close'),
     ),

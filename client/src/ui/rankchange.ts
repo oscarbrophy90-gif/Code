@@ -1,6 +1,6 @@
 import { grandChampLabel, onlineRank } from '@hoops/shared';
 
-import { positionOf } from '../state/accounts.ts';
+import { boardPositionOf } from '../state/board.ts';
 
 import { audio } from '../engine/audio.ts';
 import { captureSceneKeys, el } from './dom.ts';
@@ -31,7 +31,7 @@ export function playRankChange(
     const promoted = after > before;
     const fromRank = onlineRank(before);
     const toRank = onlineRank(after);
-    const placement = positionOf(accountId) ?? 1;
+    const placement = boardPositionOf(accountId) ?? 1;
     const toLabel = toRank.grandChamp ? grandChampLabel(placement) : toRank.label;
     const fromLabel = fromRank.grandChamp ? grandChampLabel(placement) : fromRank.label;
     // A new tier is a bigger moment than a new division inside one.

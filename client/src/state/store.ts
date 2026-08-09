@@ -29,11 +29,12 @@ import {
   allAccounts,
   loadRegistry,
   newId,
-  positionOf,
   profileKey,
   saveRegistry,
   type AccountSummary,
 } from './accounts.ts';
+
+import { boardPositionOf, invalidateBoard } from './board.ts';
 
 export const PROFILE_VERSION = 1;
 export const MAX_SLOTS = 4;
@@ -230,9 +231,9 @@ class Store {
     return allAccounts(rankedOnly);
   }
 
-  /** Where this account sits on the local board, or null before its first game. */
+  /** Where this account sits on the leaderboard, or null before its first game. */
   position(): number | null {
-    return positionOf(this.accountId);
+    return boardPositionOf(this.accountId);
   }
 
   /** Rolls the season over and refreshes the challenge board on load. */
@@ -347,6 +348,13 @@ class Store {
       }
       online.updatedAt = Date.now();
     });
+    // Written through rather than left to the debounce. The board reads saved
+    // accounts, and the rank-change animation asks for the new placement in the
+    // same tick the match ended — a 220ms wait would show the position from
+    // before the win. It also means a ranked result survives closing the tab
+    // the moment it lands.
+    this.saveNow();
+    invalidateBoard();
     return { before, after };
   }
 
