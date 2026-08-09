@@ -5,6 +5,7 @@ import {
   STORE_BY_ID,
   STORE_ITEMS,
   TITLE_BY_ID,
+  WINS_PER_DIVISION,
   streakBadge,
   type StoreCategory,
   type StoreItem,
@@ -15,6 +16,7 @@ import { audio } from '../../engine/audio.ts';
 import { navigate, refresh } from '../../main.ts';
 import { el, fmt, panel, toast } from '../dom.ts';
 import { AvatarRenderer, livePreview } from '../avatar.ts';
+import { rankPanel, ladderStrip } from '../rankbadge.ts';
 import { drawDunkFrame } from '../dunkscene.ts';
 
 /** Grouped so the locker room reads like a wardrobe, not a spreadsheet. */
@@ -86,6 +88,26 @@ export function renderAccessories(): HTMLElement {
             el('span', {}, `${store.overall()} OVR`),
           ),
         ),
+        // The rank sits beside the player, because it is part of who you are on
+        // the walkout rather than a statistic filed away on another screen.
+        rankPanel(store.profile.online),
+      ),
+    ),
+    el('div', { style: 'height:14px' }),
+
+    panel(
+      'Online rank',
+      el(
+        'p',
+        { class: 'hint', style: 'margin:0 0 12px' },
+        `Park games against real people only — the CPU, practice and drills do not move it. ${WINS_PER_DIVISION} wins clears a division, three divisions clears a tier. Past Champion 1 you are Grand Champ, and from there you are placed against everyone else in the world.`,
+      ),
+      ladderStrip(store.profile.online.wins),
+      el(
+        'div',
+        { class: 'row', style: 'gap:8px;margin-top:12px' },
+        el('button', { class: 'btn sm', onclick: () => navigate('records') }, 'See the leaderboard'),
+        el('button', { class: 'btn sm', onclick: () => navigate('parks') }, 'Find a game'),
       ),
     ),
     el('div', { style: 'height:14px' }),

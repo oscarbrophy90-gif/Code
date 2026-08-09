@@ -20,6 +20,7 @@ import { DRILLS, SHOOT_AROUND, drillMedal, drillReward } from '../src/data/drill
 import { DEFAULT_UNLOCKS, STORE_BY_ID, STORE_ITEMS } from '../src/data/cosmetics.ts';
 import { COURT_MODES, COURT_MODE_BY_ID, courtConfig, courtKey } from '../src/data/courts.ts';
 import { PARKS } from '../src/data/parks.ts';
+import { DIVISIONS_PER_TIER, ONLINE_TIERS, WINS_PER_DIVISION, WINS_TO_GRAND_CHAMP, grandChampLabel, nextRank, onlineRank, onlineRankLabel } from '../src/onlinerank.ts';
 import { PACK_TITLES } from '../src/data/titlepack.ts';
 import { PACK_TATTOOS, TATTOO_DESIGNS } from '../src/data/tattoopack.ts';
 import { PACK_DUNKS } from '../src/data/dunkpack.ts';
@@ -2233,4 +2234,76 @@ test('each court sets its own rules', () => {
     assert.equal(mode.online, true, `${mode.name} should find real opponents`);
     assert.notEqual(mode.playlist, 'private', 'a queued court is never a private lobby');
   }
+});
+
+test('the online ladder climbs five wins at a time, three divisions a tier', () => {
+  // The exact shape asked for: Bronze 3 is where you start, 1 is the best
+  // division in a tier, and five wins clears one.
+  assert.equal(onlineRank(0).label, 'Bronze 3');
+  assert.equal(onlineRank(4).label, 'Bronze 3', 'four wins is not enough');
+  assert.equal(onlineRank(5).label, 'Bronze 2');
+  assert.equal(onlineRank(10).label, 'Bronze 1');
+  assert.equal(onlineRank(15).label, 'Silver 3', 'clearing Bronze 1 moves you up a tier');
+  assert.equal(onlineRank(30).label, 'Gold 3');
+  assert.equal(onlineRank(45).label, 'Platinum 3');
+  assert.equal(onlineRank(60).label, 'Emerald 3');
+  assert.equal(onlineRank(75).label, 'Sapphire 3');
+  assert.equal(onlineRank(90).label, 'Champion 3');
+  assert.equal(onlineRank(100).label, 'Champion 1', 'the last division before the top');
+
+  // Every division is exactly five wins wide, all the way up.
+  for (let wins = 0; wins < WINS_TO_GRAND_CHAMP; wins++) {
+    const rank = onlineRank(wins);
+    assert.equal(rank.needed, WINS_PER_DIVISION);
+    assert.equal(rank.progress, wins % WINS_PER_DIVISION);
+    assert.ok(rank.division >= 1 && rank.division <= DIVISIONS_PER_TIER);
+    assert.equal(rank.grandChamp, false);
+  }
+
+  // Seven tiers of three divisions at five wins each.
+  assert.equal(WINS_TO_GRAND_CHAMP, (ONLINE_TIERS.length - 1) * DIVISIONS_PER_TIER * WINS_PER_DIVISION);
+  assert.equal(WINS_TO_GRAND_CHAMP, 105);
+});
+
+test('grand champ has no divisions and is ranked against the world', () => {
+  const gc = onlineRank(WINS_TO_GRAND_CHAMP);
+  assert.equal(gc.grandChamp, true);
+  assert.equal(gc.label, 'Grand Champ');
+  assert.equal(gc.division, 0, 'there are no divisions up here');
+  assert.equal(nextRank(WINS_TO_GRAND_CHAMP), null, 'nothing above it');
+
+  // It never fills a progress bar — more wins move you past people instead.
+  assert.equal(onlineRank(WINS_TO_GRAND_CHAMP + 50).label, 'Grand Champ');
+  assert.equal(onlineRank(WINS_TO_GRAND_CHAMP + 50).progress, 50);
+
+  // Placement is what distinguishes one grand champ from another.
+  assert.equal(onlineRankLabel(WINS_TO_GRAND_CHAMP, 1), 'Grand Champ #1');
+  assert.equal(onlineRankLabel(WINS_TO_GRAND_CHAMP, 500), 'Grand Champ #500');
+  assert.equal(onlineRankLabel(WINS_TO_GRAND_CHAMP, null), 'Grand Champ', 'unknown placement is not faked');
+  assert.equal(grandChampLabel(0), 'Grand Champ', 'a nonsense placement is not shown');
+
+  // Below grand champ a placement is meaningless and must not appear.
+  assert.equal(onlineRankLabel(10, 3), 'Bronze 1');
+});
+
+test('the ladder never goes backwards and always advances', () => {
+  // A win must never lower your rank, and five wins must always raise it.
+  let last = -1;
+  for (let wins = 0; wins <= WINS_TO_GRAND_CHAMP + 20; wins++) {
+    const tierIndex = ONLINE_TIERS.indexOf(onlineRank(wins).tier);
+    const rank = onlineRank(wins);
+    // Rank as a single ordered number: tier, then division counting down.
+    const ordinal = rank.grandChamp
+      ? 1000 + rank.progress
+      : tierIndex * DIVISIONS_PER_TIER + (DIVISIONS_PER_TIER - rank.division);
+    assert.ok(ordinal >= last, `rank went backwards at ${wins} wins`);
+    last = ordinal;
+  }
+  for (let wins = 0; wins + WINS_PER_DIVISION <= WINS_TO_GRAND_CHAMP; wins += WINS_PER_DIVISION) {
+    assert.notEqual(onlineRank(wins).label, onlineRank(wins + WINS_PER_DIVISION).label, `stuck at ${wins}`);
+  }
+
+  // Negative or fractional counts cannot produce a broken rank.
+  assert.equal(onlineRank(-5).label, 'Bronze 3');
+  assert.equal(onlineRank(7.9).label, 'Bronze 2');
 });

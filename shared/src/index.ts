@@ -5,6 +5,7 @@ export * from './badges.ts';
 export * from './shooting.ts';
 export * from './rng.ts';
 export * from './mmr.ts';
+export * from './onlinerank.ts';
 export * from './economy.ts';
 export * from './shop.ts';
 export * from './seasons.ts';

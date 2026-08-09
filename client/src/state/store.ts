@@ -164,6 +164,7 @@ function createProfile(): Profile {
     challenges: syncChallengeStates(generateChallenges(now), []),
     settings: defaultSettings(),
     lastSyncedAt: 0,
+    online: { wins: 0, losses: 0, placement: null, worldSize: 0, updatedAt: 0 },
   };
 }
 
@@ -197,6 +198,12 @@ class Store {
   /** Rolls the season over and refreshes the challenge board on load. */
   private migrate(): void {
     const now = Date.now();
+    // Saves made before online play have no record on them. Defaulted rather
+    // than version-bumped, because bumping the version throws the whole profile
+    // away and nobody should lose their player to gain a rank of Bronze 3.
+    if (!this.profile.online) {
+      this.profile.online = { wins: 0, losses: 0, placement: null, worldSize: 0, updatedAt: 0 };
+    }
     const season = seasonForTime(now);
     if (this.profile.seasonId !== season.id) {
       this.profile.seasonId = season.id;

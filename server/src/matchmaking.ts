@@ -34,6 +34,15 @@ const PRIVATE_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
  * Beach — the park you chose had no effect on who you played.
  */
 export class Matchmaker {
+  /**
+   * How many clients are connected to this server, whatever they are doing.
+   *
+   * The waiting screen needs it to answer the question that actually goes wrong:
+   * two people who each run a server on their own machine both have the address
+   * "localhost" and both believe they are on the same one. If you are the only
+   * connection here, your opponent is somewhere else.
+   */
+  totalSessions: () => number = () => 0;
   private tickets: Ticket[] = [];
   private privateLobbies = new Map<string, { host: Session; config: Partial<MatchConfig> }>();
   private rooms = new Map<string, MatchRoom>();
@@ -100,6 +109,7 @@ export class Matchmaker {
           max: Math.min(5000, t.session.rankPoints + (140 + waited * 55)),
         },
         playersInQueue: this.tickets.filter((x) => x.key === t.key).length,
+        playersOnServer: this.totalSessions(),
       });
     }
 
@@ -124,9 +134,13 @@ export class Matchmaker {
           !ranked || isAcceptableMatch(a.session.rankPoints, b.session.rankPoints, waitA, waitB);
         if (!acceptable) continue;
 
+        // Only consume the tickets if a room was actually made. They used to be
+        // marked paired before the attempt, so a match that could not be created
+        // left both players with no ticket and no room — searching forever with
+        // nothing on the server looking for them.
+        if (!this.createMatch(a, b)) continue;
         paired.add(a);
         paired.add(b);
-        this.createMatch(a, b);
         break;
       }
     }
@@ -134,8 +148,11 @@ export class Matchmaker {
     this.tickets = this.tickets.filter((t) => !paired.has(t) && t.session.socket.readyState === t.session.socket.OPEN);
   }
 
-  private createMatch(a: Ticket, b: Ticket): void {
-    if (!a.session.player || !b.session.player) return;
+  private createMatch(a: Ticket, b: Ticket): boolean {
+    if (!a.session.player || !b.session.player) {
+      console.warn(`[match] cannot pair ${a.session.displayName} and ${b.session.displayName}: a player is missing`);
+      return false;
+    }
     const id = `m${this.matchCounter++}`;
     const room = new MatchRoom(
       id,
@@ -153,6 +170,7 @@ export class Matchmaker {
     console.log(
       `[match] ${id} @ ${a.key}: ${a.session.displayName} (${a.session.rankPoints}) vs ${b.session.displayName} (${b.session.rankPoints})`,
     );
+    return true;
   }
 
   // ------------------------------------------------------------------ private

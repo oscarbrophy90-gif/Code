@@ -273,6 +273,14 @@ export class MatchRoom {
       let after = this.ranks[side];
 
       const won = winner === side;
+      // An instant quit does not make a game. Two people with two laptops could
+      // otherwise match, have one close the tab, and repeat — a rank farmed in
+      // seconds. A walkover only counts once the match has been played for a
+      // while or somebody has actually scored.
+      const contested =
+        reason === 'played' ||
+        this.state.score[0] + this.state.score[1] > 0 ||
+        (this.startedAt > 0 && Date.now() - this.startedAt > 30_000);
 
       if (this.config.playlist === 'ranked') {
         const other: Side = side === 0 ? 1 : 0;
@@ -295,21 +303,25 @@ export class MatchRoom {
         session.rankPoints = after;
       }
 
-      // Every finished game counts on the record, ranked or not. Only the ranked
-      // court moves rank points, but a casual win is still a win and used to
+      // Every contested game counts on the record, ranked or not. Only the ranked
+      // court moves rank points, but a casual win is still a park win and used to
       // leave no trace at all.
-      session.record(won);
+      if (contested) session.record(won);
 
       // Write it down. Rank and record lived only on the in-memory session and
       // died with the socket, so every result was forgotten the moment the
       // player disconnected — which read as ranks resetting on restart, when in
       // fact they were never saved in the first place.
-      store.update(session.userId, {
-        rankPoints: session.rankPoints,
-        wins: session.wins,
-        losses: session.losses,
-        winStreak: session.winStreak,
-      });
+      if (contested) {
+        store.update(session.userId, {
+          rankPoints: session.rankPoints,
+          wins: session.wins,
+          losses: session.losses,
+          winStreak: session.winStreak,
+        });
+      } else {
+        console.log(`[match] ${this.id} ended before it was a game; no record kept`);
+      }
 
       this.send(side, {
         t: 'matchEnd',
@@ -319,6 +331,15 @@ export class MatchRoom {
         rankAfter: after,
         reason,
       });
+
+      // The client's rank is derived from this number, so it is sent rather than
+      // counted locally — a tally kept on the client drifts from the server's the
+      // first time a result is not received.
+      if (session.socket.readyState === session.socket.OPEN) {
+        const { placement, worldSize } = store.placement(session.userId);
+        const record = store.record(session.userId);
+        this.send(side, { t: 'record', wins: record.wins, losses: record.losses, placement, worldSize });
+      }
 
       const findings = this.cheat[side].report();
       if (findings.length) {

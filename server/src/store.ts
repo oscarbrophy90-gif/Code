@@ -155,12 +155,41 @@ class DevStore {
     return { blob: record?.saveBlob ?? null, revision: record?.saveRevision ?? 0 };
   }
 
-  leaderboard(scope: 'world' | 'region', region?: Region, limit = 100): LeaderboardEntry[] {
-    const rows = Object.values(this.db.accounts)
+  /**
+   * Everyone with an online game to their name, best first.
+   *
+   * Sorted by wins, because wins are what the ladder is made of — sorting by
+   * rank points would put someone who has never played a ranked court above a
+   * player with fifty casual park wins, and the board is about park wins.
+   * Losses break ties so a 20-2 record beats a 20-30 one.
+   */
+  private ranked(scope: 'world' | 'region', region?: Region): AccountRecord[] {
+    return Object.values(this.db.accounts)
       .filter((a) => (scope === 'region' ? a.region === region : true))
       .filter((a) => a.wins + a.losses > 0)
-      .sort((a, b) => b.rankPoints - a.rankPoints)
-      .slice(0, limit);
+      .sort((a, b) => b.wins - a.wins || a.losses - b.losses || a.updatedAt - b.updatedAt);
+  }
+
+  /**
+   * Where an account sits in the world, 1-based, or null if they have not played.
+   *
+   * Grand Champ is defined by this number rather than by a win total, so it has
+   * to be a live comparison against everyone — the placement a player sees is
+   * the one they actually hold at that moment.
+   */
+  placement(userId: string): { placement: number | null; worldSize: number } {
+    const rows = this.ranked('world');
+    const index = rows.findIndex((a) => a.userId === userId);
+    return { placement: index < 0 ? null : index + 1, worldSize: rows.length };
+  }
+
+  record(userId: string): { wins: number; losses: number } {
+    const a = this.db.accounts[userId];
+    return { wins: a?.wins ?? 0, losses: a?.losses ?? 0 };
+  }
+
+  leaderboard(scope: 'world' | 'region', region?: Region, limit = 100): LeaderboardEntry[] {
+    const rows = this.ranked(scope, region).slice(0, limit);
 
     return rows.map((a, i) => ({
       rank: i + 1,

@@ -11,6 +11,7 @@ const HOST = process.env.HOST ?? '0.0.0.0';
 
 const matchmaker = new Matchmaker();
 const sessions = new Set<Session>();
+matchmaker.totalSessions = () => sessions.size;
 
 const http = createServer((req, res) => {
   // A tiny health endpoint so the client (and any orchestrator) can probe the
@@ -96,6 +97,12 @@ function handle(session: Session, msg: ClientMessage): void {
       session.winStreak = account.winStreak;
 
       session.send({ t: 'welcome', userId: session.userId, serverTime: Date.now(), version: PROTOCOL_VERSION });
+      // Your record travels with the handshake, so the Locker shows the right
+      // rank the moment you connect rather than only after your next game.
+      {
+        const { placement, worldSize } = store.placement(session.userId);
+        session.send({ t: 'record', wins: account.wins, losses: account.losses, placement, worldSize });
+      }
       break;
     }
 

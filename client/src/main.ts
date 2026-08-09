@@ -18,6 +18,8 @@ import { renderAccessories } from './ui/screens/accessories.ts';
 import { renderStats } from './ui/screens/stats.ts';
 import { renderRecords } from './ui/screens/records.ts';
 import { renderSettings } from './ui/screens/settings.ts';
+import { renderLeaderboard } from './ui/screens/leaderboard.ts';
+import { grandChampLabel, onlineRank } from '@hoops/shared';
 
 export type Route =
   | 'home'
@@ -32,6 +34,7 @@ export type Route =
   | 'locker'
   | 'stats'
   | 'records'
+  | 'leaderboard'
   | 'settings';
 
 const SCREENS: Record<Route, (params: RouteParams) => HTMLElement> = {
@@ -47,6 +50,7 @@ const SCREENS: Record<Route, (params: RouteParams) => HTMLElement> = {
   locker: renderAccessories,
   stats: renderStats,
   records: renderRecords,
+  leaderboard: renderLeaderboard,
   settings: renderSettings,
 };
 
@@ -60,6 +64,7 @@ const NAV: { route: Route; label: string }[] = [
   { route: 'locker', label: 'Locker' },
   { route: 'stats', label: 'Stats' },
   { route: 'records', label: 'Records' },
+  { route: 'leaderboard', label: 'Leaderboard' },
   { route: 'controls', label: 'Controls' },
   { route: 'settings', label: 'Settings' },
 ];
@@ -148,6 +153,27 @@ function renderTopbar(): void {
   const player = store.player;
   const lp = levelProgress(player.xp);
 
+  const navBar = el(
+    'nav',
+    {},
+    NAV.map((item) =>
+      el(
+        'button',
+        {
+          class: `navbtn ${item.route === currentRoute ? 'active' : ''}`,
+          onclick: () => navigate(item.route),
+        },
+        item.label,
+      ),
+    ),
+  );
+  // With a dozen destinations the bar scrolls on most screens. Keeping the
+  // active one in view means a route you just navigated to is never parked off
+  // the edge — which is how the newest screen ends up looking like it is missing.
+  requestAnimationFrame(() => {
+    navBar.querySelector('.navbtn.active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  });
+
   topbar.append(
     el(
       'button',
@@ -159,20 +185,7 @@ function renderTopbar(): void {
       el('span', { class: 'mark' }),
       el('span', {}, 'Hoops ', el('span', { class: 'elite' }, 'Elite')),
     ),
-    el(
-      'nav',
-      {},
-      NAV.map((item) =>
-        el(
-          'button',
-          {
-            class: `navbtn ${item.route === currentRoute ? 'active' : ''}`,
-            onclick: () => navigate(item.route),
-          },
-          item.label,
-        ),
-      ),
-    ),
+    navBar,
     el(
       'div',
       { class: 'purse' },
@@ -183,12 +196,24 @@ function renderTopbar(): void {
         el('span', { class: 'dot' }),
         `${fmt(player.currency)} ${CURRENCY_SHORT}`,
       ),
-      el(
-        'span',
-        { class: 'chip', title: 'Highest CPU difficulty beaten' },
-        el('span', { class: 'dot' }),
-        player.stats.highestDifficultyBeaten ? DIFFICULTY_LABEL[player.stats.highestDifficultyBeaten] : 'Unranked',
-      ),
+      // Online rank, not the CPU ladder. The CPU mark already has a whole screen
+      // in Records, and this slot is more useful showing the thing that changes
+      // when you actually play someone.
+      (() => {
+        const online = store.profile.online;
+        const rank = onlineRank(online.wins);
+        const label = rank.grandChamp ? grandChampLabel(online.placement) : rank.label;
+        return el(
+          'button',
+          {
+            class: 'chip rank-chip',
+            title: `${online.wins} park wins against real players — click for the leaderboard`,
+            onclick: () => navigate('leaderboard'),
+          },
+          el('span', { class: 'dot', style: `background:${rank.tier.color}` }),
+          online.updatedAt === 0 && online.wins === 0 ? 'Unranked' : label,
+        );
+      })(),
     ),
   );
 }

@@ -60,6 +60,13 @@ export interface NetAdapter {
   reconcile(state: MatchState): void;
   latencyMs(): number;
   close(): void;
+  /**
+   * Called when the server says the match is over — including when the other
+   * player disconnects, which the client cannot see for itself. Without it a
+   * quitting opponent left you standing on the court with a live shot clock and
+   * nobody to play, forever.
+   */
+  onEnded?: (result: { winner: Side; score: [number, number]; reason: string }) => void;
 }
 
 export interface MatchOptions {
@@ -169,6 +176,24 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
   // ------------------------------------------------------------------ pause
   const pauseHost = el('div', { style: 'position:absolute;inset:0;pointer-events:none' });
   root.appendChild(pauseHost);
+
+  // The server has the last word on an online match. Its result is written into
+  // the state before finishing, so the result screen shows the real score rather
+  // than whatever this client had predicted when the connection went quiet.
+  if (opts.net) {
+    opts.net.onEnded = ({ winner, score, reason }) => {
+      if (finished) return;
+      state.score[0] = score[0];
+      state.score[1] = score[1];
+      state.winner = winner;
+      state.phase = 'over';
+      if (reason === 'disconnect' && winner === localSide) {
+        hud.push('OPPONENT LEFT', '#ffc53d', 0, 20, true);
+      }
+      audio.play('buzzer');
+      window.setTimeout(() => closeAndFinish(false), 1400);
+    };
+  }
 
   const closeAndFinish = (quit: boolean) => {
     if (finished) return;

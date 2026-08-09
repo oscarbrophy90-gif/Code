@@ -202,6 +202,26 @@ export interface Profile {
   challenges: ChallengeState[];
   settings: GameSettings;
   lastSyncedAt: number;
+  /**
+   * Your online record as the server last reported it.
+   *
+   * Kept on the profile so the Locker can show your rank without being
+   * connected, but never counted up locally — the server owns it, and a local
+   * tally would drift the first time a result did not arrive.
+   */
+  online: OnlineRecord;
+}
+
+export interface OnlineRecord {
+  /** park games won against a real person */
+  wins: number;
+  losses: number;
+  /** world placement, 1-based; only meaningful at Grand Champ */
+  placement: number | null;
+  /** how many players have an online record at all */
+  worldSize: number;
+  /** when the server last told us, 0 if never */
+  updatedAt: number;
 }
 
 export const REGIONS = ['na-east', 'na-west', 'eu', 'apac', 'sa', 'oce'] as const;

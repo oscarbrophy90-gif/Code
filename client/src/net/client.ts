@@ -27,6 +27,8 @@ export interface QueueStatus {
   waited: number;
   /** how many are on this exact court, including you */
   playersOnCourt: number;
+  /** how many are connected to this server at all, including you */
+  playersOnServer: number;
 }
 
 export interface MatchHandshake {
@@ -59,6 +61,11 @@ class NetClient {
 
   get connected(): boolean {
     return this.socket?.readyState === WebSocket.OPEN;
+  }
+
+  /** The address this client is talking to, for the waiting screen. */
+  get address(): string {
+    return this.url();
   }
 
   private url(): string {
@@ -157,6 +164,20 @@ class NetClient {
           this.latency = Date.now() - msg.sent;
           return;
         }
+        if (msg.t === 'record') {
+          // Unprompted: it arrives with the handshake and again after every
+          // match, so it is applied here rather than by whichever screen happens
+          // to be awaiting something at the time.
+          store.update((p) => {
+            p.online = {
+              wins: msg.wins,
+              losses: msg.losses,
+              placement: msg.placement,
+              worldSize: msg.worldSize,
+              updatedAt: Date.now(),
+            };
+          });
+        }
         for (const h of [...this.handlers]) h(msg);
       };
     });
@@ -208,7 +229,7 @@ class NetClient {
     onStatus: (status: QueueStatus) => void,
   ): Promise<MatchHandshake> {
     await this.connect();
-    onStatus({ waited: 0, playersOnCourt: 1 });
+    onStatus({ waited: 0, playersOnCourt: 1, playersOnServer: 1 });
     this.send({ t: 'queue', player, rankPoints, parkId, mode });
     return this.awaitMatch(onStatus);
   }
@@ -249,7 +270,7 @@ class NetClient {
 
       const off = this.on((msg) => {
         if (msg.t === 'queueUpdate') {
-          onStatus({ waited: msg.waited, playersOnCourt: msg.playersInQueue });
+          onStatus({ waited: msg.waited, playersOnCourt: msg.playersInQueue, playersOnServer: msg.playersOnServer });
         } else if (msg.t === 'matchFound') {
           clearTimeout(timer);
           off();
@@ -324,6 +345,8 @@ class NetClient {
  * stable through a dropped packet. Snapshots correct any drift.
  */
 class SocketAdapter implements NetAdapter {
+  /** Set by the match screen so a server-side end can close the game. */
+  onEnded?: (result: { winner: Side; score: [number, number]; reason: string }) => void;
   private lastRemote: PlayerInput = emptyInput();
   private remoteFrame = -1;
   private pendingSnapshot: PackedSnapshot | null = null;
@@ -342,8 +365,12 @@ class SocketAdapter implements NetAdapter {
         }
       } else if (msg.t === 'snapshot') {
         this.pendingSnapshot = msg.state;
-      } else if (msg.t === 'kicked' || msg.t === 'matchEnd') {
+      } else if (msg.t === 'matchEnd') {
         this.closed = true;
+        this.onEnded?.({ winner: msg.winner, score: msg.score, reason: msg.reason });
+      } else if (msg.t === 'kicked') {
+        this.closed = true;
+        this.onEnded?.({ winner: this.side === 0 ? 1 : 0, score: [0, 0], reason: 'kicked' });
       }
     });
   }

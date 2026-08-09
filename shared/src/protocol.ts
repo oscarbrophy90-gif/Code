@@ -36,7 +36,15 @@ export type ClientMessage =
 export type ServerMessage =
   | { t: 'welcome'; userId: string; serverTime: number; version: number }
   | { t: 'queued'; parkId: string; mode: CourtMode; estimateSeconds: number; searching: { min: number; max: number } }
-  | { t: 'queueUpdate'; waited: number; searching: { min: number; max: number }; playersInQueue: number }
+  | {
+      t: 'queueUpdate';
+      waited: number;
+      searching: { min: number; max: number };
+      /** waiting on this exact court */
+      playersInQueue: number;
+      /** connected to this server at all, doing anything */
+      playersOnServer: number;
+    }
   /** Who is waiting on every court right now, so a park can show it live. */
   | { t: 'parkActivity'; counts: Record<string, number> }
   | { t: 'privateCreated'; code: string }
@@ -45,6 +53,12 @@ export type ServerMessage =
   | { t: 'snapshot'; frame: number; ack: number; state: PackedSnapshot }
   | { t: 'opponentInput'; frame: number; input: PackedInput }
   | { t: 'matchEnd'; winner: Side; score: [number, number]; rankDelta: number; rankAfter: number; reason: 'played' | 'forfeit' | 'disconnect' }
+  /**
+   * Your online record, as the server holds it. Pushed on connect and after
+   * every match, so the rank in the Locker is the server's number rather than a
+   * local tally that can drift away from it.
+   */
+  | { t: 'record'; wins: number; losses: number; placement: number | null; worldSize: number }
   | { t: 'pong'; sent: number; serverTime: number }
   | { t: 'leaderboard'; scope: 'world' | 'region'; entries: LeaderboardEntry[] }
   | { t: 'profile'; blob: string | null; revision: number }
@@ -57,6 +71,7 @@ export interface LeaderboardEntry {
   displayName: string;
   region: Region;
   rankPoints: number;
+  /** park games won against a real person — the only thing the ladder counts */
   wins: number;
   losses: number;
   overall: number;

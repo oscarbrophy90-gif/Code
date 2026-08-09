@@ -30,6 +30,10 @@ export function searchForOpponent(host: HTMLElement, park: ParkDef, mode: CourtM
   const waitedEl = el('div', { class: 'search-timer' }, '0s');
   const onCourtEl = el('div', { class: 'search-count' }, 'You are the only one here so far');
   const noteEl = el('div', { class: 'search-note' }, '');
+  // The address is on screen the whole time. Two people who each run a server on
+  // their own machine both have the address "localhost" and both believe they
+  // are on the same one — this is the only thing that makes that visible.
+  const serverEl = el('div', { class: 'search-server' }, `Server ${net.address}`);
 
   const cancelBtn = el('button', { class: 'btn' }, 'Leave the court');
   const overlay = el(
@@ -43,6 +47,7 @@ export function searchForOpponent(host: HTMLElement, park: ParkDef, mode: CourtM
       el('div', { class: 'search-status' }, 'Searching for players', dots),
       waitedEl,
       onCourtEl,
+      serverEl,
       el('div', { class: 'search-blurb' }, court?.blurb ?? ''),
       noteEl,
       cancelBtn,
@@ -51,12 +56,23 @@ export function searchForOpponent(host: HTMLElement, park: ParkDef, mode: CourtM
   host.appendChild(overlay);
 
   let closed = false;
+  /** Last count from the server, so the warning can use it as it comes in. */
+  let onServer = 1;
   const tick = window.setInterval(() => {
     const secs = Math.floor((performance.now() - started) / 1000);
     waitedEl.textContent = `${secs}s`;
     dots.textContent = '.'.repeat(1 + (secs % 3));
-    // After a while, say the quiet part rather than spinning forever.
-    if (secs === 20) noteEl.textContent = 'Nobody else is on this court yet. You can keep waiting.';
+    if (secs === 12) {
+      // Being alone on the server is a different problem from being alone on the
+      // court, and it is the one that actually happens: your opponent is
+      // connected to a different server, usually their own machine's localhost.
+      // Saying "nobody is on this court" there sends people looking in the wrong
+      // place, so name the real thing.
+      noteEl.textContent =
+        onServer <= 1
+          ? 'You are the only one connected to this server. If your friend is searching too, you are not both on the same one — check the address matches on both machines.'
+          : 'Nobody else is on this court yet. You can keep waiting.';
+    }
   }, 250);
 
   const close = () => {
@@ -79,11 +95,16 @@ export function searchForOpponent(host: HTMLElement, park: ParkDef, mode: CourtM
 
     const onStatus = (status: QueueStatus) => {
       if (closed) return;
+      onServer = status.playersOnServer;
       const others = Math.max(0, status.playersOnCourt - 1);
       onCourtEl.textContent =
         others === 0
           ? 'You are the only one here so far'
           : `${others} other player${others === 1 ? '' : 's'} on this court`;
+      // The population of the whole server, which is what tells you whether your
+      // opponent is even reaching the same machine as you.
+      const online = Math.max(1, status.playersOnServer);
+      serverEl.textContent = `Server ${net.address} · ${online} connected`;
     };
 
     net

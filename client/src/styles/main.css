@@ -185,7 +185,10 @@ select {
 }
 
 .navbtn {
-  padding: 7px 13px;
+  /* Tightened so the full nav fits without scrolling at common widths — with a
+     leaderboard added it overflowed, which hid the newest screen behind a
+     scroll nobody knows is there. */
+  padding: 7px 10px;
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.09em;
@@ -2313,4 +2316,195 @@ input[type='text']:focus {
 
 .search-card .btn {
   margin-top: 16px;
+}
+
+/* The address you are actually connected to, and how many are on it. Small, but
+   it is the only way to tell "nobody is playing" from "we are on two different
+   servers", which look identical otherwise. */
+.search-server {
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-top: 6px;
+  font-variant-numeric: tabular-nums;
+  word-break: break-all;
+}
+
+/* ------------------------------------------------------------------ rank badge */
+
+.rank-panel {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.rank-panel.compact {
+  gap: 9px;
+}
+
+.rank-badge {
+  flex: 0 0 auto;
+  filter: drop-shadow(0 4px 10px rgba(0, 0, 0, 0.45));
+}
+
+.rank-text {
+  min-width: 0;
+}
+
+.rank-label {
+  font-size: 19px;
+  font-weight: 900;
+  line-height: 1.1;
+}
+
+.rank-panel.compact .rank-label {
+  font-size: 14px;
+}
+
+.rank-sub {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+
+.rank-hint {
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-top: 6px;
+  line-height: 1.45;
+}
+
+/* Progress toward the next division. */
+.rank-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--panel-3);
+  overflow: hidden;
+  margin-top: 8px;
+  max-width: 220px;
+}
+
+.rank-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 240ms ease-out;
+}
+
+/* The whole ladder, bronze to grand champ. */
+.ladder-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ladder-tier {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-faint);
+  padding: 4px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+
+.ladder-tier.on {
+  color: var(--text);
+  border-color: var(--accent);
+  background: rgba(255, 122, 61, 0.1);
+}
+
+.ladder-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+/* ----------------------------------------------------------------- leaderboard */
+
+.lb-me {
+  margin-bottom: 14px;
+}
+
+.lb-head,
+.lb-row {
+  display: grid;
+  grid-template-columns: 44px 1fr 130px 64px 64px;
+  gap: 10px;
+  align-items: center;
+  padding: 9px 10px;
+}
+
+.lb-head {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  border-bottom: 1px solid var(--line);
+}
+
+.lb-row {
+  border-bottom: 1px solid rgba(42, 51, 70, 0.5);
+  font-size: 13px;
+}
+
+/* Your own row, so you can find yourself without reading every line. */
+.lb-row.me {
+  background: rgba(255, 122, 61, 0.09);
+  border-radius: 8px;
+  border-bottom-color: transparent;
+}
+
+.lb-pos {
+  font-weight: 800;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.lb-name {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lb-streak {
+  margin-left: 8px;
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--amber);
+}
+
+.lb-rank {
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.lb-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+@media (max-width: 720px) {
+  .lb-head,
+  .lb-row {
+    grid-template-columns: 32px 1fr 92px 48px;
+  }
+  .lb-head span:last-child,
+  .lb-row span:last-child {
+    display: none;
+  }
+}
+
+/* The rank chip is a button, so it needs to shed the button chrome. */
+.rank-chip {
+  cursor: pointer;
+  border: 1px solid var(--line);
+  font: inherit;
+}
+
+.rank-chip:hover {
+  border-color: var(--accent);
 }

@@ -133,6 +133,11 @@ they are searching and that object is empty, they are not reaching this server.
 | "Server speaks v1, this build speaks v2" | One side is an old build; rebuild both |
 | Both searching forever, `courts` shows one of you | You are on different courts or different parks — the match is by both |
 | Searching forever, `sessions` is 0 | Neither of you is reaching the server at all |
+| Both searching, each screen says "1 connected" | **The usual one.** You are on two different servers. `localhost` means *your own machine* on each laptop, so two people who both leave it at the default are each alone on their own server. One of you runs the server; both of you point at that one machine's address. |
+
+The waiting screen shows the address it is using and how many players are on it,
+for exactly this reason. If your friend is definitely searching and your screen
+still says one connected, the address is the thing to check — not the court.
 
 A page served over **https** can only open a **wss://** socket, never `ws://`.
 The standalone file has no such restriction because it is not on a web page.
