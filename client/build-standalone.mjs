@@ -24,6 +24,10 @@ await build({
   resolve: {
     alias: { '@hoops/shared': fileURLToPath(new URL('../shared/src/index.ts', import.meta.url)) },
   },
+  // Baked in so a shared build already knows where the server is.
+  define: {
+    __HOOPS_SERVER_URL__: JSON.stringify(process.env.HOOPS_SERVER_URL ?? ''),
+  },
   build: {
     target: 'es2019',
     outDir,

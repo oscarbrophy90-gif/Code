@@ -82,12 +82,20 @@ export function defaultSettings(): GameSettings {
 /**
  * Where to look for the game server when nothing has been configured.
  *
- * The standalone build runs from a file on disk, where `location.hostname` is
- * empty — the old guess produced `ws://:8787`, which cannot connect to anything.
- * A file:// page falls back to localhost, which is right for two windows on one
- * machine; playing someone else needs a real address, set in Settings.
+ * Three cases, in order:
+ *
+ * 1. A build that was given a server address. `HOOPS_SERVER_URL` is baked in at
+ *    build time, which is what makes a shared build actually playable: a copy
+ *    handed to a friend already knows where the game lives, so nobody has to be
+ *    told to paste an address into Settings before they can play you.
+ * 2. A page served over http(s), where the server is most likely the same host.
+ * 3. Anything else — including the standalone file, where `location.hostname` is
+ *    empty and the host-relative guess produced `ws://:8787`, which cannot
+ *    connect to anything. Localhost is right for two windows on one machine.
  */
 function defaultServerUrl(): string {
+  const baked = (__HOOPS_SERVER_URL__ || '').trim();
+  if (baked) return baked;
   if (typeof location === 'undefined' || location.protocol === 'file:' || !location.hostname) {
     return 'ws://localhost:8787';
   }

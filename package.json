@@ -16,7 +16,9 @@
     "preview": "npm run preview --workspace=client",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test --experimental-strip-types shared/test/*.test.ts",
-    "build:standalone": "node client/build-standalone.mjs"
+    "build:standalone": "node client/build-standalone.mjs",
+    "server": "npm start --workspace=server",
+    "build:online": "node scripts/build-online.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",

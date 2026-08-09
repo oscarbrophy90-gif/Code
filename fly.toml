@@ -1,0 +1,30 @@
+# Fly.io. Deploy with:  fly launch --copy-config --no-deploy  then  fly deploy
+#
+# The name has to be unique across Fly, so change it before the first deploy —
+# `fly launch` will offer to do that for you.
+app = "hoops-elite"
+primary_region = "syd"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[http_service]
+  internal_port = 8787
+  force_https = true
+  # A websocket game keeps one long connection per player. Scaling to zero would
+  # drop everyone mid-match and make the first player of the day wait for a cold
+  # start, so the machine stays up.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "GET"
+    path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

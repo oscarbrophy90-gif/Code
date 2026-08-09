@@ -11,6 +11,10 @@ export default defineConfig({
     host: true,
     port: 5173,
   },
+  // Baked in so a shared build already knows where the server is.
+  define: {
+    __HOOPS_SERVER_URL__: JSON.stringify(process.env.HOOPS_SERVER_URL ?? ''),
+  },
   build: {
     target: 'es2022',
     outDir: 'dist',
