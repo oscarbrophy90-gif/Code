@@ -1,8 +1,14 @@
-import type { GameSettings, ShotMeterStyle } from '@hoops/shared';
+import {
+  USERNAME_MAX,
+  formatCooldown,
+  usernameCooldownLeft,
+  validateUsername,
+  type GameSettings,
+  type ShotMeterStyle,
+} from '@hoops/shared';
 
 import { store } from '../../state/store.ts';
 import { audio } from '../../engine/audio.ts';
-import { net } from '../../net/client.ts';
 import { refresh } from '../../main.ts';
 import { confirmDialog, el, panel, segmented, slider, toast } from '../dom.ts';
 
@@ -15,23 +21,6 @@ const METER_STYLES: { value: ShotMeterStyle; label: string; blurb: string }[] = 
 ];
 
 export function renderSettings(): HTMLElement {
-  // Probing the server is the only way to tell a typo from a server that is
-  // simply not running, and the difference matters when a queue times out.
-  const serverStatus = el('span', { class: 'faint', style: 'font-size:12px' }, 'Not checked');
-  const testButton = el('button', { class: 'btn sm' }, 'Test connection');
-  testButton.onclick = () => {
-    serverStatus.textContent = 'Connecting…';
-    net
-      .probe()
-      .then((info) => {
-        serverStatus.textContent = `Online · ${info.sessions} connected, ${info.rooms} match${info.rooms === 1 ? '' : 'es'} running`;
-        serverStatus.style.color = 'var(--green)';
-      })
-      .catch((err: unknown) => {
-        serverStatus.textContent = err instanceof Error ? err.message : 'Could not reach the server';
-        serverStatus.style.color = 'var(--red)';
-      });
-  };
 
   const s = store.settings;
 
@@ -133,22 +122,13 @@ export function renderSettings(): HTMLElement {
       ),
 
       panel(
-        'Online play',
+        'Username',
         el(
           'div',
-          { class: 'hint', style: 'margin:0 0 8px' },
-          'Park courts look for a real opponent on this server. Two windows on this machine can use localhost; playing someone else needs an address they can reach too.',
+          { class: 'hint', style: 'margin:0 0 10px' },
+          'The name you are known by on the leaderboard. It sits under your build name on the walkout. You can change it once every 30 days.',
         ),
-        el('div', { class: 'faint', style: 'font-size:11px;margin-bottom:6px' }, 'Server address'),
-        el('input', {
-          type: 'text',
-          value: s.serverUrl,
-          placeholder: 'ws://localhost:8787',
-          spellcheck: 'false',
-          style: 'width:100%',
-          oninput: (e: Event) => set('serverUrl', (e.target as HTMLInputElement).value.trim()),
-        }),
-        el('div', { class: 'row', style: 'gap:8px;margin-top:10px;align-items:center' }, serverStatus, testButton),
+        usernameEditor(),
       ),
 
       panel(
@@ -252,5 +232,69 @@ function toggle(label: string, value: boolean, onChange: (v: boolean) => void): 
       },
       value ? 'On' : 'Off',
     ),
+  );
+}
+
+/**
+ * Changing your username.
+ *
+ * The cooldown is enforced here and stated up front rather than discovered on
+ * submit — a field you are allowed to type in and then refused is worse than one
+ * that tells you when it will open.
+ */
+function usernameEditor(): HTMLElement {
+  const profile = store.profile;
+  const now = Date.now();
+  const left = usernameCooldownLeft(profile.usernameChangedAt, now);
+  const locked = left > 0;
+
+  const input = el('input', {
+    type: 'text',
+    value: profile.username,
+    maxlength: String(USERNAME_MAX),
+    spellcheck: 'false',
+    disabled: locked,
+    style: 'width:100%',
+  }) as HTMLInputElement;
+
+  const message = el(
+    'div',
+    { class: 'hint', style: 'margin:8px 0 0' },
+    locked ? `Locked for another ${formatCooldown(left)}.` : 'Available now.',
+  );
+
+  const save = el(
+    'button',
+    { class: 'btn sm primary', disabled: locked },
+    'Change username',
+  ) as HTMLButtonElement;
+
+  save.onclick = () => {
+    const next = input.value.trim();
+    if (next === profile.username) {
+      message.textContent = 'That is already your username.';
+      return;
+    }
+    const check = validateUsername(next);
+    if (!check.ok) {
+      message.textContent = check.reason ?? 'That name will not work';
+      message.style.color = 'var(--red)';
+      return;
+    }
+    store.update((p) => {
+      p.username = next;
+      p.usernameChangedAt = Date.now();
+    });
+    toast(`You are now ${next}`, 'good');
+    refresh();
+  };
+
+  return el(
+    'div',
+    {},
+    el('div', { class: 'faint', style: 'font-size:11px;margin-bottom:6px' }, 'Username'),
+    input,
+    el('div', { class: 'row', style: 'gap:8px;margin-top:10px' }, save),
+    message,
   );
 }

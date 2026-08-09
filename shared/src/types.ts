@@ -193,6 +193,14 @@ export interface MyPlayer {
 export interface Profile {
   version: number;
   userId: string;
+  /**
+   * The name you are known by on the leaderboard, chosen before your first
+   * build. Separate from a build's name because you can have several builds and
+   * only one identity — the board ranks the person, not the body.
+   */
+  username: string;
+  /** when the username was last changed, so the cooldown can be enforced */
+  usernameChangedAt: number;
   displayName: string;
   region: Region;
   players: MyPlayer[];
@@ -212,15 +220,23 @@ export interface Profile {
   online: OnlineRecord;
 }
 
+/**
+ * Your standing on the ranked ladder.
+ *
+ * Wins are the only input: five clears a division, three divisions clears a
+ * tier. Ranked games are against CPU opponents matched to your rank, and nothing
+ * else moves this — practice, drills and the difficulty ladder all have their
+ * own rewards.
+ */
 export interface OnlineRecord {
-  /** park games won against a real person */
+  /** ranked games won */
   wins: number;
   losses: number;
-  /** world placement, 1-based; only meaningful at Grand Champ */
-  placement: number | null;
-  /** how many players have an online record at all */
-  worldSize: number;
-  /** when the server last told us, 0 if never */
+  /** current win streak, for the board */
+  streak: number;
+  /** best streak ever reached */
+  bestStreak: number;
+  /** when the last ranked game finished, 0 if never */
   updatedAt: number;
 }
 
@@ -253,7 +269,6 @@ export interface GameSettings {
   musicVolume: number;
   touchControls: boolean;
   reducedMotion: boolean;
-  serverUrl: string;
 }
 
 export interface Team {

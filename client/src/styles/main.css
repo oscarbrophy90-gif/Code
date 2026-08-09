@@ -2231,104 +2231,6 @@ input[type='text']:focus {
   background: #ff4d8d;
 }
 
-/* ---------------------------------------------------------- searching for a game */
-
-/* The wait for a real opponent. Full-screen because it is a modal state: you
-   are standing on a court and either somebody turns up or you leave. */
-.search-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 60;
-  display: grid;
-  place-items: center;
-  background: rgba(6, 8, 13, 0.82);
-  backdrop-filter: blur(6px);
-  animation: search-in 180ms ease-out;
-}
-
-@keyframes search-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-.search-card {
-  width: min(440px, calc(100vw - 32px));
-  padding: 26px 24px 22px;
-  text-align: center;
-  border: 1px solid var(--line);
-  border-radius: 14px;
-  background: linear-gradient(180deg, #141b28, #0d121c);
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
-}
-
-.search-kicker {
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.14em;
-  color: var(--accent);
-}
-
-.search-title {
-  font-size: 26px;
-  font-weight: 900;
-  margin: 4px 0 12px;
-}
-
-.search-status {
-  font-size: 14px;
-  font-weight: 700;
-  color: var(--text);
-}
-
-/* Fixed width so the animating dots do not shuffle the line they sit on. */
-.search-dots {
-  display: inline-block;
-  width: 18px;
-  text-align: left;
-}
-
-.search-timer {
-  font-size: 34px;
-  font-weight: 900;
-  font-variant-numeric: tabular-nums;
-  margin: 8px 0 2px;
-  color: var(--accent);
-}
-
-.search-count {
-  font-size: 13px;
-  color: var(--text-dim);
-}
-
-.search-blurb {
-  font-size: 12px;
-  color: var(--text-dim);
-  margin-top: 12px;
-  line-height: 1.5;
-}
-
-.search-note {
-  font-size: 12px;
-  color: var(--amber);
-  min-height: 16px;
-  margin-top: 8px;
-}
-
-.search-card .btn {
-  margin-top: 16px;
-}
-
-/* The address you are actually connected to, and how many are on it. Small, but
-   it is the only way to tell "nobody is playing" from "we are on two different
-   servers", which look identical otherwise. */
-.search-server {
-  font-size: 11px;
-  color: var(--text-faint);
-  margin-top: 6px;
-  font-variant-numeric: tabular-nums;
-  word-break: break-all;
-}
-
 /* ------------------------------------------------------------------ rank badge */
 
 .rank-panel {
@@ -2507,4 +2409,286 @@ input[type='text']:focus {
 
 .rank-chip:hover {
   border-color: var(--accent);
+}
+
+/* ------------------------------------------------------------------- username */
+
+.username-wrap {
+  display: grid;
+  place-items: center;
+  min-height: 72vh;
+}
+
+.username-card {
+  width: min(480px, calc(100vw - 32px));
+  text-align: center;
+  padding: 34px 28px 28px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: linear-gradient(180deg, #141b28, #0d121c);
+}
+
+.username-kicker {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  color: var(--accent);
+}
+
+.username-title {
+  font-size: 30px;
+  font-weight: 900;
+  margin: 8px 0 10px;
+}
+
+.username-blurb {
+  font-size: 13px;
+  color: var(--text-dim);
+  line-height: 1.55;
+  margin: 0 0 18px;
+}
+
+.username-input {
+  width: 100%;
+  font-size: 20px;
+  font-weight: 800;
+  text-align: center;
+  padding: 12px;
+}
+
+/* Fixed height so validation text appearing does not shift the button. */
+.username-msg {
+  min-height: 18px;
+  font-size: 12px;
+  font-weight: 700;
+  margin-top: 8px;
+}
+
+.username-note {
+  font-size: 11px;
+  color: var(--text-faint);
+  line-height: 1.5;
+  margin: 6px 0 18px;
+}
+
+/* ----------------------------------------------------------------- ranked screen */
+
+.rank-hero {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.nextmatch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.nextmatch-line {
+  font-size: 24px;
+  font-weight: 900;
+  margin-top: 4px;
+}
+
+.btn.lg {
+  padding: 13px 24px;
+  font-size: 15px;
+}
+
+.ladder-table {
+  border-top: 1px solid var(--line);
+}
+
+.ladder-row {
+  display: grid;
+  grid-template-columns: 1fr 90px 120px;
+  gap: 10px;
+  padding: 8px 4px;
+  font-size: 13px;
+  border-bottom: 1px solid rgba(42, 51, 70, 0.5);
+}
+
+.ladder-row.head {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.ladder-row.on {
+  background: rgba(255, 122, 61, 0.09);
+  border-radius: 6px;
+}
+
+/* ------------------------------------------------------------- player profile */
+
+/* A clickable name has to look clickable without becoming a button. */
+.lb-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.lb-link:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.lb-you {
+  margin-left: 8px;
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--accent);
+  text-transform: uppercase;
+}
+
+.player-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(6, 8, 13, 0.82);
+  backdrop-filter: blur(6px);
+  overflow-y: auto;
+}
+
+.player-card {
+  width: min(560px, 100%);
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: linear-gradient(180deg, #141b28, #0d121c);
+}
+
+.player-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.player-name {
+  font-size: 24px;
+  font-weight: 900;
+}
+
+.player-rank {
+  font-size: 14px;
+  font-weight: 800;
+  margin-top: 2px;
+}
+
+.player-line {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-top: 4px;
+}
+
+.player-builds {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.build-card {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+}
+
+.build-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.build-name {
+  font-weight: 800;
+  font-size: 15px;
+}
+
+.build-ovr {
+  font-weight: 900;
+  color: var(--accent);
+}
+
+.build-line {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+
+.build-stats {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.mini-stat {
+  text-align: center;
+  padding: 6px 2px;
+  border-radius: 7px;
+  background: var(--panel-2);
+}
+
+.mini-stat .mv {
+  display: block;
+  font-weight: 800;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.mini-stat .ml {
+  display: block;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-top: 1px;
+}
+
+@media (max-width: 520px) {
+  .build-stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+/* --------------------------------------------------------------- walkout rank */
+
+/* The shield stands beside the figure, matched to its height. */
+.walkout-rank {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.walkout-badge {
+  filter: drop-shadow(0 8px 20px rgba(0, 0, 0, 0.55));
+}
+
+.walkout-rank-label {
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0.02em;
+}
+
+/* Username under the build name, quieter than it but clearly attached. */
+.walkout-username {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-dim);
+  margin-top: 1px;
 }

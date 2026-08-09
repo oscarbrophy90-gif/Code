@@ -75,32 +75,7 @@ export function defaultSettings(): GameSettings {
     musicVolume: 0.4,
     touchControls: matchMedia('(pointer: coarse)').matches,
     reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
-    serverUrl: defaultServerUrl(),
   };
-}
-
-/**
- * Where to look for the game server when nothing has been configured.
- *
- * Three cases, in order:
- *
- * 1. A build that was given a server address. `HOOPS_SERVER_URL` is baked in at
- *    build time, which is what makes a shared build actually playable: a copy
- *    handed to a friend already knows where the game lives, so nobody has to be
- *    told to paste an address into Settings before they can play you.
- * 2. A page served over http(s), where the server is most likely the same host.
- * 3. Anything else — including the standalone file, where `location.hostname` is
- *    empty and the host-relative guess produced `ws://:8787`, which cannot
- *    connect to anything. Localhost is right for two windows on one machine.
- */
-function defaultServerUrl(): string {
-  const baked = (__HOOPS_SERVER_URL__ || '').trim();
-  if (baked) return baked;
-  if (typeof location === 'undefined' || location.protocol === 'file:' || !location.hostname) {
-    return 'ws://localhost:8787';
-  }
-  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${proto}//${location.hostname}:8787`;
 }
 
 export function createPlayer(slot: number, name: string, build: BuildSpec): MyPlayer {
@@ -164,7 +139,9 @@ function createProfile(): Profile {
     challenges: syncChallengeStates(generateChallenges(now), []),
     settings: defaultSettings(),
     lastSyncedAt: 0,
-    online: { wins: 0, losses: 0, placement: null, worldSize: 0, updatedAt: 0 },
+    username: '',
+    usernameChangedAt: 0,
+    online: { wins: 0, losses: 0, streak: 0, bestStreak: 0, updatedAt: 0 },
   };
 }
 
@@ -202,8 +179,15 @@ class Store {
     // than version-bumped, because bumping the version throws the whole profile
     // away and nobody should lose their player to gain a rank of Bronze 3.
     if (!this.profile.online) {
-      this.profile.online = { wins: 0, losses: 0, placement: null, worldSize: 0, updatedAt: 0 };
+      this.profile.online = { wins: 0, losses: 0, streak: 0, bestStreak: 0, updatedAt: 0 };
     }
+    // Older shapes carried a server placement, which no longer exists — position
+    // is worked out against the world at read time now.
+    const rec = this.profile.online as unknown as Record<string, number>;
+    if (typeof rec.streak !== 'number') rec.streak = 0;
+    if (typeof rec.bestStreak !== 'number') rec.bestStreak = 0;
+    if (typeof this.profile.username !== 'string') this.profile.username = '';
+    if (typeof this.profile.usernameChangedAt !== 'number') this.profile.usernameChangedAt = 0;
     const season = seasonForTime(now);
     if (this.profile.seasonId !== season.id) {
       this.profile.seasonId = season.id;
@@ -275,6 +259,29 @@ class Store {
   }
 
   /** Mutate the profile and persist. Batched so rapid edits stay cheap. */
+  /**
+   * Writes a ranked result.
+   *
+   * Wins are the whole of the rank, so this is the only thing that moves it.
+   * Practice, drills and the difficulty ladder all call their own reward paths
+   * and none of them reach here — a rank you can get without playing a ranked
+   * game would not mean anything.
+   */
+  recordRanked(won: boolean): void {
+    this.update((p) => {
+      const online = p.online;
+      if (won) {
+        online.wins++;
+        online.streak++;
+        online.bestStreak = Math.max(online.bestStreak, online.streak);
+      } else {
+        online.losses++;
+        online.streak = 0;
+      }
+      online.updatedAt = Date.now();
+    });
+  }
+
   update(fn: (p: Profile) => void): void {
     fn(this.profile);
     if (this.hasPlayer) {

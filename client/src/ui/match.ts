@@ -51,31 +51,12 @@ export interface MatchResult {
   drillReps: number;
 }
 
-export interface NetAdapter {
-  /** Latest remote input for this frame. */
-  remoteInput(frame: number): PlayerInput;
-  /** Push the local input up to the server. */
-  sendInput(frame: number, input: PlayerInput): void;
-  /** Reconcile against an authoritative snapshot if one arrived. */
-  reconcile(state: MatchState): void;
-  latencyMs(): number;
-  close(): void;
-  /**
-   * Called when the server says the match is over — including when the other
-   * player disconnects, which the client cannot see for itself. Without it a
-   * quitting opponent left you standing on the court with a live shot clock and
-   * nobody to play, forever.
-   */
-  onEnded?: (result: { winner: Side; score: [number, number]; reason: string }) => void;
-}
-
 export interface MatchOptions {
   opponent: SimPlayerConfig;
   difficulty: Difficulty;
   parkId: string;
   config?: Partial<MatchConfig>;
   localSide?: Side;
-  net?: NetAdapter | null;
   seed?: number;
   /** when set, the screen runs a timed training drill instead of a game */
   drill?: DrillDef | null;
@@ -104,7 +85,7 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
   // parked out of the way and never given a controller.
   const drill = opts.drill ?? null;
   const parkedBot = !!drill && (drill.mode === 'shooting' || drill.mode === 'finishing');
-  const ai = opts.net || parkedBot ? null : new AiController(remoteSide, opts.difficulty, seed ^ 0x5bf03, true, false);
+  const ai = parkedBot ? null : new AiController(remoteSide, opts.difficulty, seed ^ 0x5bf03, true, false);
   const park = PARK_BY_ID[opts.parkId] ?? PARK_BY_ID['downtown'];
 
   const cam = new Camera();
@@ -177,24 +158,6 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
   const pauseHost = el('div', { style: 'position:absolute;inset:0;pointer-events:none' });
   root.appendChild(pauseHost);
 
-  // The server has the last word on an online match. Its result is written into
-  // the state before finishing, so the result screen shows the real score rather
-  // than whatever this client had predicted when the connection went quiet.
-  if (opts.net) {
-    opts.net.onEnded = ({ winner, score, reason }) => {
-      if (finished) return;
-      state.score[0] = score[0];
-      state.score[1] = score[1];
-      state.winner = winner;
-      state.phase = 'over';
-      if (reason === 'disconnect' && winner === localSide) {
-        hud.push('OPPONENT LEFT', '#ffc53d', 0, 20, true);
-      }
-      audio.play('buzzer');
-      window.setTimeout(() => closeAndFinish(false), 1400);
-    };
-  }
-
   const closeAndFinish = (quit: boolean) => {
     if (finished) return;
     finished = true;
@@ -202,7 +165,6 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
     input.detach();
     resizeObserver.disconnect();
     window.removeEventListener('resize', resize);
-    opts.net?.close();
     const winner = state.winner;
     opts.onFinish({
       won: winner === localSide,
@@ -268,7 +230,6 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
   };
 
   const togglePause = (value: boolean) => {
-    if (opts.net) return; // online matches never pause the world
     paused = value;
     renderPause();
   };
@@ -301,19 +262,12 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
         localInput.emote = null;
       }
     }
-    let remote: PlayerInput;
-    if (opts.net) {
-      opts.net.sendInput(state.frame, localInput);
-      remote = opts.net.remoteInput(state.frame);
-    } else {
-      remote = ai ? ai.update(state, dt) : emptyInput();
-    }
+    const remote: PlayerInput = ai ? ai.update(state, dt) : emptyInput();
 
     const inputs: [PlayerInput, PlayerInput] =
       localSide === 0 ? [localInput, remote] : [remote, localInput];
 
     stepWorld(inputs, dt);
-    opts.net?.reconcile(state);
     if (drill) updateDrill(dt);
     playDribbleBounce();
     playNetSwish();
@@ -633,7 +587,7 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
       hud.drawScoreBug(ctx, state, width, localSide);
     }
     hud.drawCallouts(ctx, state, localSide, width, height);
-    drawFooter(ctx, width, height, loop.fps, opts.net?.latencyMs() ?? null, settings.touchControls);
+    drawFooter(ctx, width, height, loop.fps, null, settings.touchControls);
 
   };
 

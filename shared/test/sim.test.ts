@@ -18,8 +18,9 @@ import { scoutReport } from '../src/scouting.ts';
 import { DEFAULT_TITLES, newlyEarnedTitles, streakBadge } from '../src/data/titles.ts';
 import { DRILLS, SHOOT_AROUND, drillMedal, drillReward } from '../src/data/drills.ts';
 import { DEFAULT_UNLOCKS, STORE_BY_ID, STORE_ITEMS } from '../src/data/cosmetics.ts';
-import { COURT_MODES, COURT_MODE_BY_ID, courtConfig, courtKey } from '../src/data/courts.ts';
 import { PARKS } from '../src/data/parks.ts';
+import { rankedOpponent, USERNAME_COOLDOWN_MS, usernameCooldownLeft, validateUsername } from '../src/ranked.ts';
+import { WORLD_SIZE, worldLadder, worldPositionFor } from '../src/world.ts';
 import { DIVISIONS_PER_TIER, ONLINE_TIERS, WINS_PER_DIVISION, WINS_TO_GRAND_CHAMP, grandChampLabel, nextRank, onlineRank, onlineRankLabel } from '../src/onlinerank.ts';
 import { PACK_TITLES } from '../src/data/titlepack.ts';
 import { PACK_TATTOOS, TATTOO_DESIGNS } from '../src/data/tattoopack.ts';
@@ -32,7 +33,6 @@ import { freshBadges } from '../src/badges.ts';
 import { isAcceptableMatch, rankLabel, tierForPoints, updateRank, freshRank } from '../src/mmr.ts';
 import { generateChallenges, seasonForTime, buildBattlePass } from '../src/seasons.ts';
 import { computeMatchReward } from '../src/economy.ts';
-import { packInput, unpackInput } from '../src/protocol.ts';
 import { emptyInput, emptyStats, type SimEvent } from '../src/sim/state.ts';
 import { ATTRIBUTE_KEYS, DIFFICULTIES, EMOTE_SLOTS, POSITIONS, type BuildSpec, type CareerStats, type Difficulty } from '../src/types.ts';
 import { shotAttribute } from '../src/shooting.ts';
@@ -368,16 +368,6 @@ test('match rewards pay for winning and never go negative', () => {
   assert.ok(win.currency > 1000 && win.xp > 1000);
   assert.ok(quit.currency >= 0 && quit.xp >= 0);
   assert.ok(win.currency > quit.currency * 5);
-});
-
-test('inputs survive a pack/unpack round trip', () => {
-  const input = { ...emptyInput(), mx: 0.5, mz: -1, sprint: true, shoot: true, move: 'spin' as const, moveDirX: -0.75, moveDirZ: 0.25 };
-  const out = unpackInput(packInput(input));
-  assert.equal(out.sprint, true);
-  assert.equal(out.shoot, true);
-  assert.equal(out.move, 'spin');
-  assert.ok(Math.abs(out.mx - 0.5) < 0.01);
-  assert.ok(Math.abs(out.moveDirX + 0.75) < 0.01);
 });
 
 // ------------------------------------------------------- 19-attribute system
@@ -2200,41 +2190,7 @@ test('the three packs are wired all the way through to the shop', () => {
   }
 });
 
-test('a court is a park and a mode, and nothing else matches it', () => {
-  // This key is the whole of who you can play. Two people meet because they are
-  // standing on the same court in the same park; everyone else is on a different
-  // key and can never be paired with them however long either waits.
-  assert.equal(courtKey('downtown', 'kotc'), 'downtown:kotc');
-  assert.notEqual(courtKey('downtown', 'kotc'), courtKey('beach', 'kotc'));
-  assert.notEqual(courtKey('downtown', 'kotc'), courtKey('downtown', 'casual'));
 
-  // Every park/court pairing is distinct, so no two courts can collide.
-  const keys = new Set<string>();
-  for (const park of PARKS) {
-    for (const mode of COURT_MODES) keys.add(courtKey(park.id, mode.id));
-  }
-  assert.equal(keys.size, PARKS.length * COURT_MODES.length, 'every court has its own queue');
-});
-
-test('each court sets its own rules', () => {
-  // The room used to be handed only the park id, so every online game ran the
-  // default eleven whichever court you walked onto.
-  const kotc = defaultMatchConfig(courtConfig('downtown', 'kotc'));
-  const main = defaultMatchConfig(courtConfig('downtown', 'ranked'));
-  assert.equal(kotc.targetScore, 7, 'King of the Court is first to seven');
-  assert.equal(main.targetScore, 11, 'the main court is the full game');
-  assert.notEqual(kotc.shotClock, main.shotClock);
-  assert.equal(kotc.parkId, 'downtown', 'the park carries into the match config');
-  assert.equal(main.playlist, 'ranked', 'only the main court moves your rank');
-
-  // Training is the practice gym and must never look for a person.
-  assert.equal(COURT_MODE_BY_ID.training.online, false);
-  for (const mode of COURT_MODES) {
-    if (mode.id === 'training') continue;
-    assert.equal(mode.online, true, `${mode.name} should find real opponents`);
-    assert.notEqual(mode.playlist, 'private', 'a queued court is never a private lobby');
-  }
-});
 
 test('the online ladder climbs five wins at a time, three divisions a tier', () => {
   // The exact shape asked for: Bronze 3 is where you start, 1 is the best
@@ -2306,4 +2262,83 @@ test('the ladder never goes backwards and always advances', () => {
   // Negative or fractional counts cannot produce a broken rank.
   assert.equal(onlineRank(-5).label, 'Bronze 3');
   assert.equal(onlineRank(7.9).label, 'Bronze 2');
+});
+
+test('the ranked ladder puts a harder opponent in front of you as you climb', () => {
+  // The progression is the opponent. If climbing did not change who turns up,
+  // the rank would be a number with nothing behind it.
+  let lastOverall = 0;
+  for (const wins of [0, 15, 30, 45, 60, 75, 90, 105]) {
+    const opp = rankedOpponent(wins);
+    assert.ok(opp.overall >= lastOverall, `overall went backwards at ${wins} wins`);
+    lastOverall = opp.overall;
+    assert.ok(opp.overall >= 60 && opp.overall <= 99, 'a build the game can actually make');
+  }
+  assert.equal(rankedOpponent(0).difficulty, 'rookie', 'Bronze is a rookie game');
+  assert.equal(rankedOpponent(105).difficulty, 'hallOfFame', 'Grand Champ is the hardest there is');
+  // A division inside a tier still nudges it, so Bronze 1 is not Bronze 3.
+  assert.ok(rankedOpponent(10).overall > rankedOpponent(0).overall);
+});
+
+test('the world ladder is a pyramid and never moves', () => {
+  const a = worldLadder();
+  const b = worldLadder();
+  assert.equal(a, b, 'the ladder is built once and reused');
+  assert.equal(a.length, WORLD_SIZE);
+
+  // Positions run 1..n with no gaps or repeats.
+  const positions = a.map((p) => p.position);
+  assert.deepEqual(positions, Array.from({ length: WORLD_SIZE }, (_, i) => i + 1));
+
+  // Sorted by wins, best first.
+  for (let i = 1; i < a.length; i++) assert.ok(a[i - 1].wins >= a[i].wins, `out of order at ${i}`);
+
+  // Usernames are unique — two identical names on a leaderboard is a bug you
+  // only notice after someone screenshots it.
+  assert.equal(new Set(a.map((p) => p.username.toLowerCase())).size, WORLD_SIZE);
+
+  // A pyramid: the top rank is rare and the bottom is crowded.
+  const grandChamps = a.filter((p) => onlineRank(p.wins).grandChamp).length;
+  assert.ok(grandChamps > 10 && grandChamps < WORLD_SIZE * 0.12, `${grandChamps} grand champs is not elite`);
+  const bronze = a.filter((p) => onlineRank(p.wins).tier.id === 'bronze').length;
+  assert.ok(bronze > grandChamps * 2, 'bronze should be the crowded end');
+
+  // Every build a player has adds up to the account's record.
+  for (const p of a) {
+    const wins = p.builds.reduce((s, x) => s + x.wins, 0);
+    assert.equal(wins, p.wins, `${p.username}'s builds do not add up to their wins`);
+    assert.ok(p.builds.length >= 1 && p.builds.length <= 3);
+    for (const b of p.builds) assert.ok(b.overall >= 60 && b.overall <= 99);
+  }
+});
+
+test('your position on the ladder moves as you win', () => {
+  const bottom = worldPositionFor(0, 0);
+  const mid = worldPositionFor(50, 10);
+  const top = worldPositionFor(9999, 0);
+  assert.equal(top, 1, 'more wins than anyone puts you first');
+  assert.ok(mid < bottom, 'winning moves you up the board');
+  assert.ok(bottom >= WORLD_SIZE, 'nobody is below a player with no wins');
+  // One more win never drops you.
+  let previous = Number.MAX_SAFE_INTEGER;
+  for (let wins = 0; wins <= 200; wins += 5) {
+    const at = worldPositionFor(wins, 0);
+    assert.ok(at <= previous, `position got worse at ${wins} wins`);
+    previous = at;
+  }
+});
+
+test('usernames are checked, and changing one is locked for thirty days', () => {
+  assert.equal(validateUsername('Ace').ok, true);
+  assert.equal(validateUsername('a_b-c.1').ok, true);
+  assert.equal(validateUsername('ab').ok, false, 'too short');
+  assert.equal(validateUsername('x'.repeat(20)).ok, false, 'too long');
+  assert.equal(validateUsername('has space').ok, false);
+  assert.equal(validateUsername('!!!!').ok, false, 'needs a letter or number');
+
+  const now = 1_700_000_000_000;
+  assert.equal(usernameCooldownLeft(0, now), 0, 'a first name is free');
+  assert.equal(usernameCooldownLeft(now, now), USERNAME_COOLDOWN_MS, 'just changed: full wait');
+  assert.equal(usernameCooldownLeft(now - USERNAME_COOLDOWN_MS, now), 0, 'exactly thirty days later it is free');
+  assert.ok(usernameCooldownLeft(now - USERNAME_COOLDOWN_MS / 2, now) > 0, 'halfway through it is still locked');
 });

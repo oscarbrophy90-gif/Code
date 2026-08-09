@@ -11,7 +11,8 @@ import { renderPractice } from './ui/screens/practice.ts';
 import { renderControls } from './ui/screens/controls.ts';
 import { renderBuilder } from './ui/screens/builder.ts';
 import { renderMyPlayer } from './ui/screens/myplayer.ts';
-import { renderParks } from './ui/screens/parks.ts';
+import { renderRank } from './ui/screens/rank.ts';
+import { renderUsername } from './ui/screens/username.ts';
 import { renderSeason } from './ui/screens/season.ts';
 import { renderStore } from './ui/screens/store.ts';
 import { renderAccessories } from './ui/screens/accessories.ts';
@@ -19,16 +20,17 @@ import { renderStats } from './ui/screens/stats.ts';
 import { renderRecords } from './ui/screens/records.ts';
 import { renderSettings } from './ui/screens/settings.ts';
 import { renderLeaderboard } from './ui/screens/leaderboard.ts';
-import { grandChampLabel, onlineRank } from '@hoops/shared';
+import { grandChampLabel, onlineRank, worldPositionFor } from '@hoops/shared';
 
 export type Route =
   | 'home'
   | 'play'
   | 'practice'
   | 'controls'
+  | 'username'
   | 'builder'
   | 'myplayer'
-  | 'parks'
+  | 'rank'
   | 'season'
   | 'store'
   | 'locker'
@@ -42,9 +44,10 @@ const SCREENS: Record<Route, (params: RouteParams) => HTMLElement> = {
   play: renderPlay,
   practice: renderPractice,
   controls: renderControls,
+  username: renderUsername,
   builder: renderBuilder,
   myplayer: renderMyPlayer,
-  parks: renderParks,
+  rank: renderRank,
   season: renderSeason,
   store: renderStore,
   locker: renderAccessories,
@@ -55,16 +58,19 @@ const SCREENS: Record<Route, (params: RouteParams) => HTMLElement> = {
 };
 
 const NAV: { route: Route; label: string }[] = [
+  // Ordered by how often you go there, because the bar scrolls on most screens
+  // and whatever sits past the edge may as well not exist. Ranked and the board
+  // it feeds are the loop, so they come before the wardrobe.
   { route: 'home', label: 'Home' },
   { route: 'play', label: 'Play' },
+  { route: 'rank', label: 'Ranked' },
+  { route: 'leaderboard', label: 'Leaderboard' },
   { route: 'myplayer', label: 'MyPlayer' },
-  { route: 'parks', label: 'Parks' },
-  { route: 'season', label: 'Season' },
-  { route: 'store', label: 'Store' },
   { route: 'locker', label: 'Locker' },
+  { route: 'store', label: 'Store' },
+  { route: 'season', label: 'Season' },
   { route: 'stats', label: 'Stats' },
   { route: 'records', label: 'Records' },
-  { route: 'leaderboard', label: 'Leaderboard' },
   { route: 'controls', label: 'Controls' },
   { route: 'settings', label: 'Settings' },
 ];
@@ -202,16 +208,19 @@ function renderTopbar(): void {
       (() => {
         const online = store.profile.online;
         const rank = onlineRank(online.wins);
-        const label = rank.grandChamp ? grandChampLabel(online.placement) : rank.label;
+        const played = online.wins + online.losses > 0;
+        const label = rank.grandChamp
+          ? grandChampLabel(played ? worldPositionFor(online.wins, online.losses) : null)
+          : rank.label;
         return el(
           'button',
           {
             class: 'chip rank-chip',
-            title: `${online.wins} park wins against real players — click for the leaderboard`,
+            title: `${online.wins} ranked wins — click for the leaderboard`,
             onclick: () => navigate('leaderboard'),
           },
           el('span', { class: 'dot', style: `background:${rank.tier.color}` }),
-          online.updatedAt === 0 && online.wins === 0 ? 'Unranked' : label,
+          played ? label : 'Unranked',
         );
       })(),
     ),
@@ -222,9 +231,15 @@ function renderTopbar(): void {
 const ROUTES_WITHOUT_PLAYER: Route[] = ['builder', 'settings', 'controls'];
 
 function renderShell(): void {
-  // Nothing in the game works without a player, so a profile with no build is
-  // routed straight into the creator rather than into a half-empty screen.
-  if (!store.hasPlayer && !ROUTES_WITHOUT_PLAYER.includes(currentRoute)) {
+  // First run is in order: pick who you are, then build a player. The username
+  // comes first because the build belongs to the account rather than the other
+  // way round, and the walkout needs a name to put under the build from the very
+  // first game.
+  if (!store.profile.username) {
+    currentRoute = 'username';
+  } else if (!store.hasPlayer && !ROUTES_WITHOUT_PLAYER.includes(currentRoute)) {
+    // Nothing in the game works without a player, so a profile with no build is
+    // routed straight into the creator rather than into a half-empty screen.
     currentRoute = 'builder';
   }
   renderTopbar();

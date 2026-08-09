@@ -93,7 +93,7 @@ export function renderHome(): HTMLElement {
           modeTile('Records', 'Career Ladder', 'Track every difficulty you have cleared and your personal bests.', '#4aa3ff', false, () =>
             navigate('records'),
           ),
-          modeTile('Parks', 'Enter a Park', 'Walk the courts, squad up, queue from anywhere.', '#a06bff', false, () => navigate('parks')),
+          modeTile('Ranked', 'Climb the ladder', 'Five wins a division. Every opponent is built to your rank.', '#a06bff', false, () => navigate('rank')),
         ),
       ),
 

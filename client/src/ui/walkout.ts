@@ -1,4 +1,7 @@
 import {
+  grandChampLabel,
+  onlineRank,
+  worldPositionFor,
   DIFFICULTY_LABEL,
   SKIN_TONES,
   TITLE_BY_ID,
@@ -11,6 +14,7 @@ import {
 } from '@hoops/shared';
 
 import { audio } from '../engine/audio.ts';
+import { drawRankBadge } from './rankbadge.ts';
 import { captureSceneKeys, el } from './dom.ts';
 
 export interface WalkoutOptions {
@@ -21,8 +25,11 @@ export interface WalkoutOptions {
   venue: string;
   /** "Ranked 1v1", "Training", event name — whatever the game is */
   subtitle: string;
-  /** true when the opponent is a person, so no difficulty is shown */
-  online?: boolean;
+  /**
+   * The account behind your build: the username on the ladder and the record its
+   * rank comes from. Only yours — the opponent is a build, not an account.
+   */
+  identity?: { username: string; wins: number; losses: number };
 }
 
 /** How long each beat of the cutscene runs, in milliseconds. */
@@ -69,7 +76,7 @@ export function playWalkout(opts: WalkoutOptions): Promise<void> {
           { class: 'walkout-sub' },
           // An online game has no CPU, so naming a difficulty there would be a
           // lie about who you are playing.
-          opts.online ? opts.subtitle : `${opts.subtitle} · ${DIFFICULTY_LABEL[opts.difficulty]}`,
+          `${opts.subtitle} · ${DIFFICULTY_LABEL[opts.difficulty]}`,
         ),
       ),
       body,
@@ -88,7 +95,7 @@ export function playWalkout(opts: WalkoutOptions): Promise<void> {
 
     const second = BEAT.intro + BEAT.card;
     at(second, () => {
-      body.appendChild(entrantCard(opts.player, 'left', 'And their opponent'));
+      body.appendChild(entrantCard(opts.player, 'left', 'And their opponent', opts.identity));
       audio.play('ui', 1.15);
     });
 
@@ -104,7 +111,19 @@ export function playWalkout(opts: WalkoutOptions): Promise<void> {
 
 // --------------------------------------------------------------------- card
 
-function entrantCard(cfg: SimPlayerConfig, side: 'left' | 'right', kicker: string): HTMLElement {
+/**
+ * One entrant.
+ *
+ * `identity` is the account behind the build: the username on the ladder and the
+ * rank they hold. It only applies to you — the CPU opponent is a build, not an
+ * account, so it gets a name and nothing under it.
+ */
+function entrantCard(
+  cfg: SimPlayerConfig,
+  side: 'left' | 'right',
+  kicker: string,
+  identity?: { username: string; wins: number; losses: number },
+): HTMLElement {
   const overall = computeOverall(cfg.attrs, cfg.position ?? 'SF');
   const report = scoutReport(cfg.attrs);
   const title = cfg.titleId ? TITLE_BY_ID[cfg.titleId] : undefined;
@@ -117,12 +136,18 @@ function entrantCard(cfg: SimPlayerConfig, side: 'left' | 'right', kicker: strin
     'div',
     { class: `walkout-card ${side}`, style: `--c1:${cfg.jerseyPrimary};--c2:${cfg.jerseySecondary}` },
     el('div', { class: 'walkout-spot' }),
+    // The badge stands beside the figure at the same height, because a rank is
+    // part of the walkout rather than a statistic filed elsewhere.
+    identity ? rankPillar(identity) : null,
     figure,
     el(
       'div',
       { class: 'walkout-info' },
       el('div', { class: 'walkout-kicker' }, kicker),
       el('div', { class: 'walkout-name' }, cfg.name),
+      // The username sits under the build name: one person, several builds, and
+      // the ladder ranks the person.
+      identity ? el('div', { class: 'walkout-username' }, identity.username) : null,
       el(
         'div',
         { class: 'walkout-tags' },
@@ -148,6 +173,33 @@ function entrantCard(cfg: SimPlayerConfig, side: 'left' | 'right', kicker: strin
         ? el('div', { class: 'walkout-gear' }, ...cfg.gear.map((g) => el('span', { class: 'gear-chip' }, g)))
         : null,
     ),
+  );
+}
+
+/**
+ * The rank shield, standing next to the player at figure height.
+ *
+ * Sized off the same number the figure uses so the two always match, whatever
+ * the viewport does.
+ */
+function rankPillar(identity: { username: string; wins: number; losses: number }): HTMLElement {
+  const size = window.innerWidth < 720 ? 132 : 210;
+  const played = identity.wins + identity.losses > 0;
+  const placement = played ? worldPositionFor(identity.wins, identity.losses) : null;
+  const rank = onlineRank(identity.wins);
+  const label = rank.grandChamp ? grandChampLabel(placement) : rank.label;
+
+  const badge = el('canvas', {
+    class: 'walkout-badge',
+    style: `width:${Math.round(size * 0.62)}px;height:${size}px`,
+  }) as HTMLCanvasElement;
+  requestAnimationFrame(() => drawRankBadge(badge, identity.wins, placement));
+
+  return el(
+    'div',
+    { class: 'walkout-rank' },
+    badge,
+    el('div', { class: 'walkout-rank-label', style: `color:${rank.tier.color}` }, played ? label : 'Unranked'),
   );
 }
 

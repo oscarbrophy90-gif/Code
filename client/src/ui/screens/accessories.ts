@@ -100,14 +100,14 @@ export function renderAccessories(): HTMLElement {
       el(
         'p',
         { class: 'hint', style: 'margin:0 0 12px' },
-        `Park games against real people only — the CPU, practice and drills do not move it. ${WINS_PER_DIVISION} wins clears a division, three divisions clears a tier. Past Champion 1 you are Grand Champ, and from there you are placed against everyone else in the world.`,
+        `Ranked matches only — practice, drills and the difficulty ladder do not move it. ${WINS_PER_DIVISION} wins clears a division, three divisions clears a tier. Past Champion 1 you are Grand Champ, and from there you are placed against everyone else on the ladder.`,
       ),
       ladderStrip(store.profile.online.wins),
       el(
         'div',
         { class: 'row', style: 'gap:8px;margin-top:12px' },
         el('button', { class: 'btn sm', onclick: () => navigate('records') }, 'See the leaderboard'),
-        el('button', { class: 'btn sm', onclick: () => navigate('parks') }, 'Find a game'),
+        el('button', { class: 'btn sm', onclick: () => navigate('rank') }, 'Play ranked'),
       ),
     ),
     el('div', { style: 'height:14px' }),

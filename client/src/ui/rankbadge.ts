@@ -2,8 +2,10 @@ import {
   DIVISIONS_PER_TIER,
   ONLINE_TIERS,
   WINS_PER_DIVISION,
+  WORLD_SIZE,
   grandChampLabel,
   onlineRank,
+  worldPositionFor,
   type OnlineRecord,
 } from '@hoops/shared';
 
@@ -94,14 +96,19 @@ export function drawRankBadge(canvas: HTMLCanvasElement, wins: number, placement
  */
 export function rankPanel(record: OnlineRecord, compact = false): HTMLElement {
   const rank = onlineRank(record.wins);
-  const label = rank.grandChamp ? grandChampLabel(record.placement) : rank.label;
+  // Position is worked out against the world at read time rather than stored, so
+  // it cannot go stale — the ladder is fixed, so the same record always sits in
+  // the same place.
+  const played = record.wins + record.losses > 0;
+  const placement = played ? worldPositionFor(record.wins, record.losses) : null;
+  const label = rank.grandChamp ? grandChampLabel(placement) : rank.label;
 
   const canvas = el('canvas', {
     class: 'rank-badge',
     style: compact ? 'width:52px;height:58px' : 'width:88px;height:98px',
   }) as HTMLCanvasElement;
   // The canvas has to be in the document before it has a layout size to read.
-  requestAnimationFrame(() => drawRankBadge(canvas, record.wins, record.placement));
+  requestAnimationFrame(() => drawRankBadge(canvas, record.wins, placement));
 
   const bits: HTMLElement[] = [
     el('div', { class: 'rank-label', style: `color:${rank.tier.color}` }, label),
@@ -112,9 +119,9 @@ export function rankPanel(record: OnlineRecord, compact = false): HTMLElement {
       el(
         'div',
         { class: 'rank-sub' },
-        record.placement !== null && record.worldSize > 0
-          ? `${record.wins} online wins · ${record.placement} of ${record.worldSize} in the world`
-          : `${record.wins} online wins`,
+        placement !== null
+          ? `${record.wins} ranked wins · ${placement} of ${WORLD_SIZE + 1} in the world`
+          : `${record.wins} ranked wins`,
       ),
     );
     if (!compact) {
@@ -122,12 +129,19 @@ export function rankPanel(record: OnlineRecord, compact = false): HTMLElement {
         el(
           'div',
           { class: 'rank-hint' },
-          'Grand Champ is placed against everyone else. Win more park games and you climb past people.',
+          'Grand Champ has no divisions. From here you are placed against everyone else — win more and you climb past them.',
         ),
       );
     }
   } else {
-    bits.push(el('div', { class: 'rank-sub' }, `${record.wins} online win${record.wins === 1 ? '' : 's'}`));
+    bits.push(
+      el(
+        'div',
+        { class: 'rank-sub' },
+        `${record.wins} ranked win${record.wins === 1 ? '' : 's'}`,
+        placement !== null ? ` · #${placement} in the world` : '',
+      ),
+    );
     if (!compact) {
       const remaining = rank.needed - rank.progress;
       bits.push(

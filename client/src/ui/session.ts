@@ -28,7 +28,7 @@ import {
 import { store } from '../state/store.ts';
 import { audio } from '../engine/audio.ts';
 import { dismissFullscreen, navigate, showFullscreen } from '../main.ts';
-import { createMatchScreen, type MatchResult, type NetAdapter } from './match.ts';
+import { createMatchScreen, type MatchResult } from './match.ts';
 import { bar, el, fmt, overlay, ratio, toast } from './dom.ts';
 import { playWalkout } from './walkout.ts';
 import { AvatarRenderer, livePreview } from './avatar.ts';
@@ -40,12 +40,13 @@ export interface StartMatchOptions {
   parkId: string;
   playlist: Playlist | 'event';
   config?: Partial<MatchConfig>;
-  net?: NetAdapter | null;
   localSide?: 0 | 1;
   seed?: number;
   eventName?: string;
   /** practice gym runs pay nothing and do not touch the career ladder */
   practice?: boolean;
+  /** a ranked match: the only thing that moves your rank */
+  ranked?: boolean;
   /** timed training drill instead of a game */
   drill?: DrillDef | null;
 }
@@ -72,7 +73,11 @@ export function startMatch(opts: StartMatchOptions): void {
     difficulty: opts.difficulty,
     venue: PARK_BY_ID[opts.parkId]?.name ?? 'Hoops Elite',
     subtitle: opts.eventName ?? labelFor(opts.playlist),
-    online: Boolean(opts.net),
+    identity: {
+      username: store.profile.username,
+      wins: store.profile.online.wins,
+      losses: store.profile.online.losses,
+    },
   }).then(() => {
     walkoutUp = false;
     launchMatch(opts);
@@ -85,7 +90,6 @@ function launchMatch(opts: StartMatchOptions): void {
     difficulty: opts.difficulty,
     parkId: opts.parkId,
     config: { ...opts.config, playlist: opts.playlist === 'event' ? 'casual' : opts.playlist },
-    net: opts.net,
     localSide: opts.localSide,
     seed: opts.seed,
     drill: opts.drill,
@@ -139,6 +143,10 @@ function applyResult(result: MatchResult, opts: StartMatchOptions): RewardSummar
 
   const badgeUps = mergeBadges(player.badges, result.simBadges);
   const challengesCompleted: string[] = [];
+
+  // The rank moves here and nowhere else. A forfeit still counts as a loss —
+  // quitting a ranked game you are losing should not be free.
+  if (opts.ranked) store.recordRanked(result.won);
 
   store.update((profile) => {
     const p = profile.players[profile.activeSlot];
