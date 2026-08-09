@@ -181,3 +181,73 @@ state, so they shard by match ID across a fleet. Matchmaking is the only statefu
 runs as a single service per region with a Redis-backed ticket queue. Regional servers keep
 latency inside the ~50 ms band that a timing game needs; cross-region play is offered
 explicitly rather than matched into silently.
+
+## Park matchmaking
+
+You are matched by **where you are standing**. Walking onto a court in a park queues you
+for that park and that court, and the pair is the whole of who you can meet:
+
+```
+courtKey(parkId, mode)   →   "downtown:kotc"
+```
+
+Everyone waiting on `downtown:kotc` is waiting for each other. Somebody on
+`beach:kotc` is on a different key and is never a candidate, no matter how long
+either of them waits. The key is built by `courtKey` in `shared/src/data/courts.ts`,
+which both ends import — a client cannot queue for a court the server understands
+differently, because there is only one definition of what a court is.
+
+Skill only enters after the key matches, and only on the ranked court: two players
+already on the same court are checked against `isAcceptableMatch`, whose band widens
+with waiting time. The casual and King of the Court courts take whoever is there,
+because making someone wait for a rating-appropriate opponent on a seven-point
+pick-up game is how a queue stays empty.
+
+The court also decides the game. `courtConfig` returns the match settings for a
+court, so King of the Court is first to seven with a twelve second clock while the
+main court is the full first-to-eleven. Before this, the room was handed only the
+park id and every online match ran the default rules whichever court you chose.
+
+### What the player sees
+
+| State | Screen |
+| --- | --- |
+| Waiting | Park and court named, seconds counting, how many others are on **this** court |
+| Nobody yet | After 20s it says so plainly rather than spinning silently |
+| Matched | The opponent's name, then the walkout |
+| No server | What went wrong, and a choice: play the CPU, go back, or search again |
+
+The last row matters. A queue that quietly drops you into a game against a bot
+labelled as a person is worse than one that admits nobody is online, so the CPU is
+always offered by name and never substituted silently.
+
+## Running a server people can actually reach
+
+Online play needs one server both players can open a socket to. This is the part
+no amount of client code can solve on its own.
+
+```bash
+npm install
+npm start --workspace=server      # ws://0.0.0.0:8787, health on /health
+```
+
+Point the client at it in **Settings → Online play → Server address**, and use
+**Test connection** to check: it probes `/health` over HTTP, which distinguishes a
+typo from a server that is down from a version mismatch — three failures that all
+look identical if you only try the WebSocket.
+
+| Who you want to play | Address to use |
+| --- | --- |
+| Two windows on one machine | `ws://localhost:8787` (the default) |
+| Someone on your network | `ws://<your-LAN-ip>:8787` |
+| Someone anywhere | `wss://<your-host>` — needs the server deployed and, over HTTPS, TLS |
+
+The standalone `HoopsElite.html` runs from `file://`, where `location.hostname` is
+empty; it falls back to localhost rather than the `ws://:8787` that the host-relative
+guess used to produce.
+
+### Protocol version
+
+`PROTOCOL_VERSION` is 2. Version 1 queued with a playlist and no court, so a v1
+client would wait on a key the server never fills. The handshake rejects a mismatch
+outright instead of leaving it queued forever.

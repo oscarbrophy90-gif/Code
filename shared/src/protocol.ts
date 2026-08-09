@@ -1,7 +1,13 @@
 import type { MatchConfig, PlayerInput, SimPlayerConfig, Side } from './sim/state.ts';
-import type { Playlist, Region } from './types.ts';
+import type { Region } from './types.ts';
+import type { CourtMode } from './data/courts.ts';
 
-export const PROTOCOL_VERSION = 1;
+/**
+ * Bumped from 1: `queue` now names a court rather than only a playlist, because
+ * matchmaking pairs by park and court. A v1 client would queue with no mode and
+ * sit forever, so the server refuses it rather than leaving it waiting.
+ */
+export const PROTOCOL_VERSION = 2;
 /** Client input send rate. */
 export const INPUT_HZ = 60;
 /** Server authoritative snapshot rate. */
@@ -13,7 +19,7 @@ export const TICK_HZ = 120;
 
 export type ClientMessage =
   | { t: 'hello'; version: number; token: string; displayName: string; region: Region }
-  | { t: 'queue'; playlist: Playlist; player: SimPlayerConfig; rankPoints: number; parkId: string }
+  | { t: 'queue'; player: SimPlayerConfig; rankPoints: number; parkId: string; mode: CourtMode }
   | { t: 'cancelQueue' }
   | { t: 'createPrivate'; player: SimPlayerConfig; config: Partial<MatchConfig> }
   | { t: 'joinPrivate'; code: string; player: SimPlayerConfig }
@@ -29,10 +35,12 @@ export type ClientMessage =
 
 export type ServerMessage =
   | { t: 'welcome'; userId: string; serverTime: number; version: number }
-  | { t: 'queued'; playlist: Playlist; estimateSeconds: number; searching: { min: number; max: number } }
+  | { t: 'queued'; parkId: string; mode: CourtMode; estimateSeconds: number; searching: { min: number; max: number } }
   | { t: 'queueUpdate'; waited: number; searching: { min: number; max: number }; playersInQueue: number }
+  /** Who is waiting on every court right now, so a park can show it live. */
+  | { t: 'parkActivity'; counts: Record<string, number> }
   | { t: 'privateCreated'; code: string }
-  | { t: 'matchFound'; matchId: string; side: Side; opponent: SimPlayerConfig; opponentRank: number; config: MatchConfig; seed: number; startsInMs: number }
+  | { t: 'matchFound'; matchId: string; side: Side; opponent: SimPlayerConfig; opponentName: string; opponentRank: number; config: MatchConfig; seed: number; startsInMs: number }
   | { t: 'matchStart'; serverFrame: number; serverTime: number }
   | { t: 'snapshot'; frame: number; ack: number; state: PackedSnapshot }
   | { t: 'opponentInput'; frame: number; input: PackedInput }

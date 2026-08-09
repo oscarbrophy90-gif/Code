@@ -21,6 +21,8 @@ export interface WalkoutOptions {
   venue: string;
   /** "Ranked 1v1", "Training", event name — whatever the game is */
   subtitle: string;
+  /** true when the opponent is a person, so no difficulty is shown */
+  online?: boolean;
 }
 
 /** How long each beat of the cutscene runs, in milliseconds. */
@@ -62,7 +64,13 @@ export function playWalkout(opts: WalkoutOptions): Promise<void> {
         'div',
         { class: 'walkout-head' },
         el('div', { class: 'walkout-venue' }, opts.venue),
-        el('div', { class: 'walkout-sub' }, `${opts.subtitle} · ${DIFFICULTY_LABEL[opts.difficulty]}`),
+        el(
+          'div',
+          { class: 'walkout-sub' },
+          // An online game has no CPU, so naming a difficulty there would be a
+          // lie about who you are playing.
+          opts.online ? opts.subtitle : `${opts.subtitle} · ${DIFFICULTY_LABEL[opts.difficulty]}`,
+        ),
       ),
       body,
       el('button', { class: 'walkout-skip', onclick: finish }, 'Skip'),

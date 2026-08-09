@@ -18,6 +18,7 @@ export { AiController, DIFFICULTY_PRESETS, type AiProfile } from './sim/ai.ts';
 
 export * from './data/teams.ts';
 export * from './data/parks.ts';
+export * from './data/courts.ts';
 export * from './data/cosmetics.ts';
 export * from './data/titles.ts';
 export * from './data/titlepack.ts';

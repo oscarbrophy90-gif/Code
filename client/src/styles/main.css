@@ -2227,3 +2227,90 @@ input[type='text']:focus {
   color: #05060a;
   background: #ff4d8d;
 }
+
+/* ---------------------------------------------------------- searching for a game */
+
+/* The wait for a real opponent. Full-screen because it is a modal state: you
+   are standing on a court and either somebody turns up or you leave. */
+.search-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  background: rgba(6, 8, 13, 0.82);
+  backdrop-filter: blur(6px);
+  animation: search-in 180ms ease-out;
+}
+
+@keyframes search-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.search-card {
+  width: min(440px, calc(100vw - 32px));
+  padding: 26px 24px 22px;
+  text-align: center;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: linear-gradient(180deg, #141b28, #0d121c);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+}
+
+.search-kicker {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  color: var(--accent);
+}
+
+.search-title {
+  font-size: 26px;
+  font-weight: 900;
+  margin: 4px 0 12px;
+}
+
+.search-status {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+/* Fixed width so the animating dots do not shuffle the line they sit on. */
+.search-dots {
+  display: inline-block;
+  width: 18px;
+  text-align: left;
+}
+
+.search-timer {
+  font-size: 34px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  margin: 8px 0 2px;
+  color: var(--accent);
+}
+
+.search-count {
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+.search-blurb {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-top: 12px;
+  line-height: 1.5;
+}
+
+.search-note {
+  font-size: 12px;
+  color: var(--amber);
+  min-height: 16px;
+  margin-top: 8px;
+}
+
+.search-card .btn {
+  margin-top: 16px;
+}

@@ -1,6 +1,6 @@
 import { createServer } from 'node:http';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { PROTOCOL_VERSION, computeOverall, type ClientMessage } from '@hoops/shared';
+import { COURT_MODE_BY_ID, PROTOCOL_VERSION, computeOverall, type ClientMessage } from '@hoops/shared';
 
 import { Matchmaker } from './matchmaking.ts';
 import { Session } from './session.ts';
@@ -23,6 +23,7 @@ const http = createServer((req, res) => {
         version: PROTOCOL_VERSION,
         sessions: sessions.size,
         ...matchmaker.stats(),
+        courts: matchmaker.counts(),
         uptimeSeconds: Math.round(process.uptime()),
       }),
     );
@@ -99,8 +100,9 @@ function handle(session: Session, msg: ClientMessage): void {
     }
 
     case 'queue': {
-      if (msg.playlist === 'private') {
-        session.error('bad_playlist', 'Use createPrivate or joinPrivate for private matches');
+      const court = COURT_MODE_BY_ID[msg.mode];
+      if (!court || !court.online) {
+        session.error('bad_court', `${msg.mode} is not a court you can queue for`);
         return;
       }
       session.player = msg.player;
@@ -108,7 +110,7 @@ function handle(session: Session, msg: ClientMessage): void {
       store.update(session.userId, {
         overall: computeOverall(msg.player.attrs, 'SG'),
       });
-      matchmaker.enqueue(session, msg.playlist, msg.parkId);
+      matchmaker.enqueue(session, msg.parkId, msg.mode);
       break;
     }
 

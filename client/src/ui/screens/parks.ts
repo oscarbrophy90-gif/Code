@@ -1,9 +1,21 @@
-import { PARKS, computeOverall, generateOpponent, hashString, type ParkDef } from '@hoops/shared';
+import {
+  COURT_MODES,
+  COURT_MODE_BY_ID,
+  PARKS,
+  computeOverall,
+  courtConfig,
+  generateOpponent,
+  hashString,
+  type CourtMode,
+  type ParkDef,
+} from '@hoops/shared';
 
 import { store } from '../../state/store.ts';
 import { navigate } from '../../main.ts';
-import { el, panel } from '../dom.ts';
+import { el, panel, toast } from '../dom.ts';
 import { startMatch } from '../session.ts';
+import { searchForOpponent } from '../searching.ts';
+
 import { hexA, mix } from '../../render/court.ts';
 
 interface CourtNode {
@@ -11,7 +23,7 @@ interface CourtNode {
   y: number;
   r: number;
   label: string;
-  mode: 'ranked' | 'casual' | 'kotc' | 'training';
+  mode: CourtMode;
   busy: number;
 }
 
@@ -81,17 +93,43 @@ export function renderParks(): HTMLElement {
           ),
         ),
         panel(
-          'Runs',
-          el('p', { class: 'hint', style: 'margin:0 0 12px' }, 'Every court here runs a CPU opponent at your selected difficulty. Walk up to one and step on the ring to start.'),
+          'Courts',
+          el(
+            'p',
+            { class: 'hint', style: 'margin:0 0 12px' },
+            'Step onto a court and it looks for someone else standing on the same one. Matches are made by park and court, so King of the Court here only finds you people at King of the Court here.',
+          ),
           el(
             'div',
-            { class: 'row' },
-            el('button', { class: 'btn sm', onclick: () => navigate('play') }, 'Choose difficulty'),
+            { style: 'display:grid;gap:8px' },
+            ...COURT_MODES.map((m) =>
+              el(
+                'button',
+                {
+                  class: 'kv',
+                  style: 'width:100%;text-align:left;cursor:pointer',
+                  onclick: () => {
+                    if (m.id === 'training') {
+                      navigate('practice');
+                      return;
+                    }
+                    void queueForCourt(park, m.id);
+                  },
+                },
+                el(
+                  'span',
+                  { class: 'k' },
+                  m.name,
+                  el('span', { class: 'faint', style: 'display:block;font-size:11px;font-weight:400' }, m.blurb),
+                ),
+                el('span', { class: 'v' }, m.online ? 'Find a game' : 'Solo'),
+              ),
+            ),
           ),
         ),
         panel(
           'How to move',
-          el('p', { class: 'hint', style: 'margin:0' }, 'Drag or use WASD inside the park view to walk. Step onto a court ring to open it, then pick a mode.'),
+          el('p', { class: 'hint', style: 'margin:0' }, 'Drag or use WASD inside the park view to walk. Step onto a court ring to queue for it, or use the list above.'),
         ),
       ),
     ),
@@ -186,7 +224,6 @@ function buildHub(park: ParkDef): HTMLElement {
   canvas.addEventListener('pointercancel', endPointer);
 
   function openCourt(court: CourtNode): void {
-    const player = store.player;
     // The training rim is the practice gym. It used to run a scored game
     // against a nerfed bot with no practice flag, which quietly credited a
     // career win on Rookie for beating a dummy.
@@ -194,18 +231,7 @@ function buildHub(park: ParkDef): HTMLElement {
       navigate('practice');
       return;
     }
-    if (court.mode === 'kotc') {
-      startMatch({
-        opponent: generateOpponent(Math.max(60, computeOverall(player.attributes, player.build.position)), hashString(`kotc-${Date.now()}`)),
-        difficulty: 'allStar',
-        parkId: park.id,
-        playlist: 'event',
-        config: { targetScore: 7, maxScore: 9 },
-        eventName: 'King of the Court',
-      });
-      return;
-    }
-    navigate('play');
+    void queueForCourt(park, court.mode);
   }
 
   const loop = (now: number) => {
@@ -352,4 +378,100 @@ function buildHub(park: ParkDef): HTMLElement {
   window.addEventListener('resize', resize);
 
   return wrapper;
+}
+
+/**
+ * Step onto a court and wait for somebody to step onto the same one.
+ *
+ * The park is the lobby. This queues for *this* park and *this* court, so the
+ * only people you can be matched with are the ones standing where you are —
+ * which is the whole idea: two players who both pick King of the Court at
+ * Downtown play each other, and nobody at Beach is pulled into it.
+ */
+async function queueForCourt(park: ParkDef, mode: CourtMode): Promise<void> {
+  const outcome = await searchForOpponent(document.body, park, mode);
+  if (outcome.reason === 'cancelled') return;
+
+  if (outcome.reason === 'error' || !outcome.handshake) {
+    // Never quietly substitute a bot for a person. Say what happened and let the
+    // player choose the CPU game if that is what they want.
+    offerOffline(park, mode, outcome.message ?? 'Could not reach the server');
+    return;
+  }
+
+  const h = outcome.handshake;
+  startMatch({
+    opponent: h.opponent,
+    opponentRankPoints: h.opponentRank,
+    // There is no CPU to set a difficulty for; this only labels the walkout,
+    // because the opponent is a person.
+    difficulty: 'pro',
+    parkId: park.id,
+    playlist: COURT_MODE_BY_ID[mode]?.playlist ?? 'casual',
+    config: h.config,
+    net: h.adapter,
+    localSide: h.side,
+    seed: h.seed,
+    eventName: `${COURT_MODE_BY_ID[mode]?.name ?? 'Online'} · online`,
+  });
+}
+
+/** No server, or nobody came. Offer the CPU, clearly labelled as the CPU. */
+function offerOffline(park: ParkDef, mode: CourtMode, why: string): void {
+  const def = COURT_MODE_BY_ID[mode];
+  const card = el(
+    'div',
+    { class: 'search-overlay' },
+    el(
+      'div',
+      { class: 'search-card' },
+      el('div', { class: 'search-kicker' }, 'NO GAME FOUND'),
+      el('div', { class: 'search-title' }, def?.name ?? mode),
+      el('div', { class: 'search-blurb' }, why),
+      el(
+        'div',
+        { class: 'search-blurb' },
+        'You can play the CPU on this court instead. It will not count towards your online record.',
+      ),
+      el(
+        'div',
+        { class: 'row', style: 'gap:8px;justify-content:center;margin-top:14px' },
+        el(
+          'button',
+          {
+            class: 'btn primary',
+            onclick: () => {
+              card.remove();
+              startMatch({
+                opponent: generateOpponent(
+                  Math.max(60, computeOverall(store.player.attributes, store.player.build.position)),
+                  hashString(`${park.id}-${mode}-${Date.now()}`),
+                ),
+                difficulty: 'allStar',
+                parkId: park.id,
+                playlist: 'casual',
+                config: courtConfig(park.id, mode),
+                eventName: `${def?.name ?? 'Park'} · CPU`,
+              });
+            },
+          },
+          'Play the CPU',
+        ),
+        el('button', { class: 'btn', onclick: () => card.remove() }, 'Back to the park'),
+        el(
+          'button',
+          {
+            class: 'btn',
+            onclick: () => {
+              card.remove();
+              void queueForCourt(park, mode);
+            },
+          },
+          'Search again',
+        ),
+      ),
+    ),
+  );
+  document.body.appendChild(card);
+  toast('No online game found', 'info');
 }

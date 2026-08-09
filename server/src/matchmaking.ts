@@ -1,20 +1,37 @@
-import { isAcceptableMatch, type MatchConfig, type Playlist } from '@hoops/shared';
+import {
+  COURT_MODE_BY_ID,
+  courtConfig,
+  courtKey,
+  isAcceptableMatch,
+  type CourtMode,
+  type MatchConfig,
+} from '@hoops/shared';
 import { MatchRoom } from './room.ts';
 import type { Session } from './session.ts';
 
 interface Ticket {
   session: Session;
-  playlist: 'ranked' | 'casual';
+  /** which park, and which court in it — together, who this player will meet */
   parkId: string;
+  mode: CourtMode;
+  key: string;
   queuedAt: number;
 }
 
 const PRIVATE_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
 /**
- * Skill-based matchmaking. Tickets pair when both players' rating bands
- * overlap; the bands widen with wait time so the tails of the ladder still
- * find games without ever forcing a wildly unfair one early.
+ * Matchmaking, by park and court.
+ *
+ * Two players meet because they walked onto the same court in the same park —
+ * King of the Court at Downtown finds you the other person waiting at King of
+ * the Court at Downtown, and nobody else. That pairing key comes first; skill
+ * only decides whether two people already on the same court are an acceptable
+ * game, and only on the ranked court.
+ *
+ * This used to pair on the playlist alone and ignore parkId entirely, so a
+ * player waiting at Downtown could be dropped into a game someone started at
+ * Beach — the park you chose had no effect on who you played.
  */
 export class Matchmaker {
   private tickets: Ticket[] = [];
@@ -26,16 +43,21 @@ export class Matchmaker {
     setInterval(() => this.pump(), 500);
   }
 
-  enqueue(session: Session, playlist: 'ranked' | 'casual', parkId: string): void {
+  enqueue(session: Session, parkId: string, mode: CourtMode): void {
     this.dequeue(session);
-    const ticket: Ticket = { session, playlist, parkId, queuedAt: Date.now() };
+    const key = courtKey(parkId, mode);
+    const ticket: Ticket = { session, parkId, mode, key, queuedAt: Date.now() };
     this.tickets.push(ticket);
     session.queuedAt = ticket.queuedAt;
-    session.queuePlaylist = playlist;
+    // The session tracks only the two ladder playlists; a court can never be
+    // 'private', which is created by code rather than queued for.
+    const playlist = COURT_MODE_BY_ID[mode]?.playlist;
+    session.queuePlaylist = playlist === 'ranked' ? 'ranked' : 'casual';
     session.send({
       t: 'queued',
-      playlist,
-      estimateSeconds: this.estimate(playlist),
+      parkId,
+      mode,
+      estimateSeconds: this.estimate(key),
       searching: { min: Math.max(0, session.rankPoints - 140), max: session.rankPoints + 140 },
     });
     this.pump();
@@ -49,15 +71,25 @@ export class Matchmaker {
     }
   }
 
-  private estimate(playlist: 'ranked' | 'casual'): number {
-    const waiting = this.tickets.filter((t) => t.playlist === playlist).length;
+  /** Rough wait, based on whether anyone else is already on this exact court. */
+  private estimate(key: string): number {
+    const waiting = this.tickets.filter((t) => t.key === key).length;
     return waiting > 0 ? 5 : 30;
+  }
+
+  /** How many are waiting on each court, for the park screen's live counts. */
+  counts(): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const t of this.tickets) out[t.key] = (out[t.key] ?? 0) + 1;
+    return out;
   }
 
   private pump(): void {
     const now = Date.now();
 
-    // Keep everyone informed while they wait.
+    // Keep everyone informed while they wait. The count is of this court only —
+    // a number counting the whole server would say four players are waiting when
+    // none of them can be your opponent.
     for (const t of this.tickets) {
       const waited = (now - t.queuedAt) / 1000;
       t.session.send({
@@ -67,7 +99,7 @@ export class Matchmaker {
           min: Math.max(0, t.session.rankPoints - (140 + waited * 55)),
           max: Math.min(5000, t.session.rankPoints + (140 + waited * 55)),
         },
-        playersInQueue: this.tickets.filter((x) => x.playlist === t.playlist).length,
+        playersInQueue: this.tickets.filter((x) => x.key === t.key).length,
       });
     }
 
@@ -81,14 +113,15 @@ export class Matchmaker {
 
       for (const b of ordered) {
         if (b === a || paired.has(b)) continue;
-        if (b.playlist !== a.playlist) continue;
+        // Same park, same court, or they are not each other's opponent at all.
+        if (b.key !== a.key) continue;
         if (b.session.socket.readyState !== b.session.socket.OPEN) continue;
 
         const waitB = (now - b.queuedAt) / 1000;
-        // Casual play only needs a loose pairing; ranked must be in band.
+        // An unranked court takes whoever is there; ranked has to be in band.
+        const ranked = COURT_MODE_BY_ID[a.mode]?.playlist === 'ranked';
         const acceptable =
-          a.playlist === 'casual' ||
-          isAcceptableMatch(a.session.rankPoints, b.session.rankPoints, waitA, waitB);
+          !ranked || isAcceptableMatch(a.session.rankPoints, b.session.rankPoints, waitA, waitB);
         if (!acceptable) continue;
 
         paired.add(a);
@@ -108,13 +141,18 @@ export class Matchmaker {
       id,
       { session: a.session, player: a.session.player, rank: a.session.rankPoints },
       { session: b.session, player: b.session.player, rank: b.session.rankPoints },
-      { playlist: a.playlist, parkId: a.parkId },
+      // The court decides the game. King of the Court is first to seven, and it
+      // was previously handed only the park id, so every online match was the
+      // default eleven whichever court you walked onto.
+      courtConfig(a.parkId, a.mode),
     );
     room.onFinished = (finished) => this.rooms.delete(finished.id);
     this.rooms.set(id, room);
     a.session.queuePlaylist = null;
     b.session.queuePlaylist = null;
-    console.log(`[match] ${id}: ${a.session.displayName} (${a.session.rankPoints}) vs ${b.session.displayName} (${b.session.rankPoints}) [${a.playlist}]`);
+    console.log(
+      `[match] ${id} @ ${a.key}: ${a.session.displayName} (${a.session.rankPoints}) vs ${b.session.displayName} (${b.session.rankPoints})`,
+    );
   }
 
   // ------------------------------------------------------------------ private

@@ -18,6 +18,8 @@ import { scoutReport } from '../src/scouting.ts';
 import { DEFAULT_TITLES, newlyEarnedTitles, streakBadge } from '../src/data/titles.ts';
 import { DRILLS, SHOOT_AROUND, drillMedal, drillReward } from '../src/data/drills.ts';
 import { DEFAULT_UNLOCKS, STORE_BY_ID, STORE_ITEMS } from '../src/data/cosmetics.ts';
+import { COURT_MODES, COURT_MODE_BY_ID, courtConfig, courtKey } from '../src/data/courts.ts';
+import { PARKS } from '../src/data/parks.ts';
 import { PACK_TITLES } from '../src/data/titlepack.ts';
 import { PACK_TATTOOS, TATTOO_DESIGNS } from '../src/data/tattoopack.ts';
 import { PACK_DUNKS } from '../src/data/dunkpack.ts';
@@ -2194,5 +2196,41 @@ test('the three packs are wired all the way through to the shop', () => {
   const packIds = new Set([...PACK_TITLES.map((t) => t.id), ...PACK_TATTOOS.map((i) => i.id), ...PACK_DUNKS.map((d) => `dunk-${d.id}`)]);
   for (const id of DEFAULT_UNLOCKS) {
     assert.ok(!packIds.has(id), `${id} should be bought, not given away`);
+  }
+});
+
+test('a court is a park and a mode, and nothing else matches it', () => {
+  // This key is the whole of who you can play. Two people meet because they are
+  // standing on the same court in the same park; everyone else is on a different
+  // key and can never be paired with them however long either waits.
+  assert.equal(courtKey('downtown', 'kotc'), 'downtown:kotc');
+  assert.notEqual(courtKey('downtown', 'kotc'), courtKey('beach', 'kotc'));
+  assert.notEqual(courtKey('downtown', 'kotc'), courtKey('downtown', 'casual'));
+
+  // Every park/court pairing is distinct, so no two courts can collide.
+  const keys = new Set<string>();
+  for (const park of PARKS) {
+    for (const mode of COURT_MODES) keys.add(courtKey(park.id, mode.id));
+  }
+  assert.equal(keys.size, PARKS.length * COURT_MODES.length, 'every court has its own queue');
+});
+
+test('each court sets its own rules', () => {
+  // The room used to be handed only the park id, so every online game ran the
+  // default eleven whichever court you walked onto.
+  const kotc = defaultMatchConfig(courtConfig('downtown', 'kotc'));
+  const main = defaultMatchConfig(courtConfig('downtown', 'ranked'));
+  assert.equal(kotc.targetScore, 7, 'King of the Court is first to seven');
+  assert.equal(main.targetScore, 11, 'the main court is the full game');
+  assert.notEqual(kotc.shotClock, main.shotClock);
+  assert.equal(kotc.parkId, 'downtown', 'the park carries into the match config');
+  assert.equal(main.playlist, 'ranked', 'only the main court moves your rank');
+
+  // Training is the practice gym and must never look for a person.
+  assert.equal(COURT_MODE_BY_ID.training.online, false);
+  for (const mode of COURT_MODES) {
+    if (mode.id === 'training') continue;
+    assert.equal(mode.online, true, `${mode.name} should find real opponents`);
+    assert.notEqual(mode.playlist, 'private', 'a queued court is never a private lobby');
   }
 });

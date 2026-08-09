@@ -79,8 +79,18 @@ export function defaultSettings(): GameSettings {
   };
 }
 
+/**
+ * Where to look for the game server when nothing has been configured.
+ *
+ * The standalone build runs from a file on disk, where `location.hostname` is
+ * empty — the old guess produced `ws://:8787`, which cannot connect to anything.
+ * A file:// page falls back to localhost, which is right for two windows on one
+ * machine; playing someone else needs a real address, set in Settings.
+ */
 function defaultServerUrl(): string {
-  if (typeof location === 'undefined') return 'ws://localhost:8787';
+  if (typeof location === 'undefined' || location.protocol === 'file:' || !location.hostname) {
+    return 'ws://localhost:8787';
+  }
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   return `${proto}//${location.hostname}:8787`;
 }

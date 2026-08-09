@@ -2,6 +2,7 @@ import type { GameSettings, ShotMeterStyle } from '@hoops/shared';
 
 import { store } from '../../state/store.ts';
 import { audio } from '../../engine/audio.ts';
+import { net } from '../../net/client.ts';
 import { refresh } from '../../main.ts';
 import { confirmDialog, el, panel, segmented, slider, toast } from '../dom.ts';
 
@@ -14,6 +15,24 @@ const METER_STYLES: { value: ShotMeterStyle; label: string; blurb: string }[] = 
 ];
 
 export function renderSettings(): HTMLElement {
+  // Probing the server is the only way to tell a typo from a server that is
+  // simply not running, and the difference matters when a queue times out.
+  const serverStatus = el('span', { class: 'faint', style: 'font-size:12px' }, 'Not checked');
+  const testButton = el('button', { class: 'btn sm' }, 'Test connection');
+  testButton.onclick = () => {
+    serverStatus.textContent = 'Connecting…';
+    net
+      .probe()
+      .then((info) => {
+        serverStatus.textContent = `Online · ${info.sessions} connected, ${info.rooms} match${info.rooms === 1 ? '' : 'es'} running`;
+        serverStatus.style.color = 'var(--green)';
+      })
+      .catch((err: unknown) => {
+        serverStatus.textContent = err instanceof Error ? err.message : 'Could not reach the server';
+        serverStatus.style.color = 'var(--red)';
+      });
+  };
+
   const s = store.settings;
 
   const set = <K extends keyof GameSettings>(key: K, value: GameSettings[K]) => {
@@ -111,6 +130,25 @@ export function renderSettings(): HTMLElement {
           refresh();
         }),
         el('div', { class: 'hint', style: 'margin-top:10px' }, 'The simulation always runs at a fixed 120 Hz regardless of frame rate, so capping the display never changes shot timing.'),
+      ),
+
+      panel(
+        'Online play',
+        el(
+          'div',
+          { class: 'hint', style: 'margin:0 0 8px' },
+          'Park courts look for a real opponent on this server. Two windows on this machine can use localhost; playing someone else needs an address they can reach too.',
+        ),
+        el('div', { class: 'faint', style: 'font-size:11px;margin-bottom:6px' }, 'Server address'),
+        el('input', {
+          type: 'text',
+          value: s.serverUrl,
+          placeholder: 'ws://localhost:8787',
+          spellcheck: 'false',
+          style: 'width:100%',
+          oninput: (e: Event) => set('serverUrl', (e.target as HTMLInputElement).value.trim()),
+        }),
+        el('div', { class: 'row', style: 'gap:8px;margin-top:10px;align-items:center' }, serverStatus, testButton),
       ),
 
       panel(

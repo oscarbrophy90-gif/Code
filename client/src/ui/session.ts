@@ -72,6 +72,7 @@ export function startMatch(opts: StartMatchOptions): void {
     difficulty: opts.difficulty,
     venue: PARK_BY_ID[opts.parkId]?.name ?? 'Hoops Elite',
     subtitle: opts.eventName ?? labelFor(opts.playlist),
+    online: Boolean(opts.net),
   }).then(() => {
     walkoutUp = false;
     launchMatch(opts);

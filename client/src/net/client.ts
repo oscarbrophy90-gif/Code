@@ -12,7 +12,7 @@ import {
   type MatchState,
   type PackedSnapshot,
   type PlayerInput,
-  type Playlist,
+  type CourtMode,
   type ServerMessage,
   type SimPlayerConfig,
   type Side,
@@ -21,10 +21,19 @@ import {
 import { store } from '../state/store.ts';
 import type { NetAdapter } from '../ui/match.ts';
 
+/** What the park shows while it is waiting. */
+export interface QueueStatus {
+  /** seconds spent waiting so far */
+  waited: number;
+  /** how many are on this exact court, including you */
+  playersOnCourt: number;
+}
+
 export interface MatchHandshake {
   matchId: string;
   side: Side;
   opponent: SimPlayerConfig;
+  opponentName: string;
   opponentRank: number;
   seed: number;
   config: MatchConfig;
@@ -56,6 +65,38 @@ class NetClient {
     return store.settings.serverUrl || 'ws://localhost:8787';
   }
 
+  /**
+   * Ask the server's health endpoint whether it is there.
+   *
+   * A WebSocket that fails to open tells you almost nothing — a wrong port, a
+   * server that is down and a typo all look identical. The HTTP probe separates
+   * them, which is what makes the Settings button worth having.
+   */
+  async probe(): Promise<{ sessions: number; rooms: number; queued: number }> {
+    const ws = this.url();
+    const http = ws.replace(/^ws:/, 'http:').replace(/^wss:/, 'https:').replace(/\/$/, '');
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), CONNECT_TIMEOUT_MS);
+    try {
+      const res = await fetch(`${http}/health`, { signal: controller.signal });
+      if (!res.ok) throw new Error(`Server answered ${res.status}`);
+      const info = (await res.json()) as { version: number; sessions: number; rooms: number; queued: number };
+      if (info.version !== PROTOCOL_VERSION) {
+        throw new Error(`Server speaks v${info.version}, this build speaks v${PROTOCOL_VERSION}`);
+      }
+      return info;
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') throw new Error(`No answer from ${ws} — is it running?`);
+      // A refused connection surfaces as a bare "Failed to fetch", which tells a
+      // player nothing. Everything that is not an explicit answer from the
+      // server means the same thing to them: nothing is listening there.
+      if (err instanceof TypeError) throw new Error(`Nothing is listening on ${ws}`);
+      throw err instanceof Error ? err : new Error(`Could not reach ${ws}`);
+    } finally {
+      window.clearTimeout(timer);
+    }
+  }
+
   connect(): Promise<WebSocket> {
     if (this.socket?.readyState === WebSocket.OPEN) return Promise.resolve(this.socket);
     if (this.connecting) return this.connecting;
@@ -84,7 +125,10 @@ class NetClient {
           t: 'hello',
           version: PROTOCOL_VERSION,
           token: store.profile.userId,
-          displayName: store.profile.displayName,
+          // The name that matters is the one on the jersey. The profile display
+          // name defaults to 'Rookie' and almost nobody changes it, so using it
+          // meant every opponent was announced as "Rookie".
+          displayName: store.player?.name || store.profile.displayName,
           region: store.profile.region,
         });
         this.startPing();
@@ -149,16 +193,23 @@ class NetClient {
     this.send({ t: 'cancelQueue' });
   }
 
+  /**
+   * Queue for one court in one park.
+   *
+   * The pair of ids is the whole of who you will play: everyone waiting on this
+   * park and this court is waiting for each other, and nobody else is a
+   * candidate. `onStatus` is called with progress so the park can show it.
+   */
   async queue(
-    playlist: Playlist,
+    parkId: string,
+    mode: CourtMode,
     player: SimPlayerConfig,
     rankPoints: number,
-    parkId: string,
-    onStatus: (message: string) => void,
+    onStatus: (status: QueueStatus) => void,
   ): Promise<MatchHandshake> {
     await this.connect();
-    onStatus('Searching for an opponent…');
-    this.send({ t: 'queue', playlist, player, rankPoints, parkId });
+    onStatus({ waited: 0, playersOnCourt: 1 });
+    this.send({ t: 'queue', player, rankPoints, parkId, mode });
     return this.awaitMatch(onStatus);
   }
 
@@ -188,7 +239,7 @@ class NetClient {
     return this.awaitMatch(() => {});
   }
 
-  private awaitMatch(onStatus: (message: string) => void): Promise<MatchHandshake> {
+  private awaitMatch(onStatus: (status: QueueStatus) => void): Promise<MatchHandshake> {
     return new Promise((resolve, reject) => {
       const timer = window.setTimeout(() => {
         off();
@@ -198,16 +249,16 @@ class NetClient {
 
       const off = this.on((msg) => {
         if (msg.t === 'queueUpdate') {
-          onStatus(`Searching… ${msg.playersInQueue} player${msg.playersInQueue === 1 ? '' : 's'} in queue`);
+          onStatus({ waited: msg.waited, playersOnCourt: msg.playersInQueue });
         } else if (msg.t === 'matchFound') {
           clearTimeout(timer);
           off();
-          onStatus('Opponent found');
           this.send({ t: 'ready' });
           resolve({
             matchId: msg.matchId,
             side: msg.side,
             opponent: msg.opponent,
+            opponentName: msg.opponentName,
             opponentRank: msg.opponentRank,
             seed: msg.seed,
             config: msg.config,
