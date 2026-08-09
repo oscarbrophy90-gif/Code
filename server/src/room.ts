@@ -22,6 +22,7 @@ import {
 } from '@hoops/shared';
 
 import { AntiCheat } from './antiCheat.ts';
+import { store } from './store.ts';
 import type { Session } from './session.ts';
 
 const MAX_MATCH_SECONDS = 15 * 60;
@@ -271,6 +272,8 @@ export class MatchRoom {
       let delta = 0;
       let after = this.ranks[side];
 
+      const won = winner === side;
+
       if (this.config.playlist === 'ranked') {
         const other: Side = side === 0 ? 1 : 0;
         const rankState = {
@@ -283,15 +286,30 @@ export class MatchRoom {
         const update = updateRank(
           rankState,
           this.ranks[other],
-          winner === side,
+          won,
           this.state.score[side],
           this.state.score[other],
         );
         delta = update.delta;
         after = update.after;
         session.rankPoints = after;
-        session.record(winner === side);
       }
+
+      // Every finished game counts on the record, ranked or not. Only the ranked
+      // court moves rank points, but a casual win is still a win and used to
+      // leave no trace at all.
+      session.record(won);
+
+      // Write it down. Rank and record lived only on the in-memory session and
+      // died with the socket, so every result was forgotten the moment the
+      // player disconnected — which read as ranks resetting on restart, when in
+      // fact they were never saved in the first place.
+      store.update(session.userId, {
+        rankPoints: session.rankPoints,
+        wins: session.wins,
+        losses: session.losses,
+        winStreak: session.winStreak,
+      });
 
       this.send(side, {
         t: 'matchEnd',

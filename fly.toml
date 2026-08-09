@@ -25,6 +25,17 @@ primary_region = "syd"
     method = "GET"
     path = "/health"
 
+# Records live on a volume, not on the machine. A container's own filesystem is
+# replaced on every deploy, so without this the ladder would start over each time
+# you pushed. Create it once with:
+#   fly volumes create hoops_data --size 1
+[[mounts]]
+  source = "hoops_data"
+  destination = "/data"
+
+[env]
+  HOOPS_DATA_DIR = "/data"
+
 [[vm]]
   size = "shared-cpu-1x"
   memory = "256mb"

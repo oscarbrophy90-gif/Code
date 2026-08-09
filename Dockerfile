@@ -26,6 +26,13 @@ COPY server/ server/
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=8787
+
+# Records go here. Mount a volume at this path or they are thrown away with the
+# container on every deploy — the ladder would quietly start over each push.
+ENV HOOPS_DATA_DIR=/data
+RUN mkdir -p /data
+VOLUME ["/data"]
+
 EXPOSE 8787
 
 # The health endpoint is the same one the game's Settings screen probes, so a

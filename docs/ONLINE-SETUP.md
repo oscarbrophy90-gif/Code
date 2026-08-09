@@ -146,6 +146,38 @@ is small — 256 MB is plenty for a handful of concurrent games. Fly's smallest
 shared machine and Render's free tier both handle it. The traffic is a few
 kilobytes per second per match.
 
-There is no database. Ranks and profiles live in memory and reset when the
-server restarts — see `docs/DATABASE.md` for the schema if you want them to
-persist.
+## Keeping ranks between restarts
+
+Results are written to `db.json` in the server's data directory. Set where that
+is with `HOOPS_DATA_DIR`; it defaults to `server/data`, which is fine when you
+run the server yourself and wrong inside a container, whose own filesystem is
+replaced on every deploy.
+
+```bash
+HOOPS_DATA_DIR=/data npm run server
+```
+
+`fly.toml` mounts a volume at `/data` and sets the variable. Create it once:
+
+```bash
+fly volumes create hoops_data --size 1
+```
+
+Render's free tier has no persistent disk at all, so records reset there on
+every redeploy; `render.yaml` has the disk block commented out for when you move
+to a paid instance.
+
+The file is written by rename, so a crash mid-write cannot leave a half-written
+database, and the previous version is kept as `db.json.bak`. If the live file is
+ever unreadable the server falls back to that backup, keeps the damaged file
+next to it, and says so in the log rather than starting from an empty ladder.
+
+Backing up is copying one file:
+
+```bash
+fly ssh console -C "cat /data/db.json" > backup.json
+```
+
+This is a JSON file, not a database, and it is loaded into memory whole. That is
+the right shape for a few thousand accounts and the wrong one for a few hundred
+thousand — `docs/DATABASE.md` has the Postgres schema for when it matters.

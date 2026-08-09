@@ -1,10 +1,22 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { closeSync, copyFileSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { LeaderboardEntry, Region } from '@hoops/shared';
 
-const DATA_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'data');
+/**
+ * Where the records live.
+ *
+ * Configurable because a container's own filesystem is thrown away on every
+ * restart and deploy. Pointing this at a mounted volume is the difference
+ * between a ladder that persists and one that quietly starts over each time you
+ * push — see docs/ONLINE-SETUP.md.
+ */
+const DATA_DIR = process.env.HOOPS_DATA_DIR
+  ? process.env.HOOPS_DATA_DIR
+  : join(dirname(fileURLToPath(import.meta.url)), '..', 'data');
 const DB_PATH = join(DATA_DIR, 'db.json');
+const TMP_PATH = `${DB_PATH}.tmp`;
+const BAK_PATH = `${DB_PATH}.bak`;
 
 interface AccountRecord {
   userId: string;
@@ -33,15 +45,66 @@ interface Db {
 class DevStore {
   private db: Db = { accounts: {} };
   private dirty = false;
+  private timer: NodeJS.Timeout | null = null;
 
   constructor() {
-    try {
-      mkdirSync(DATA_DIR, { recursive: true });
-      this.db = JSON.parse(readFileSync(DB_PATH, 'utf8')) as Db;
-    } catch {
-      this.db = { accounts: {} };
+    mkdirSync(DATA_DIR, { recursive: true });
+    this.db = this.load();
+    const count = Object.keys(this.db.accounts).length;
+    console.log(`[store] ${count} account${count === 1 ? '' : 's'} from ${DB_PATH}`);
+
+    this.timer = setInterval(() => this.flush(), 5000);
+    // A deploy or a Ctrl-C used to throw away up to five seconds of results,
+    // which on a short game is a whole match.
+    for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+      process.on(signal, () => {
+        this.close();
+        process.exit(0);
+      });
     }
-    setInterval(() => this.flush(), 5000);
+  }
+
+  /**
+   * Reads the database, falling back to the last good copy.
+   *
+   * A parse failure used to be swallowed and replaced with an empty database —
+   * one truncated write and every account was gone with nothing in the log to
+   * say so. Now a bad file is kept, the backup is tried, and it is loud.
+   */
+  private load(): Db {
+    for (const [path, label] of [
+      [DB_PATH, 'database'],
+      [BAK_PATH, 'backup'],
+    ] as const) {
+      if (!existsSync(path)) continue;
+      try {
+        const parsed = JSON.parse(readFileSync(path, 'utf8')) as Db;
+        if (!parsed || typeof parsed !== 'object' || typeof parsed.accounts !== 'object') {
+          throw new Error('not a database');
+        }
+        if (label === 'backup') console.warn('[store] recovered from backup');
+        return { accounts: parsed.accounts ?? {} };
+      } catch (err) {
+        console.error(`[store] ${label} at ${path} is unreadable:`, err instanceof Error ? err.message : err);
+        if (label === 'database') {
+          // Keep it. It is the only copy of whatever was in there.
+          try {
+            copyFileSync(path, `${path}.corrupt-${Date.now()}`);
+            console.error('[store] kept a copy alongside it for inspection');
+          } catch {
+            /* nothing more to do */
+          }
+        }
+      }
+    }
+    return { accounts: {} };
+  }
+
+  /** Flush and stop. Called on shutdown so the last results are not lost. */
+  close(): void {
+    if (this.timer) clearInterval(this.timer);
+    this.timer = null;
+    this.flush();
   }
 
   account(userId: string, displayName: string, region: Region): AccountRecord {
@@ -112,14 +175,36 @@ class DevStore {
     }));
   }
 
+  /**
+   * Writes the database so that a crash cannot leave a half-written one.
+   *
+   * Write to a temporary file, force it to disk, then rename over the real one —
+   * a rename within a directory is atomic, so at every instant the file on disk
+   * is either entirely the old database or entirely the new one. Writing
+   * straight over the target, as this used to, means a process killed mid-write
+   * leaves a truncated file, and the loader treated that as "no accounts".
+   */
   private flush(): void {
     if (!this.dirty) return;
     this.dirty = false;
     try {
       mkdirSync(DATA_DIR, { recursive: true });
-      writeFileSync(DB_PATH, JSON.stringify(this.db), 'utf8');
+      const json = JSON.stringify(this.db);
+      writeFileSync(TMP_PATH, json, 'utf8');
+      // Rename is only atomic with respect to what is already on the platter.
+      const fd = openSync(TMP_PATH, 'r');
+      try {
+        fsyncSync(fd);
+      } finally {
+        closeSync(fd);
+      }
+      // Keep the version we are replacing, so a bad write is recoverable.
+      if (existsSync(DB_PATH)) copyFileSync(DB_PATH, BAK_PATH);
+      renameSync(TMP_PATH, DB_PATH);
     } catch (err) {
       console.error('[store] failed to persist', err);
+      // Try again on the next tick rather than dropping the change.
+      this.dirty = true;
     }
   }
 }
