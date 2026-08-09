@@ -16,7 +16,7 @@ import { store } from '../../state/store.ts';
 import { navigate } from '../../main.ts';
 import { bar, el, fmt, panel, ratio } from '../dom.ts';
 import { portraitEl } from '../portrait.ts';
-import { DIFFICULTY_BLURB } from './play.ts';
+import { blurbColor, DIFFICULTY_BLURB } from './play.ts';
 
 /**
  * Single-player career board. The difficulty ladder is the progression spine:
@@ -45,7 +45,7 @@ export function renderRecords(): HTMLElement {
         'Highest beaten',
         s.highestDifficultyBeaten ? DIFFICULTY_LABEL[s.highestDifficultyBeaten] : '—',
         `${cleared} of ${DIFFICULTIES.length} cleared`,
-        s.highestDifficultyBeaten ? DIFFICULTY_BLURB[s.highestDifficultyBeaten].color : undefined,
+        s.highestDifficultyBeaten ? blurbColor(s.highestDifficultyBeaten) : undefined,
       ),
       bigStat('Win %', ratio(s.wins, games), `${s.wins}W – ${s.losses}L`),
       bigStat('Longest streak', String(s.longestWinStreak), `current ${s.currentWinStreak}`),

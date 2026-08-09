@@ -1,5 +1,6 @@
 import {
   DIFFICULTIES,
+  type SelectableDifficulty,
   DIFFICULTY_LABEL,
   DIFFICULTY_PRESETS,
   LIVE_EVENTS,
@@ -18,7 +19,17 @@ import { el, fmt, panel } from '../dom.ts';
 import { startMatch } from '../session.ts';
 
 /** How each level actually plays, in the player's language rather than stats. */
-export const DIFFICULTY_BLURB: Record<Difficulty, { tag: string; traits: string[]; color: string }> = {
+interface DifficultyBlurb {
+  tag: string;
+  traits: string[];
+  color: string;
+}
+
+/**
+ * Only the six you can pick. Grand Champ is deliberately absent: it is not
+ * selectable, so there is nothing to describe on a screen you choose from.
+ */
+export const DIFFICULTY_BLURB: Record<SelectableDifficulty, DifficultyBlurb> = {
   rookie: {
     tag: 'Learning the game',
     traits: ['Misses open shots often', 'Poor defensive decisions', 'Slow reactions', 'Easy to beat'],
@@ -51,7 +62,7 @@ export const DIFFICULTY_BLURB: Record<Difficulty, { tag: string; traits: string[
   },
 };
 
-let difficulty: Difficulty = 'pro';
+let difficulty: SelectableDifficulty = 'pro';
 let parkId = 'downtown';
 
 export function renderPlay(_params: RouteParams): HTMLElement {
@@ -105,7 +116,7 @@ export function renderPlay(_params: RouteParams): HTMLElement {
           el(
             'div',
             { class: 'diff-grid' },
-            ...DIFFICULTIES.map((d) => {
+            ...DIFFICULTIES.map((d: SelectableDifficulty) => {
               const info = DIFFICULTY_BLURB[d];
               const beaten = (stats.winsByDifficulty[d] ?? 0) > 0;
               const played = stats.gamesByDifficulty[d] ?? 0;
@@ -227,7 +238,7 @@ export function renderPlay(_params: RouteParams): HTMLElement {
         panel(
           'Career ladder',
           el('p', { class: 'hint', style: 'margin:0 0 12px' }, 'Beat every difficulty to complete the ladder. Your highest cleared level is your career mark.'),
-          ...DIFFICULTIES.map((d) => {
+          ...DIFFICULTIES.map((d: SelectableDifficulty) => {
             const wins = stats.winsByDifficulty[d] ?? 0;
             const games = stats.gamesByDifficulty[d] ?? 0;
             return el(
@@ -247,7 +258,7 @@ export function renderPlay(_params: RouteParams): HTMLElement {
             el('span', { class: 'faint' }, 'Highest beaten: '),
             el(
               'b',
-              { style: `color:${stats.highestDifficultyBeaten ? DIFFICULTY_BLURB[stats.highestDifficultyBeaten].color : 'var(--text-faint)'}` },
+              { style: `color:${blurbColor(stats.highestDifficultyBeaten)}` },
               stats.highestDifficultyBeaten ? DIFFICULTY_LABEL[stats.highestDifficultyBeaten] : 'None yet',
             ),
           ),
@@ -303,9 +314,20 @@ export function renderPlay(_params: RouteParams): HTMLElement {
   return root;
 }
 
+/**
+ * The tint for a difficulty, including the one that has no blurb.
+ *
+ * Grand Champ is not selectable so it has no card to describe, but the career
+ * mark can still land on it if a ranked game is ever credited to the ladder.
+ */
+export function blurbColor(d: Difficulty | null | undefined): string {
+  if (!d) return 'var(--text-faint)';
+  return (DIFFICULTY_BLURB as Partial<Record<Difficulty, DifficultyBlurb>>)[d]?.color ?? 'var(--pink)';
+}
+
 /** Higher difficulties also field a slightly better build, not just better AI. */
 function difficultyOverallBump(d: Difficulty): number {
-  return { rookie: -8, semiPro: -4, pro: 0, allStar: 3, superstar: 6, hallOfFame: 9 }[d];
+  return { rookie: -8, semiPro: -4, pro: 0, allStar: 3, superstar: 6, hallOfFame: 9, grandChamp: 12 }[d];
 }
 
 function describeDifficulty(d: Difficulty): string {

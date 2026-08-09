@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { AiController } from '../src/sim/ai.ts';
+import { AiController, DIFFICULTY_PRESETS } from '../src/sim/ai.ts';
 import { createMatch, currentContest, defaultMatchConfig, EMOTE_COOLDOWN, EMOTE_DURATION, SIM_DT, ballThroughRim, dribbleBounceIndex, dribbleTempo, stepMatch, drainEvents } from '../src/sim/match.ts';
 import { generateOpponent } from '../src/data/opponents.ts';
 import {
@@ -19,7 +19,7 @@ import { DEFAULT_TITLES, newlyEarnedTitles, streakBadge } from '../src/data/titl
 import { DRILLS, SHOOT_AROUND, drillMedal, drillReward } from '../src/data/drills.ts';
 import { DEFAULT_UNLOCKS, STORE_BY_ID, STORE_ITEMS } from '../src/data/cosmetics.ts';
 import { PARKS } from '../src/data/parks.ts';
-import { rankedOpponent, USERNAME_COOLDOWN_MS, usernameCooldownLeft, validateUsername } from '../src/ranked.ts';
+import { applyRankedResult, rankChange, rankedOpponent, USERNAME_COOLDOWN_MS, usernameCooldownLeft, validateUsername } from '../src/ranked.ts';
 import { WORLD_SIZE, worldLadder, worldPositionFor } from '../src/world.ts';
 import { DIVISIONS_PER_TIER, ONLINE_TIERS, WINS_PER_DIVISION, WINS_TO_GRAND_CHAMP, grandChampLabel, nextRank, onlineRank, onlineRankLabel } from '../src/onlinerank.ts';
 import { PACK_TITLES } from '../src/data/titlepack.ts';
@@ -34,7 +34,7 @@ import { isAcceptableMatch, rankLabel, tierForPoints, updateRank, freshRank } fr
 import { generateChallenges, seasonForTime, buildBattlePass } from '../src/seasons.ts';
 import { computeMatchReward } from '../src/economy.ts';
 import { emptyInput, emptyStats, type SimEvent } from '../src/sim/state.ts';
-import { ATTRIBUTE_KEYS, DIFFICULTIES, EMOTE_SLOTS, POSITIONS, type BuildSpec, type CareerStats, type Difficulty } from '../src/types.ts';
+import { ALL_DIFFICULTIES, ATTRIBUTE_KEYS, DIFFICULTIES, EMOTE_SLOTS, POSITIONS, type BuildSpec, type CareerStats, type Difficulty } from '../src/types.ts';
 import { shotAttribute } from '../src/shooting.ts';
 import { COURT, distanceToRim, isBeyondArc } from '../src/sim/court.ts';
 
@@ -2264,6 +2264,45 @@ test('the ladder never goes backwards and always advances', () => {
   assert.equal(onlineRank(7.9).label, 'Bronze 2');
 });
 
+test('a loss costs a win and can drop you a division', () => {
+  // Bronze 2 with three wins loses one and stays put.
+  const bronze2with3 = 8;
+  assert.equal(onlineRank(bronze2with3).label, 'Bronze 2');
+  assert.equal(onlineRank(bronze2with3).progress, 3);
+  const after = applyRankedResult(bronze2with3, false);
+  assert.equal(onlineRank(after).label, 'Bronze 2');
+  assert.equal(onlineRank(after).progress, 2);
+  assert.equal(rankChange(bronze2with3, after), 'none', 'losing a win inside a division is not a demotion');
+
+  // At the bottom of a division, a loss drops you into the top of the one below.
+  const bronze2with0 = 5;
+  const dropped = applyRankedResult(bronze2with0, false);
+  assert.equal(onlineRank(dropped).label, 'Bronze 3');
+  assert.equal(onlineRank(dropped).progress, 4, 'you land near the top of the division below');
+  assert.equal(rankChange(bronze2with0, dropped), 'demoted');
+
+  // Bronze 3 with nothing on it is the floor and you cannot fall out of it.
+  assert.equal(applyRankedResult(0, false), 0);
+  assert.equal(onlineRank(applyRankedResult(0, false)).label, 'Bronze 3');
+  assert.equal(rankChange(0, applyRankedResult(0, false)), 'none');
+
+  // A tier boundary demotes across tiers, not just divisions.
+  const silver3with0 = 15;
+  const toBronze = applyRankedResult(silver3with0, false);
+  assert.equal(onlineRank(silver3with0).label, 'Silver 3');
+  assert.equal(onlineRank(toBronze).label, 'Bronze 1');
+  assert.equal(rankChange(silver3with0, toBronze), 'demoted');
+
+  // And a win at the top of a division promotes.
+  assert.equal(rankChange(4, applyRankedResult(4, true)), 'promoted');
+  assert.equal(rankChange(3, applyRankedResult(3, true)), 'none');
+
+  // Wins and losses cancel out exactly, so a 50% record goes nowhere.
+  let wins = 40;
+  for (let i = 0; i < 20; i++) wins = applyRankedResult(applyRankedResult(wins, true), false);
+  assert.equal(wins, 40, 'win one lose one leaves you where you started');
+});
+
 test('the ranked ladder puts a harder opponent in front of you as you climb', () => {
   // The progression is the opponent. If climbing did not change who turns up,
   // the rank would be a number with nothing behind it.
@@ -2275,7 +2314,17 @@ test('the ranked ladder puts a harder opponent in front of you as you climb', ()
     assert.ok(opp.overall >= 60 && opp.overall <= 99, 'a build the game can actually make');
   }
   assert.equal(rankedOpponent(0).difficulty, 'rookie', 'Bronze is a rookie game');
-  assert.equal(rankedOpponent(105).difficulty, 'hallOfFame', 'Grand Champ is the hardest there is');
+  // Grand Champ is above Hall of Fame, and that difficulty cannot be picked
+  // from the Play menu — the only way to meet it is to earn it.
+  assert.equal(rankedOpponent(105).difficulty, 'grandChamp');
+  assert.ok(!(DIFFICULTIES as readonly string[]).includes('grandChamp'), 'it is not selectable');
+  assert.ok(ALL_DIFFICULTIES.includes('grandChamp'), 'but the simulation knows it');
+  const hof = DIFFICULTY_PRESETS.hallOfFame;
+  const gc = DIFFICULTY_PRESETS.grandChamp;
+  assert.ok(gc.reactionTime < hof.reactionTime, 'it reacts faster than Hall of Fame');
+  assert.ok(gc.releaseError < hof.releaseError, 'and misses less');
+  assert.ok(gc.contestIq > hof.contestIq && gc.shotSelection > hof.shotSelection);
+  assert.ok(gc.bitesOnFakes < hof.bitesOnFakes, 'and is harder to fool');
   // A division inside a tier still nudges it, so Bronze 1 is not Bronze 3.
   assert.ok(rankedOpponent(10).overall > rankedOpponent(0).overall);
 });

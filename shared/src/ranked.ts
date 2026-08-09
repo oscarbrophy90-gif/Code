@@ -46,6 +46,37 @@ export function formatCooldown(ms: number): string {
   return hours > 1 ? `${hours} hours` : 'less than an hour';
 }
 
+/**
+ * What a result does to your standing.
+ *
+ * A win is worth one, a loss costs one, and the floor is zero — Bronze 3 with
+ * nothing on it is the bottom and you cannot fall out of the ladder. Because the
+ * rank is derived from this number, losing at the bottom of a division drops you
+ * into the top of the one below without any special case: 5 wins is Bronze 2
+ * with nothing on it, and 4 is Bronze 3 with four of five.
+ *
+ * That is the whole rule. A ladder you can only climb is a ladder that measures
+ * how long you played rather than how well.
+ */
+export function applyRankedResult(wins: number, won: boolean): number {
+  return Math.max(0, wins + (won ? 1 : -1));
+}
+
+/**
+ * Whether a result moved you between divisions, and which way.
+ *
+ * Compared as ranks rather than as win counts, because that is what a player
+ * notices: four wins to five is a promotion and five to six is nothing at all.
+ */
+export function rankChange(before: number, after: number): 'promoted' | 'demoted' | 'none' {
+  const from = onlineRank(before);
+  const to = onlineRank(after);
+  if (from.tier.id === to.tier.id && from.division === to.division && from.grandChamp === to.grandChamp) {
+    return 'none';
+  }
+  return after > before ? 'promoted' : 'demoted';
+}
+
 export interface RankedOpponent {
   /** overall rating to build the CPU at */
   overall: number;
@@ -66,7 +97,7 @@ export function rankedOpponent(wins: number): RankedOpponent {
   const tierIndex = ONLINE_TIERS.findIndex((t) => t.id === rank.tier.id);
 
   // Bronze starts at a genuine rookie and the top of the ladder is a max build.
-  const OVERALL_BY_TIER = [62, 68, 73, 78, 83, 87, 91, 95];
+  const OVERALL_BY_TIER = [62, 68, 73, 78, 83, 87, 91, 99];
   const DIFFICULTY_BY_TIER: Difficulty[] = [
     'rookie',
     'semiPro',
@@ -75,7 +106,9 @@ export function rankedOpponent(wins: number): RankedOpponent {
     'allStar',
     'allStar',
     'superstar',
-    'hallOfFame',
+    // The top of the ladder is the one difficulty you cannot select from the
+    // Play menu, and it is harder than Hall of Fame.
+    'grandChamp',
   ];
 
   const base = OVERALL_BY_TIER[tierIndex] ?? 62;

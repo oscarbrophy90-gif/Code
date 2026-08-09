@@ -148,8 +148,19 @@ export interface CareerStats {
   freeThrowsAttempted: number;
 }
 
+/** The six you can pick in Play. The career ladder is exactly these. */
 export const DIFFICULTIES = ['rookie', 'semiPro', 'pro', 'allStar', 'superstar', 'hallOfFame'] as const;
-export type Difficulty = (typeof DIFFICULTIES)[number];
+
+/**
+ * Every difficulty the simulation can run, including the one you cannot choose.
+ *
+ * `grandChamp` sits above Hall of Fame and is reachable only by getting to the
+ * top of the ranked ladder. It is deliberately not in `DIFFICULTIES`, so it
+ * never appears in the Play menu — the only way to meet it is to earn it.
+ */
+export const ALL_DIFFICULTIES = [...DIFFICULTIES, 'grandChamp'] as const;
+export type Difficulty = (typeof ALL_DIFFICULTIES)[number];
+export type SelectableDifficulty = (typeof DIFFICULTIES)[number];
 
 export const DIFFICULTY_LABEL: Record<Difficulty, string> = {
   rookie: 'Rookie',
@@ -158,6 +169,7 @@ export const DIFFICULTY_LABEL: Record<Difficulty, string> = {
   allStar: 'All-Star',
   superstar: 'Superstar',
   hallOfFame: 'Hall of Fame',
+  grandChamp: 'Grand Champ',
 };
 
 export interface RankState {
@@ -229,9 +241,16 @@ export interface Profile {
  * own rewards.
  */
 export interface OnlineRecord {
-  /** ranked games won */
+  /**
+   * Ladder wins: what the rank is made of.
+   *
+   * This goes down as well as up — a loss costs one — so it is a standing rather
+   * than a career total. `lifetimeWins` is the number that only ever grows.
+   */
   wins: number;
   losses: number;
+  /** every ranked game ever won, which a loss never takes away */
+  lifetimeWins: number;
   /** current win streak, for the board */
   streak: number;
   /** best streak ever reached */

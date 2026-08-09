@@ -1,5 +1,5 @@
 import {
-  DIFFICULTY_LABEL,
+  DIVISIONS_PER_TIER,
   ONLINE_TIERS,
   WINS_PER_DIVISION,
   computeOverall,
@@ -28,7 +28,6 @@ import { rankPanel, ladderStrip } from '../rankbadge.ts';
 export function renderRank(): HTMLElement {
   const record = store.profile.online;
   const rank = onlineRank(record.wins);
-  const opponent = rankedOpponent(record.wins);
   const played = record.wins + record.losses > 0;
   const position = played ? worldPositionFor(record.wins, record.losses) : null;
   const games = record.wins + record.losses;
@@ -75,14 +74,18 @@ export function renderRank(): HTMLElement {
         el(
           'div',
           {},
-          el('div', { class: 'faint', style: 'font-size:11px;font-weight:800;letter-spacing:.1em' }, 'YOU WILL FACE'),
-          el('div', { class: 'nextmatch-line' }, `${opponent.overall} OVR · ${DIFFICULTY_LABEL[opponent.difficulty]}`),
+          el('div', { class: 'faint', style: 'font-size:11px;font-weight:800;letter-spacing:.1em' }, 'YOUR NEXT OPPONENT'),
+          // Deliberately not their rating or the difficulty. You find out who
+          // they are by playing them, which is the point of a ranked queue —
+          // knowing the number in advance turns every match into a decision
+          // about whether to bother.
+          el('div', { class: 'nextmatch-line' }, 'Somebody at your rank'),
           el(
             'div',
             { class: 'hint', style: 'margin:6px 0 0' },
             rank.grandChamp
-              ? 'The top of the ladder. Every opponent from here is a maximum build playing at Hall of Fame.'
-              : `Win ${rank.needed - rank.progress} more and you are ${nextLabel(record.wins)} — and they get harder.`,
+              ? 'The top of the ladder. There is nothing above this, and it plays like it.'
+              : `Win ${rank.needed - rank.progress} more and you are ${nextLabel(record.wins)}. Lose and you drop one.`,
           ),
         ),
         el(
@@ -108,16 +111,16 @@ export function renderRank(): HTMLElement {
       el(
         'div',
         { class: 'ladder-table', style: 'margin-top:14px' },
-        el('div', { class: 'ladder-row head' }, el('span', {}, 'Tier'), el('span', {}, 'Opponent'), el('span', {}, 'Difficulty')),
+        el('div', { class: 'ladder-row head' }, el('span', {}, 'Tier'), el('span', {}, 'Wins to reach'), el('span', {}, '')),
         ...ONLINE_TIERS.map((tier, i) => {
-          const wins = i === ONLINE_TIERS.length - 1 ? 105 : i * 15;
-          const opp = rankedOpponent(wins);
+          const at = i * DIVISIONS_PER_TIER * WINS_PER_DIVISION;
+          const reached = record.wins >= at;
           return el(
             'div',
             { class: `ladder-row ${tier.id === rank.tier.id ? 'on' : ''}` },
             el('span', { style: `color:${tier.color};font-weight:800` }, tier.name),
-            el('span', {}, `${opp.overall} OVR`),
-            el('span', { class: 'faint' }, DIFFICULTY_LABEL[opp.difficulty]),
+            el('span', {}, at === 0 ? 'Where you start' : String(at)),
+            el('span', { class: 'faint' }, reached ? 'reached' : ''),
           );
         }),
       ),

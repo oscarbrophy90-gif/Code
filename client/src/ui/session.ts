@@ -1,6 +1,7 @@
 import {
   BADGE_BY_ID,
-  DIFFICULTIES,
+  ALL_DIFFICULTIES,
+  rankChange,
   DIFFICULTY_LABEL,
   CURRENCY_SHORT,
   TIER_COLOR,
@@ -29,6 +30,7 @@ import { store } from '../state/store.ts';
 import { audio } from '../engine/audio.ts';
 import { dismissFullscreen, navigate, showFullscreen } from '../main.ts';
 import { createMatchScreen, type MatchResult } from './match.ts';
+import { playRankChange } from './rankchange.ts';
 import { bar, el, fmt, overlay, ratio, toast } from './dom.ts';
 import { playWalkout } from './walkout.ts';
 import { AvatarRenderer, livePreview } from './avatar.ts';
@@ -73,6 +75,7 @@ export function startMatch(opts: StartMatchOptions): void {
     difficulty: opts.difficulty,
     venue: PARK_BY_ID[opts.parkId]?.name ?? 'Hoops Elite',
     subtitle: opts.eventName ?? labelFor(opts.playlist),
+    hideDifficulty: Boolean(opts.ranked),
     identity: {
       username: store.profile.username,
       wins: store.profile.online.wins,
@@ -95,11 +98,21 @@ function launchMatch(opts: StartMatchOptions): void {
     drill: opts.drill,
     onFinish: (result) => {
       dismissFullscreen();
+      const rankBefore = opts.ranked ? store.profile.online.wins : null;
       if (opts.drill) {
         showDrillResults(result, opts.drill);
         return;
       }
       const summary = applyResult(result, opts);
+      // The rank change plays first and only when the rank actually moved. A
+      // screen you see after every game is a screen you skip after the second
+      // one, so it is kept for the moment that earned it.
+      if (summary.rankMove && summary.rankMove !== 'none' && rankBefore !== null) {
+        void playRankChange(document.body, rankBefore, store.profile.online.wins, store.profile.online.losses).then(() => {
+          showResults(result, summary, opts);
+        });
+        return;
+      }
       showResults(result, summary, opts);
     },
   });
@@ -117,6 +130,8 @@ export interface RewardSummary {
   passTierAfter: number;
   challengesCompleted: string[];
   titlesEarned: { id: string; name: string; color: string }[];
+  /** whether a ranked result moved you between divisions */
+  rankMove?: 'promoted' | 'demoted' | 'none';
 }
 
 /**
@@ -146,7 +161,11 @@ function applyResult(result: MatchResult, opts: StartMatchOptions): RewardSummar
 
   // The rank moves here and nowhere else. A forfeit still counts as a loss —
   // quitting a ranked game you are losing should not be free.
-  if (opts.ranked) store.recordRanked(result.won);
+  let rankMove: 'promoted' | 'demoted' | 'none' | undefined;
+  if (opts.ranked) {
+    const moved = store.recordRanked(result.won);
+    rankMove = rankChange(moved.before, moved.after);
+  }
 
   store.update((profile) => {
     const p = profile.players[profile.activeSlot];
@@ -165,14 +184,17 @@ function applyResult(result: MatchResult, opts: StartMatchOptions): RewardSummar
       s.currentWinStreak = 0;
     }
 
-    // Difficulty ladder. Practice runs are excluded so the record means something.
-    if (!opts.practice) {
+    // Difficulty ladder. Practice runs are excluded so the record means
+    // something, and so are ranked games: the career ladder is the six levels
+    // you choose from Play, and a ranked opponent is chosen for you.
+    if (!opts.practice && !opts.ranked) {
       const d = opts.difficulty;
       s.gamesByDifficulty[d] = (s.gamesByDifficulty[d] ?? 0) + 1;
       if (result.won) {
         s.winsByDifficulty[d] = (s.winsByDifficulty[d] ?? 0) + 1;
         const current = s.highestDifficultyBeaten;
-        if (!current || DIFFICULTIES.indexOf(d) > DIFFICULTIES.indexOf(current)) {
+        const rankOf = (x: Difficulty) => ALL_DIFFICULTIES.indexOf(x);
+        if (!current || rankOf(d) > rankOf(current)) {
           s.highestDifficultyBeaten = d;
         }
       }
@@ -253,6 +275,7 @@ function applyResult(result: MatchResult, opts: StartMatchOptions): RewardSummar
     passTierAfter: store.profile.battlePass.tier,
     challengesCompleted,
     titlesEarned: earned.map((t) => ({ id: t.id, name: t.name, color: t.color })),
+    rankMove,
   };
 }
 

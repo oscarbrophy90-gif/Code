@@ -54,6 +54,11 @@ export const DIFFICULTY_PRESETS: Record<Difficulty, AiProfile> = {
   superstar: { reactionTime: 0.14, standoff: 2.7, stealAggression: 0.28, contestIq: 0.82, shotSelection: 0.84, releaseError: 0.075, moveRate: 1.05, helpIq: 0.82, moveTier: 2, comboLength: 3, tendencyRead: 0.8, bitesOnFakes: 0.2 },
   // Elite reactions, rarely a bad decision. Plays like a real competitor.
   hallOfFame: { reactionTime: 0.095, standoff: 2.3, stealAggression: 0.34, contestIq: 0.93, shotSelection: 0.93, releaseError: 0.045, moveRate: 1.3, helpIq: 0.94, moveTier: 2, comboLength: 4, tendencyRead: 1, bitesOnFakes: 0.09 },
+  // Above Hall of Fame, and only ever met at the top of the ranked ladder.
+  // Reacts inside a human's own reaction time, almost never misses an open
+  // look, and barely ever bites on a fake. Grand Champ should feel like the
+  // ladder stopped being fair, because there is nothing above it to climb to.
+  grandChamp: { reactionTime: 0.06, standoff: 2.0, stealAggression: 0.4, contestIq: 0.99, shotSelection: 0.97, releaseError: 0.022, moveRate: 1.55, helpIq: 0.99, moveTier: 2, comboLength: 5, tendencyRead: 1, bitesOnFakes: 0.04 },
 };
 
 interface Sample {

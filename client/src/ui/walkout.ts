@@ -30,6 +30,13 @@ export interface WalkoutOptions {
    * rank comes from. Only yours — the opponent is a build, not an account.
    */
   identity?: { username: string; wins: number; losses: number };
+  /**
+   * Hide the difficulty on the title card.
+   *
+   * Ranked picks your opponent for you, and naming the setting would tell you
+   * how hard the game is before you have played a possession of it.
+   */
+  hideDifficulty?: boolean;
 }
 
 /** How long each beat of the cutscene runs, in milliseconds. */
@@ -76,7 +83,7 @@ export function playWalkout(opts: WalkoutOptions): Promise<void> {
           { class: 'walkout-sub' },
           // An online game has no CPU, so naming a difficulty there would be a
           // lie about who you are playing.
-          `${opts.subtitle} · ${DIFFICULTY_LABEL[opts.difficulty]}`,
+          opts.hideDifficulty ? opts.subtitle : `${opts.subtitle} · ${DIFFICULTY_LABEL[opts.difficulty]}`,
         ),
       ),
       body,

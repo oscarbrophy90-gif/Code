@@ -22,6 +22,7 @@ import {
   type SimPlayerConfig,
   EMOTE_SLOTS,
   type Appearance,
+  applyRankedResult,
 } from '@hoops/shared';
 
 const STORAGE_KEY = 'hoops-elite.profile.v1';
@@ -141,7 +142,7 @@ function createProfile(): Profile {
     lastSyncedAt: 0,
     username: '',
     usernameChangedAt: 0,
-    online: { wins: 0, losses: 0, streak: 0, bestStreak: 0, updatedAt: 0 },
+    online: { wins: 0, losses: 0, lifetimeWins: 0, streak: 0, bestStreak: 0, updatedAt: 0 },
   };
 }
 
@@ -179,13 +180,14 @@ class Store {
     // than version-bumped, because bumping the version throws the whole profile
     // away and nobody should lose their player to gain a rank of Bronze 3.
     if (!this.profile.online) {
-      this.profile.online = { wins: 0, losses: 0, streak: 0, bestStreak: 0, updatedAt: 0 };
+      this.profile.online = { wins: 0, losses: 0, lifetimeWins: 0, streak: 0, bestStreak: 0, updatedAt: 0 };
     }
     // Older shapes carried a server placement, which no longer exists — position
     // is worked out against the world at read time now.
     const rec = this.profile.online as unknown as Record<string, number>;
     if (typeof rec.streak !== 'number') rec.streak = 0;
     if (typeof rec.bestStreak !== 'number') rec.bestStreak = 0;
+    if (typeof rec.lifetimeWins !== 'number') rec.lifetimeWins = rec.wins ?? 0;
     if (typeof this.profile.username !== 'string') this.profile.username = '';
     if (typeof this.profile.usernameChangedAt !== 'number') this.profile.usernameChangedAt = 0;
     const season = seasonForTime(now);
@@ -267,19 +269,23 @@ class Store {
    * and none of them reach here — a rank you can get without playing a ranked
    * game would not mean anything.
    */
-  recordRanked(won: boolean): void {
+  recordRanked(won: boolean): { before: number; after: number } {
+    const before = this.profile.online.wins;
+    const after = applyRankedResult(before, won);
     this.update((p) => {
       const online = p.online;
+      online.wins = after;
       if (won) {
-        online.wins++;
         online.streak++;
         online.bestStreak = Math.max(online.bestStreak, online.streak);
+        online.lifetimeWins++;
       } else {
         online.losses++;
         online.streak = 0;
       }
       online.updatedAt = Date.now();
     });
+    return { before, after };
   }
 
   update(fn: (p: Profile) => void): void {
