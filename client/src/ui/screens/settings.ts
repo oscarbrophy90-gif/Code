@@ -8,6 +8,7 @@ import {
 } from '@hoops/shared';
 
 import { store } from '../../state/store.ts';
+import { usernameTaken } from '../../state/accounts.ts';
 import { audio } from '../../engine/audio.ts';
 import { refresh } from '../../main.ts';
 import { confirmDialog, el, panel, segmented, slider, toast } from '../dom.ts';
@@ -119,6 +120,51 @@ export function renderSettings(): HTMLElement {
           refresh();
         }),
         el('div', { class: 'hint', style: 'margin-top:10px' }, 'The simulation always runs at a fixed 120 Hz regardless of frame rate, so capping the display never changes shot timing.'),
+      ),
+
+      panel(
+        'Players on this device',
+        el(
+          'div',
+          { class: 'hint', style: 'margin:0 0 10px' },
+          'Everyone here has their own rank, their own builds and their own place on the leaderboard. Switching does not touch anybody else\'s save.',
+        ),
+        el(
+          'div',
+          { style: 'display:grid;gap:8px' },
+          ...store.accounts().map((account) =>
+            el(
+              'div',
+              { class: 'kv' },
+              el('span', { class: 'k' }, account.username || 'Unnamed'),
+              account.id === store.accountId
+                ? el('span', { class: 'v faint' }, 'playing')
+                : el(
+                    'button',
+                    {
+                      class: 'btn sm',
+                      onclick: () => {
+                        store.switchAccount(account.id);
+                        refresh();
+                      },
+                    },
+                    'Switch to',
+                  ),
+            ),
+          ),
+          el(
+            'button',
+            {
+              class: 'btn sm primary',
+              style: 'justify-self:start',
+              onclick: () => {
+                store.addAccount();
+                refresh();
+              },
+            },
+            'Add a player',
+          ),
+        ),
       ),
 
       panel(
@@ -278,6 +324,11 @@ function usernameEditor(): HTMLElement {
     const check = validateUsername(next);
     if (!check.ok) {
       message.textContent = check.reason ?? 'That name will not work';
+      message.style.color = 'var(--red)';
+      return;
+    }
+    if (usernameTaken(next, store.accountId)) {
+      message.textContent = 'Somebody else on this board already has that one';
       message.style.color = 'var(--red)';
       return;
     }

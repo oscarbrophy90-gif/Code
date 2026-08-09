@@ -1,4 +1,6 @@
-import { grandChampLabel, onlineRank, worldPositionFor } from '@hoops/shared';
+import { grandChampLabel, onlineRank } from '@hoops/shared';
+
+import { positionOf } from '../state/accounts.ts';
 
 import { audio } from '../engine/audio.ts';
 import { captureSceneKeys, el } from './dom.ts';
@@ -23,13 +25,13 @@ export function playRankChange(
   host: HTMLElement,
   before: number,
   after: number,
-  losses: number,
+  accountId: string,
 ): Promise<void> {
   return new Promise((resolve) => {
     const promoted = after > before;
     const fromRank = onlineRank(before);
     const toRank = onlineRank(after);
-    const placement = worldPositionFor(after, losses);
+    const placement = positionOf(accountId) ?? 1;
     const toLabel = toRank.grandChamp ? grandChampLabel(placement) : toRank.label;
     const fromLabel = fromRank.grandChamp ? grandChampLabel(placement) : fromRank.label;
     // A new tier is a bigger moment than a new division inside one.

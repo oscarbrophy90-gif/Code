@@ -2,14 +2,13 @@ import {
   DIVISIONS_PER_TIER,
   ONLINE_TIERS,
   WINS_PER_DIVISION,
-  WORLD_SIZE,
   grandChampLabel,
   onlineRank,
-  worldPositionFor,
   type OnlineRecord,
 } from '@hoops/shared';
 
 import { el } from './dom.ts';
+import { boardSize } from '../state/accounts.ts';
 
 /**
  * The online rank, drawn as a badge.
@@ -94,13 +93,9 @@ export function drawRankBadge(canvas: HTMLCanvasElement, wins: number, placement
  * `compact` drops the progress bar for places that only have room for the rank
  * itself.
  */
-export function rankPanel(record: OnlineRecord, compact = false): HTMLElement {
+export function rankPanel(record: OnlineRecord, placement: number | null, compact = false): HTMLElement {
   const rank = onlineRank(record.wins);
-  // Position is worked out against the world at read time rather than stored, so
-  // it cannot go stale — the ladder is fixed, so the same record always sits in
-  // the same place.
   const played = record.wins + record.losses > 0;
-  const placement = played ? worldPositionFor(record.wins, record.losses) : null;
   const label = rank.grandChamp ? grandChampLabel(placement) : rank.label;
 
   const canvas = el('canvas', {
@@ -120,7 +115,7 @@ export function rankPanel(record: OnlineRecord, compact = false): HTMLElement {
         'div',
         { class: 'rank-sub' },
         placement !== null
-          ? `${record.wins} ranked wins · ${placement} of ${WORLD_SIZE + 1} in the world`
+          ? `${record.wins} ranked wins · ${placement} of ${boardSize()} on the board`
           : `${record.wins} ranked wins`,
       ),
     );
@@ -129,7 +124,7 @@ export function rankPanel(record: OnlineRecord, compact = false): HTMLElement {
         el(
           'div',
           { class: 'rank-hint' },
-          'Grand Champ has no divisions. From here you are placed against everyone else — win more and you climb past them.',
+          'Grand Champ has no divisions. From here you are placed against everyone else on this board.',
         ),
       );
     }
@@ -139,7 +134,7 @@ export function rankPanel(record: OnlineRecord, compact = false): HTMLElement {
         'div',
         { class: 'rank-sub' },
         `${record.wins} ranked win${record.wins === 1 ? '' : 's'}`,
-        placement !== null ? ` · #${placement} in the world` : '',
+        placement !== null ? ` · #${placement} on the board` : '',
       ),
     );
     if (!compact) {

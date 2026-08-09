@@ -25,7 +25,16 @@ import {
   applyRankedResult,
 } from '@hoops/shared';
 
-const STORAGE_KEY = 'hoops-elite.profile.v1';
+import {
+  allAccounts,
+  loadRegistry,
+  newId,
+  positionOf,
+  profileKey,
+  saveRegistry,
+  type AccountSummary,
+} from './accounts.ts';
+
 export const PROFILE_VERSION = 1;
 export const MAX_SLOTS = 4;
 
@@ -153,6 +162,8 @@ function createProfile(): Profile {
  */
 class Store {
   profile: Profile;
+  /** which account is playing; the profile above is that account's save */
+  accountId = '';
   private listeners = new Set<Listener>();
   private saveTimer: number | null = null;
 
@@ -162,8 +173,10 @@ class Store {
   }
 
   private load(): Profile {
+    const registry = loadRegistry();
+    this.accountId = registry.activeId;
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = localStorage.getItem(profileKey(this.accountId));
       if (!raw) return createProfile();
       const parsed = JSON.parse(raw) as Profile;
       if (!parsed || parsed.version !== PROFILE_VERSION || !Array.isArray(parsed.players)) return createProfile();
@@ -171,6 +184,55 @@ class Store {
     } catch {
       return createProfile();
     }
+  }
+
+  /**
+   * Puts a different account in the chair.
+   *
+   * The current one is flushed first, because a switch that loses the last few
+   * seconds of the previous player's game is a switch nobody trusts twice.
+   */
+  switchAccount(id: string): void {
+    if (id === this.accountId) return;
+    this.saveNow();
+    const registry = loadRegistry();
+    if (!registry.ids.includes(id)) return;
+    registry.activeId = id;
+    saveRegistry(registry);
+    this.profile = this.load();
+    this.migrate();
+    for (const l of this.listeners) l();
+  }
+
+  /**
+   * Starts a new account and switches to it.
+   *
+   * It lands with no username and no build, so the first-run flow catches it and
+   * walks the new player through both — the same path the first person took.
+   */
+  addAccount(): string {
+    this.saveNow();
+    const registry = loadRegistry();
+    const id = newId();
+    registry.ids.push(id);
+    registry.activeId = id;
+    saveRegistry(registry);
+    this.accountId = id;
+    this.profile = createProfile();
+    this.migrate();
+    this.saveNow();
+    for (const l of this.listeners) l();
+    return id;
+  }
+
+  /** Every account on this device, for the switcher and the board. */
+  accounts(rankedOnly = false): AccountSummary[] {
+    return allAccounts(rankedOnly);
+  }
+
+  /** Where this account sits on the local board, or null before its first game. */
+  position(): number | null {
+    return positionOf(this.accountId);
   }
 
   /** Rolls the season over and refreshes the challenge board on load. */
@@ -308,7 +370,7 @@ class Store {
 
   saveNow(): void {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.profile));
+      localStorage.setItem(profileKey(this.accountId), JSON.stringify(this.profile));
     } catch {
       // Quota errors are non-fatal — the session keeps playing in memory.
     }

@@ -1,6 +1,7 @@
-import { USERNAME_MAX, USERNAME_MIN, validateUsername, worldLadder } from '@hoops/shared';
+import { USERNAME_MAX, USERNAME_MIN, validateUsername } from '@hoops/shared';
 
 import { store } from '../../state/store.ts';
+import { usernameTaken } from '../../state/accounts.ts';
 import { refresh } from '../../main.ts';
 import { el } from '../dom.ts';
 
@@ -25,9 +26,6 @@ export function renderUsername(): HTMLElement {
   const message = el('div', { class: 'username-msg' }, '');
   const submit = el('button', { class: 'btn primary lg' }, 'Continue') as HTMLButtonElement;
 
-  // Names already on the ladder are taken. Checking here rather than after
-  // submission means you never see your own name twice on the board.
-  const taken = new Set(worldLadder().map((p) => p.username.toLowerCase()));
 
   const check = (): boolean => {
     const value = input.value.trim();
@@ -38,8 +36,9 @@ export function renderUsername(): HTMLElement {
       submit.disabled = true;
       return false;
     }
-    if (taken.has(value.toLowerCase())) {
-      message.textContent = 'Somebody on the ladder already has that one';
+    // Two people on the same board with the same name is a board nobody can read.
+    if (usernameTaken(value, store.accountId)) {
+      message.textContent = 'Somebody else on this board already has that one';
       message.style.color = 'var(--red)';
       submit.disabled = true;
       return false;

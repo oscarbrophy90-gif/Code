@@ -1,7 +1,6 @@
 import {
   grandChampLabel,
   onlineRank,
-  worldPositionFor,
   DIFFICULTY_LABEL,
   SKIN_TONES,
   TITLE_BY_ID,
@@ -29,7 +28,7 @@ export interface WalkoutOptions {
    * The account behind your build: the username on the ladder and the record its
    * rank comes from. Only yours — the opponent is a build, not an account.
    */
-  identity?: { username: string; wins: number; losses: number };
+  identity?: { username: string; wins: number; losses: number; placement: number | null };
   /**
    * Hide the difficulty on the title card.
    *
@@ -129,7 +128,7 @@ function entrantCard(
   cfg: SimPlayerConfig,
   side: 'left' | 'right',
   kicker: string,
-  identity?: { username: string; wins: number; losses: number },
+  identity?: { username: string; wins: number; losses: number; placement: number | null },
 ): HTMLElement {
   const overall = computeOverall(cfg.attrs, cfg.position ?? 'SF');
   const report = scoutReport(cfg.attrs);
@@ -189,10 +188,10 @@ function entrantCard(
  * Sized off the same number the figure uses so the two always match, whatever
  * the viewport does.
  */
-function rankPillar(identity: { username: string; wins: number; losses: number }): HTMLElement {
+function rankPillar(identity: { username: string; wins: number; losses: number; placement: number | null }): HTMLElement {
   const size = window.innerWidth < 720 ? 132 : 210;
   const played = identity.wins + identity.losses > 0;
-  const placement = played ? worldPositionFor(identity.wins, identity.losses) : null;
+  const placement = identity.placement;
   const rank = onlineRank(identity.wins);
   const label = rank.grandChamp ? grandChampLabel(placement) : rank.label;
 

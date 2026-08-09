@@ -20,7 +20,7 @@ import { renderStats } from './ui/screens/stats.ts';
 import { renderRecords } from './ui/screens/records.ts';
 import { renderSettings } from './ui/screens/settings.ts';
 import { renderLeaderboard } from './ui/screens/leaderboard.ts';
-import { grandChampLabel, onlineRank, worldPositionFor } from '@hoops/shared';
+import { grandChampLabel, onlineRank } from '@hoops/shared';
 
 export type Route =
   | 'home'
@@ -209,9 +209,7 @@ function renderTopbar(): void {
         const online = store.profile.online;
         const rank = onlineRank(online.wins);
         const played = online.wins + online.losses > 0;
-        const label = rank.grandChamp
-          ? grandChampLabel(played ? worldPositionFor(online.wins, online.losses) : null)
-          : rank.label;
+        const label = rank.grandChamp ? grandChampLabel(store.position()) : rank.label;
         return el(
           'button',
           {

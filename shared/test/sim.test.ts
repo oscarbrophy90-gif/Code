@@ -20,7 +20,6 @@ import { DRILLS, SHOOT_AROUND, drillMedal, drillReward } from '../src/data/drill
 import { DEFAULT_UNLOCKS, STORE_BY_ID, STORE_ITEMS } from '../src/data/cosmetics.ts';
 import { PARKS } from '../src/data/parks.ts';
 import { applyRankedResult, rankChange, rankedOpponent, USERNAME_COOLDOWN_MS, usernameCooldownLeft, validateUsername } from '../src/ranked.ts';
-import { WORLD_SIZE, worldLadder, worldPositionFor } from '../src/world.ts';
 import { DIVISIONS_PER_TIER, ONLINE_TIERS, WINS_PER_DIVISION, WINS_TO_GRAND_CHAMP, grandChampLabel, nextRank, onlineRank, onlineRankLabel } from '../src/onlinerank.ts';
 import { PACK_TITLES } from '../src/data/titlepack.ts';
 import { PACK_TATTOOS, TATTOO_DESIGNS } from '../src/data/tattoopack.ts';
@@ -2329,53 +2328,7 @@ test('the ranked ladder puts a harder opponent in front of you as you climb', ()
   assert.ok(rankedOpponent(10).overall > rankedOpponent(0).overall);
 });
 
-test('the world ladder is a pyramid and never moves', () => {
-  const a = worldLadder();
-  const b = worldLadder();
-  assert.equal(a, b, 'the ladder is built once and reused');
-  assert.equal(a.length, WORLD_SIZE);
 
-  // Positions run 1..n with no gaps or repeats.
-  const positions = a.map((p) => p.position);
-  assert.deepEqual(positions, Array.from({ length: WORLD_SIZE }, (_, i) => i + 1));
-
-  // Sorted by wins, best first.
-  for (let i = 1; i < a.length; i++) assert.ok(a[i - 1].wins >= a[i].wins, `out of order at ${i}`);
-
-  // Usernames are unique — two identical names on a leaderboard is a bug you
-  // only notice after someone screenshots it.
-  assert.equal(new Set(a.map((p) => p.username.toLowerCase())).size, WORLD_SIZE);
-
-  // A pyramid: the top rank is rare and the bottom is crowded.
-  const grandChamps = a.filter((p) => onlineRank(p.wins).grandChamp).length;
-  assert.ok(grandChamps > 10 && grandChamps < WORLD_SIZE * 0.12, `${grandChamps} grand champs is not elite`);
-  const bronze = a.filter((p) => onlineRank(p.wins).tier.id === 'bronze').length;
-  assert.ok(bronze > grandChamps * 2, 'bronze should be the crowded end');
-
-  // Every build a player has adds up to the account's record.
-  for (const p of a) {
-    const wins = p.builds.reduce((s, x) => s + x.wins, 0);
-    assert.equal(wins, p.wins, `${p.username}'s builds do not add up to their wins`);
-    assert.ok(p.builds.length >= 1 && p.builds.length <= 3);
-    for (const b of p.builds) assert.ok(b.overall >= 60 && b.overall <= 99);
-  }
-});
-
-test('your position on the ladder moves as you win', () => {
-  const bottom = worldPositionFor(0, 0);
-  const mid = worldPositionFor(50, 10);
-  const top = worldPositionFor(9999, 0);
-  assert.equal(top, 1, 'more wins than anyone puts you first');
-  assert.ok(mid < bottom, 'winning moves you up the board');
-  assert.ok(bottom >= WORLD_SIZE, 'nobody is below a player with no wins');
-  // One more win never drops you.
-  let previous = Number.MAX_SAFE_INTEGER;
-  for (let wins = 0; wins <= 200; wins += 5) {
-    const at = worldPositionFor(wins, 0);
-    assert.ok(at <= previous, `position got worse at ${wins} wins`);
-    previous = at;
-  }
-});
 
 test('usernames are checked, and changing one is locked for thirty days', () => {
   assert.equal(validateUsername('Ace').ok, true);

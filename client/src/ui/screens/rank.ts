@@ -7,12 +7,10 @@ import {
   hashString,
   onlineRank,
   rankedOpponent,
-  tierPopulation,
-  worldPositionFor,
-  WORLD_SIZE,
 } from '@hoops/shared';
 
 import { store } from '../../state/store.ts';
+import { boardSize } from '../../state/accounts.ts';
 import { navigate } from '../../main.ts';
 import { el, panel } from '../dom.ts';
 import { startMatch } from '../session.ts';
@@ -29,7 +27,7 @@ export function renderRank(): HTMLElement {
   const record = store.profile.online;
   const rank = onlineRank(record.wins);
   const played = record.wins + record.losses > 0;
-  const position = played ? worldPositionFor(record.wins, record.losses) : null;
+  const position = store.position();
   const games = record.wins + record.losses;
 
   const root = el('div', { class: 'wrap' });
@@ -43,7 +41,7 @@ export function renderRank(): HTMLElement {
 
     panel(
       'Your rank',
-      el('div', { class: 'rank-hero' }, rankPanel(record)),
+      el('div', { class: 'rank-hero' }, rankPanel(record, position)),
       el(
         'div',
         { class: 'grid cols-4', style: 'margin-top:14px' },
@@ -56,12 +54,14 @@ export function renderRank(): HTMLElement {
         ? el(
             'p',
             { class: 'hint', style: 'margin:12px 0 0' },
-            `You are #${position} of ${WORLD_SIZE + 1} on the ladder. ${tierPopulation(rank.tier.id)} others are in ${rank.tier.name}.`,
+            boardSize() > 1
+              ? `You are #${position} of ${boardSize()} on the board.`
+              : 'You are the only player on the board so far. Anyone else who makes a username here and plays will join it.',
           )
         : el(
             'p',
             { class: 'hint', style: 'margin:12px 0 0' },
-            'Play your first ranked match to take a place on the ladder.',
+            'Play your first ranked match to take a place on the board.',
           ),
     ),
     el('div', { style: 'height:14px' }),

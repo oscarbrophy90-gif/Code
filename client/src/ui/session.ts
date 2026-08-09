@@ -80,6 +80,7 @@ export function startMatch(opts: StartMatchOptions): void {
       username: store.profile.username,
       wins: store.profile.online.wins,
       losses: store.profile.online.losses,
+      placement: store.position(),
     },
   }).then(() => {
     walkoutUp = false;
@@ -108,7 +109,7 @@ function launchMatch(opts: StartMatchOptions): void {
       // screen you see after every game is a screen you skip after the second
       // one, so it is kept for the moment that earned it.
       if (summary.rankMove && summary.rankMove !== 'none' && rankBefore !== null) {
-        void playRankChange(document.body, rankBefore, store.profile.online.wins, store.profile.online.losses).then(() => {
+        void playRankChange(document.body, rankBefore, store.profile.online.wins, store.accountId).then(() => {
           showResults(result, summary, opts);
         });
         return;

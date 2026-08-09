@@ -1,149 +1,69 @@
-import {
-  ONLINE_TIERS,
-  WINS_PER_DIVISION,
-  WORLD_SIZE,
-  grandChampLabel,
-  onlineRank,
-  worldLadder,
-  worldPositionFor,
-  type WorldBuild,
-  type WorldPlayer,
-} from '@hoops/shared';
+import { ONLINE_TIERS, WINS_PER_DIVISION, grandChampLabel, onlineRank } from '@hoops/shared';
 
 import { store } from '../../state/store.ts';
+import { allAccounts, type AccountBuild, type AccountSummary } from '../../state/accounts.ts';
 import { el, panel } from '../dom.ts';
 import { rankPanel, drawRankBadge } from '../rankbadge.ts';
-import { navigate } from '../../main.ts';
-
-/** How many rows a page shows. The whole ladder at once is unreadable. */
-const PAGE = 25;
-
-let page = 0;
-let filter: 'all' | 'around' = 'around';
+import { navigate, refresh } from '../../main.ts';
 
 /**
- * The ladder.
+ * The leaderboard.
  *
- * Everyone with a rank is on it, you included, ordered by wins. You are slotted
- * into the same ordering as everyone else rather than pinned to the bottom, so
- * the position you see is the position you hold.
+ * Real players only. Everyone on it created a username on this copy of the game
+ * and finished at least one ranked match — nothing is generated to pad it out,
+ * so a board with one name on it means one person has played.
+ *
+ * Because there is no server, "everyone" means everyone who has played *here*.
+ * A second person adds themselves by creating an account and playing, and then
+ * the two of you are ranked against each other.
  */
 export function renderLeaderboard(): HTMLElement {
-  const root = el('div', { class: 'wrap' });
+  const board = allAccounts(true);
   const record = store.profile.online;
-  const played = record.wins + record.losses > 0;
-  const myPosition = played ? worldPositionFor(record.wins, record.losses) : null;
+  const myPosition = store.position();
 
+  const root = el('div', { class: 'wrap' });
   root.append(
     el('h1', { class: 'page' }, 'Leaderboard'),
     el(
       'p',
       { class: 'page-sub' },
-      `Every ranked player, ordered by wins. ${WORLD_SIZE} CPU players hold ranks on this ladder and you are placed among them — climbing past a name means beating enough games to overtake it.`,
+      'Everyone who has made a username here and played a ranked match, ordered by wins. Nobody is invented to fill it out — if it is short, that is how many people have played.',
     ),
 
-    panel(
-      'Your place',
-      rankPanel(record),
-      !played
-        ? el(
-            'p',
-            { class: 'hint', style: 'margin:12px 0 0' },
-            'You have not played a ranked match yet, so you are not on the board. One win puts you on it.',
-          )
-        : null,
-      el(
-        'div',
-        { class: 'row', style: 'gap:8px;margin-top:12px' },
-        el('button', { class: 'btn sm primary', onclick: () => navigate('rank') }, 'Play ranked match'),
-      ),
-    ),
+    panel('Your place', rankPanel(record, myPosition)),
     el('div', { style: 'height:14px' }),
-  );
-
-  const listHost = el('div', {});
-  const draw = () => {
-    listHost.replaceChildren(renderBoard(myPosition, draw));
-  };
-
-  root.append(
-    el(
-      'div',
-      { class: 'seg mb' },
+    board.length === 0 ? emptyBoard() : renderBoard(board, myPosition),
+    el('div', { style: 'height:14px' }),
+    panel(
+      'Add another player',
       el(
-        'button',
-        {
-          class: filter === 'around' ? 'on' : '',
-          onclick: () => {
-            filter = 'around';
-            draw();
-          },
-        },
-        'Around me',
+        'p',
+        { class: 'hint', style: 'margin:0 0 12px' },
+        'Passing the game to somebody else? Give them their own account and their own rank. Everyone who plays here shares this board.',
       ),
-      el(
-        'button',
-        {
-          class: filter === 'all' ? 'on' : '',
-          onclick: () => {
-            filter = 'all';
-            page = 0;
-            draw();
-          },
-        },
-        'Top of the world',
-      ),
+      accountSwitcher(),
     ),
-    listHost,
   );
 
-  draw();
   return root;
 }
 
-function renderBoard(myPosition: number | null, redraw: () => void): HTMLElement {
-  const ladder = worldLadder();
-  const record = store.profile.online;
-
-  // "Around me" centres the page on your row, which is the only view that
-  // answers the question you actually have: who is directly above me.
-  let from = page * PAGE;
-  if (filter === 'around' && myPosition !== null) {
-    from = Math.max(0, myPosition - 1 - Math.floor(PAGE / 2));
-  } else if (filter === 'around') {
-    from = Math.max(0, ladder.length - PAGE);
-  }
-
-  const rows: HTMLElement[] = [];
-  // Your own row is spliced into the ordering rather than appended, so the
-  // numbers on screen run in an unbroken sequence.
-  const slice: { position: number; player: WorldPlayer | null }[] = [];
-  for (let i = from; i < Math.min(ladder.length, from + PAGE); i++) {
-    slice.push({ position: 0, player: ladder[i] });
-  }
-  if (myPosition !== null) {
-    const at = myPosition - 1 - from;
-    if (at >= 0 && at <= slice.length) slice.splice(at, 0, { position: myPosition, player: null });
-  }
-
-  let running = from + 1;
-  for (const entry of slice) {
-    if (entry.player === null) {
-      rows.push(row(myPosition ?? running, store.profile.username || 'You', record.wins, record.losses, record.streak, true, null));
-      running++;
-      continue;
-    }
-    const p = entry.player;
-    // A world player's own position shifts down by one once you are above them.
-    const shown = myPosition !== null && myPosition <= p.position ? p.position + 1 : p.position;
-    rows.push(row(shown, p.username, p.wins, p.losses, 0, false, p));
-    running++;
-  }
-
-  const totalPages = Math.ceil(ladder.length / PAGE);
-
+function emptyBoard(): HTMLElement {
   return panel(
-    filter === 'around' ? 'Around you' : `Page ${page + 1} of ${totalPages}`,
+    'Nobody has played yet',
+    el(
+      'p',
+      { class: 'hint', style: 'margin:0 0 12px' },
+      'The board fills up as people play ranked matches. One game puts you on it.',
+    ),
+    el('button', { class: 'btn sm primary', onclick: () => navigate('rank') }, 'Play a ranked match'),
+  );
+}
+
+function renderBoard(board: AccountSummary[], myPosition: number | null): HTMLElement {
+  return panel(
+    board.length === 1 ? '1 player' : `${board.length} players`,
     el(
       'div',
       { class: 'lb-head' },
@@ -153,90 +73,94 @@ function renderBoard(myPosition: number | null, redraw: () => void): HTMLElement
       el('span', { style: 'text-align:right' }, 'Wins'),
       el('span', { style: 'text-align:right' }, 'Losses'),
     ),
-    ...rows,
-    filter === 'all'
-      ? el(
-          'div',
-          { class: 'row', style: 'gap:8px;margin-top:12px;justify-content:center' },
-          el(
-            'button',
-            {
-              class: 'btn sm',
-              disabled: page === 0,
-              onclick: () => {
-                page = Math.max(0, page - 1);
-                redraw();
-              },
-            },
-            'Previous',
-          ),
-          el(
-            'button',
-            {
-              class: 'btn sm',
-              disabled: page >= totalPages - 1,
-              onclick: () => {
-                page = Math.min(totalPages - 1, page + 1);
-                redraw();
-              },
-            },
-            'Next',
-          ),
-        )
-      : null,
+    ...board.map((account, i) => row(account, i + 1, i + 1 === myPosition)),
     el(
       'p',
       { class: 'hint', style: 'margin:12px 0 0' },
-      `${WINS_PER_DIVISION} wins clears a division. ${ONLINE_TIERS.map((t) => t.name).join(' → ')}.`,
+      `${WINS_PER_DIVISION} wins clears a division, and a loss costs one. ${ONLINE_TIERS.map((t) => t.name).join(' → ')}.`,
     ),
   );
 }
 
-function row(
-  position: number,
-  username: string,
-  wins: number,
-  losses: number,
-  streak: number,
-  isMe: boolean,
-  player: WorldPlayer | null,
-): HTMLElement {
-  const rank = onlineRank(wins);
+function row(account: AccountSummary, position: number, isMe: boolean): HTMLElement {
+  const rank = onlineRank(account.wins);
   const label = rank.grandChamp ? grandChampLabel(position) : rank.label;
-
-  const name = el(
-    player ? 'button' : 'span',
-    player
-      ? { class: 'lb-name lb-link', onclick: () => showPlayer(player, position) }
-      : { class: 'lb-name' },
-    username,
-    isMe ? el('span', { class: 'lb-you' }, 'you') : null,
-    streak >= 3 ? el('span', { class: 'lb-streak' }, `${streak} in a row`) : null,
-  );
 
   return el(
     'div',
     { class: `lb-row ${isMe ? 'me' : ''}` },
     el('span', { class: 'lb-pos' }, String(position)),
-    name,
+    el(
+      'button',
+      { class: 'lb-name lb-link', onclick: () => showAccount(account, position) },
+      account.username,
+      isMe ? el('span', { class: 'lb-you' }, 'you') : null,
+      account.streak >= 3 ? el('span', { class: 'lb-streak' }, `${account.streak} in a row`) : null,
+    ),
     el('span', { class: 'lb-rank', style: `color:${rank.tier.color}` }, label),
-    el('span', { class: 'lb-num' }, String(wins)),
-    el('span', { class: 'lb-num faint' }, String(losses)),
+    el('span', { class: 'lb-num' }, String(account.wins)),
+    el('span', { class: 'lb-num faint' }, String(account.losses)),
+  );
+}
+
+/** Switching between the people who play on this copy. */
+function accountSwitcher(): HTMLElement {
+  const all = allAccounts();
+  return el(
+    'div',
+    { style: 'display:grid;gap:8px' },
+    ...all.map((account) =>
+      el(
+        'div',
+        { class: 'kv' },
+        el(
+          'span',
+          { class: 'k' },
+          account.username,
+          account.id === store.accountId ? el('span', { class: 'lb-you' }, 'playing') : null,
+        ),
+        account.id === store.accountId
+          ? el('span', { class: 'v faint' }, 'current')
+          : el(
+              'button',
+              {
+                class: 'btn sm',
+                onclick: () => {
+                  store.switchAccount(account.id);
+                  refresh();
+                },
+              },
+              'Switch to',
+            ),
+      ),
+    ),
+    el(
+      'button',
+      {
+        class: 'btn sm primary',
+        style: 'justify-self:start;margin-top:4px',
+        onclick: () => {
+          store.addAccount();
+          refresh();
+        },
+      },
+      'New player',
+    ),
   );
 }
 
 /**
- * One player's card: their rank, and every build they have played.
+ * One player's card: their rank and every build they have played.
  *
- * The per-build records add up to the account total, so opening this never
- * contradicts the row that was clicked to get here.
+ * These are real career numbers off that account's saves, so the per-build lines
+ * are the same ones the owner sees on their own Records screen.
  */
-function showPlayer(player: WorldPlayer, position: number): void {
-  const rank = onlineRank(player.wins);
+function showAccount(account: AccountSummary, position: number): void {
+  const rank = onlineRank(account.wins);
   const label = rank.grandChamp ? grandChampLabel(position) : rank.label;
 
   const badge = el('canvas', { class: 'rank-badge', style: 'width:72px;height:80px' }) as HTMLCanvasElement;
-  requestAnimationFrame(() => drawRankBadge(badge, player.wins, position));
+  requestAnimationFrame(() => drawRankBadge(badge, account.wins, position));
 
   const overlay = el(
     'div',
@@ -251,16 +175,18 @@ function showPlayer(player: WorldPlayer, position: number): void {
         el(
           'div',
           {},
-          el('div', { class: 'player-name' }, player.username),
+          el('div', { class: 'player-name' }, account.username),
           el('div', { class: 'player-rank', style: `color:${rank.tier.color}` }, label),
           el(
             'div',
             { class: 'player-line' },
-            `#${position} in the world · ${player.wins}W ${player.losses}L · ${player.builds.length} build${player.builds.length === 1 ? '' : 's'}`,
+            `#${position} on the board · ${account.wins}W ${account.losses}L · ${account.lifetimeWins} ranked wins all time · ${account.builds.length} build${account.builds.length === 1 ? '' : 's'}`,
           ),
         ),
       ),
-      el('div', { class: 'player-builds' }, ...player.builds.map(buildCard)),
+      account.builds.length > 0
+        ? el('div', { class: 'player-builds' }, ...account.builds.map(buildCard))
+        : el('p', { class: 'hint', style: 'margin:0 0 16px' }, 'No builds yet.'),
       el('button', { class: 'btn', onclick: () => overlay.remove() }, 'Close'),
     ),
   );
@@ -270,10 +196,11 @@ function showPlayer(player: WorldPlayer, position: number): void {
   document.body.appendChild(overlay);
 }
 
-function buildCard(build: WorldBuild): HTMLElement {
+function buildCard(build: AccountBuild): HTMLElement {
   const per = (n: number) => (build.games > 0 ? (n / build.games).toFixed(1) : '0.0');
   const feet = Math.floor(build.heightIn / 12);
   const inches = build.heightIn % 12;
+  const green = build.attempts > 0 ? Math.round((build.greens / build.attempts) * 100) : 0;
 
   return el(
     'div',
@@ -297,7 +224,7 @@ function buildCard(build: WorldBuild): HTMLElement {
       miniStat('APG', per(build.assists)),
       miniStat('SPG', per(build.steals)),
       miniStat('BPG', per(build.blocks)),
-      miniStat('Green', `${Math.round(build.greenRate * 100)}%`),
+      miniStat('Green', `${green}%`),
       miniStat('Wins', String(build.wins)),
       miniStat('Streak', String(build.bestStreak)),
     ),

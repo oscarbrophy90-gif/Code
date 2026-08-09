@@ -90,7 +90,7 @@ export function renderAccessories(): HTMLElement {
         ),
         // The rank sits beside the player, because it is part of who you are on
         // the walkout rather than a statistic filed away on another screen.
-        rankPanel(store.profile.online),
+        rankPanel(store.profile.online, store.position()),
       ),
     ),
     el('div', { style: 'height:14px' }),

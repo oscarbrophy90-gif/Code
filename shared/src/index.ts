@@ -6,7 +6,6 @@ export * from './shooting.ts';
 export * from './rng.ts';
 export * from './mmr.ts';
 export * from './onlinerank.ts';
-export * from './world.ts';
 export * from './ranked.ts';
 export * from './economy.ts';
 export * from './shop.ts';
