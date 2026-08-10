@@ -98,14 +98,15 @@ const BUILD_NAMES = [
  * and the win counts are fitted to it rather than the other way round.
  */
 const TIER_POPULATION: { tier: string; count: number }[] = [
-  { tier: 'grandchamp', count: 38 },
-  { tier: 'champion', count: 44 },
-  { tier: 'sapphire', count: 52 },
-  { tier: 'emerald', count: 62 },
-  { tier: 'platinum', count: 74 },
+  { tier: 'grandchamp', count: 32 },
+  { tier: 'champion', count: 38 },
+  { tier: 'diamond', count: 46 },
+  { tier: 'sapphire', count: 54 },
+  { tier: 'emerald', count: 64 },
+  { tier: 'platinum', count: 76 },
   { tier: 'gold', count: 88 },
-  { tier: 'silver', count: 110 },
-  { tier: 'bronze', count: 132 },
+  { tier: 'silver', count: 106 },
+  { tier: 'bronze', count: 96 },
 ];
 
 /** Wins that put you at the bottom of each tier. */

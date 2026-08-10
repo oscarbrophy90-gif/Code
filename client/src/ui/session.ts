@@ -28,7 +28,7 @@ import {
 
 import { store } from '../state/store.ts';
 import { audio } from '../engine/audio.ts';
-import { dismissFullscreen, navigate, showFullscreen } from '../main.ts';
+import { dismissFullscreen, navigate, refresh, showFullscreen } from '../main.ts';
 import { createMatchScreen, type MatchResult } from './match.ts';
 import { playRankChange } from './rankchange.ts';
 import { bar, el, fmt, overlay, ratio, toast } from './dom.ts';
@@ -82,6 +82,8 @@ export function startMatch(opts: StartMatchOptions): void {
       losses: store.profile.online.losses,
       placement: store.position(),
     },
+    nameEffectId: store.player.loadout.nameEffectId,
+    bannerId: store.player.loadout.bannerId,
   }).then(() => {
     walkoutUp = false;
     launchMatch(opts);
@@ -102,9 +104,15 @@ function launchMatch(opts: StartMatchOptions): void {
       const rankBefore = opts.ranked ? store.profile.online.wins : null;
       if (opts.drill) {
         showDrillResults(result, opts.drill);
+        refresh();
         return;
       }
       const summary = applyResult(result, opts);
+      // The screen behind the match was drawn before it was played, and
+      // everything the game just changed lives on it — coins, XP, your ranked
+      // record. Redrawing it here is what makes a win actually show up; without
+      // it you come back to the same rank and the same numbers you left.
+      refresh();
       // The rank change plays first and only when the rank actually moved. A
       // screen you see after every game is a screen you skip after the second
       // one, so it is kept for the moment that earned it.

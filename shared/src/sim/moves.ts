@@ -2,6 +2,7 @@ import type { AttributeKey } from '../types.ts';
 import type { StoreItem } from '../economy.ts';
 import { GENERATED_DUNKS } from '../data/catalogue.ts';
 import { PACK_DUNKS } from '../data/dunkpack.ts';
+import { RANK_DUNKS } from '../data/rankpack.ts';
 
 export type DribbleMoveId =
   | 'crossover'
@@ -86,6 +87,8 @@ export interface DunkPackageDef {
    * cheap common stays a common.
    */
   rarity?: StoreItem['rarity'];
+  /** the rank that pays this package out, when it is a season reward */
+  rankReward?: string;
 }
 
 const CORE_DUNKS: DunkPackageDef[] = [
@@ -96,8 +99,8 @@ const CORE_DUNKS: DunkPackageDef[] = [
   { id: 'reverse-flush', name: 'Reverse Flush', blurb: 'Baseline reverses and under-the-rim spins.', requires: 74, requiresVertical: 68, contactCapable: false, price: 8500, duration: 0.7 },
 ];
 
-/** The five originals, the generated rest, and the pack. */
-export const DUNK_PACKAGES: DunkPackageDef[] = [...CORE_DUNKS, ...GENERATED_DUNKS, ...PACK_DUNKS];
+/** The five originals, the generated rest, the pack, and the ranked rewards. */
+export const DUNK_PACKAGES: DunkPackageDef[] = [...CORE_DUNKS, ...GENERATED_DUNKS, ...PACK_DUNKS, ...RANK_DUNKS];
 
 export const DUNK_PACKAGE_BY_ID: Record<string, DunkPackageDef> = Object.fromEntries(
   DUNK_PACKAGES.map((d) => [d.id, d]),

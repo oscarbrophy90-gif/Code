@@ -1,44 +1,106 @@
 import { hashString, Rng } from './rng.ts';
 import type { ChallengeState } from './types.ts';
 
-export const SEASON_LENGTH_WEEKS = 8;
-export const SEASON_LENGTH_MS = SEASON_LENGTH_WEEKS * 7 * 24 * 60 * 60 * 1000;
+/**
+ * How long a season runs.
+ *
+ * Twenty days. Short enough that a rank reset is an event you take part in
+ * rather than something that happens to you twice a year, and long enough to
+ * climb the whole ladder if you are good enough to.
+ */
+export const SEASON_LENGTH_DAYS = 20;
+export const SEASON_LENGTH_MS = SEASON_LENGTH_DAYS * 24 * 60 * 60 * 1000;
 /** First season tipped off at this instant; every season is measured from it. */
 export const SEASON_EPOCH = Date.UTC(2026, 0, 5, 0, 0, 0);
 
 export interface SeasonDef {
   index: number;
   id: string;
+  /** "Season 7: Neon Circuit" */
   name: string;
+  /** just the title half — "Neon Circuit" */
+  title: string;
   theme: string;
   startsAt: number;
   endsAt: number;
   accent: string;
   accentAlt: string;
+  /**
+   * Which cover art the season wears, 0-5. Drawn procedurally by the client
+   * from this plus the two accents, so every season looks like its own thing
+   * without shipping a single image.
+   */
+  cover: number;
 }
 
-const SEASON_NAMES: [string, string, string, string][] = [
-  ['Concrete Rise', 'Cracked asphalt, chain nets, city lights.', '#ff7a3d', '#ffd23d'],
-  ['Neon Circuit', 'Night courts wired with reactive lighting.', '#3dd6ff', '#a03dff'],
-  ['Salt & Sand', 'Beach runs, sun glare, barefoot handles.', '#ffd98a', '#3dbfa0'],
-  ['Skyline', 'Rooftop hoops above the traffic.', '#8ab4ff', '#ff5c8a'],
-  ['Ironworks', 'Old gym, cold air, heavy iron.', '#c0c6d0', '#e05b3d'],
-  ['Midnight Green', 'The season of the perfect release.', '#3ef07a', '#0f6b3a'],
+/**
+ * Season names are generated rather than listed.
+ *
+ * A fixed list runs out, and a season that reuses last year's name is a season
+ * nobody believes is new. Two halves and a seeded pick gives a few thousand
+ * combinations, and seeding off the season index means everybody on every copy
+ * of the game is in the same season with the same name.
+ */
+const SEASON_FIRST = [
+  'Concrete', 'Neon', 'Salt', 'Skyline', 'Iron', 'Midnight', 'Chrome', 'Ember',
+  'Static', 'Glass', 'Cobalt', 'Rust', 'Velvet', 'Frost', 'Amber', 'Crimson',
+  'Shadow', 'Solar', 'Marble', 'Onyx', 'Copper', 'Violet', 'Storm', 'Ash',
 ];
+
+const SEASON_SECOND = [
+  'Rise', 'Circuit', 'Coast', 'Reign', 'Works', 'Green', 'Hour', 'Run',
+  'Signal', 'House', 'Court', 'Season', 'Line', 'Break', 'Light', 'Cut',
+  'District', 'Heights', 'Nights', 'Standard',
+];
+
+const SEASON_THEMES = [
+  'Cracked asphalt, chain nets, city lights.',
+  'Night courts wired with reactive lighting.',
+  'Sun glare, salt air, barefoot handles.',
+  'Rooftop hoops above the traffic.',
+  'Old gym, cold air, heavy iron.',
+  'The season of the perfect release.',
+  'Nobody warms up. Everybody runs it back.',
+  'Twenty days to prove where you belong.',
+];
+
+const SEASON_ACCENTS: [string, string][] = [
+  ['#ff7a3d', '#ffd23d'],
+  ['#3dd6ff', '#a03dff'],
+  ['#ffd98a', '#3dbfa0'],
+  ['#8ab4ff', '#ff5c8a'],
+  ['#c0c6d0', '#e05b3d'],
+  ['#3ef07a', '#0f6b3a'],
+  ['#ff5c8a', '#ffb347'],
+  ['#8ff2ff', '#5b8cff'],
+];
+
+/** How many distinct cover designs the client knows how to draw. */
+export const SEASON_COVERS = 6;
 
 export function seasonForTime(time: number): SeasonDef {
   const index = Math.max(0, Math.floor((time - SEASON_EPOCH) / SEASON_LENGTH_MS));
-  const [name, theme, accent, accentAlt] = SEASON_NAMES[index % SEASON_NAMES.length];
+  const rng = new Rng(hashString(`hoops-season-${index}`));
+  // Drawn in a fixed order so the same index always builds the same season.
+  const first = SEASON_FIRST[rng.int(0, SEASON_FIRST.length)];
+  const second = SEASON_SECOND[rng.int(0, SEASON_SECOND.length)];
+  const theme = SEASON_THEMES[rng.int(0, SEASON_THEMES.length)];
+  const [accent, accentAlt] = SEASON_ACCENTS[rng.int(0, SEASON_ACCENTS.length)];
+  const cover = rng.int(0, SEASON_COVERS);
+
+  const title = `${first} ${second}`;
   const startsAt = SEASON_EPOCH + index * SEASON_LENGTH_MS;
   return {
     index,
     id: `S${index + 1}`,
-    name: `Season ${index + 1}: ${name}`,
+    name: `Season ${index + 1}: ${title}`,
+    title,
     theme,
     startsAt,
     endsAt: startsAt + SEASON_LENGTH_MS,
     accent,
     accentAlt,
+    cover,
   };
 }
 
@@ -79,7 +141,7 @@ export function buildBattlePass(season: SeasonDef): PassReward[] {
     const milestone = tier % 10 === 0;
     rewards.push(
       milestone
-        ? { tier, track: 'free', kind: 'cosmetic', name: `${season.name.split(': ')[1]} Jersey ${tier / 10}`, itemId: `bp-${season.id}-free-jersey-${tier}` }
+        ? { tier, track: 'free', kind: 'cosmetic', name: `${season.title} Jersey ${tier / 10}`, itemId: `bp-${season.id}-free-jersey-${tier}` }
         : tier % 5 === 0
           ? { tier, track: 'free', kind: 'currency', name: `${1500 + tier * 25} Coins`, amount: 1500 + tier * 25 }
           : { tier, track: 'free', kind: 'currency', name: `${400 + tier * 15} Coins`, amount: 400 + tier * 15 },
@@ -89,11 +151,11 @@ export function buildBattlePass(season: SeasonDef): PassReward[] {
       tier % 10 === 0 ? 'court' : tier % 7 === 0 ? 'animation' : tier % 4 === 0 ? 'cosmetic' : rng.chance(0.3) ? 'boost' : 'currency';
     const premiumName =
       premiumKind === 'court'
-        ? `${season.name.split(': ')[1]} Court ${tier / 10}`
+        ? `${season.title} Court ${tier / 10}`
         : premiumKind === 'animation'
           ? `Signature Celebration ${Math.ceil(tier / 7)}`
           : premiumKind === 'cosmetic'
-            ? `${season.name.split(': ')[1]} Drop ${Math.ceil(tier / 4)}`
+            ? `${season.title} Drop ${Math.ceil(tier / 4)}`
             : premiumKind === 'boost'
               ? 'Double XP (1 hour)'
               : `${900 + tier * 30} Coins`;

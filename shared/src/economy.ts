@@ -118,7 +118,13 @@ export type StoreCategory =
   | 'jumpshot'
   | 'dunkPackage'
   | 'court'
-  | 'title';
+  | 'title'
+  // Three kinds that only the ranked path pays out. An aura is drawn around
+  // you on the floor, a name effect changes how your username renders wherever
+  // it appears, and a banner hangs behind you on the walkout.
+  | 'aura'
+  | 'nameEffect'
+  | 'banner';
 
 export interface StoreItem {
   id: string;

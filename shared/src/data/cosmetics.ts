@@ -9,11 +9,11 @@ import {
   GENERATED_THREE_CELEBRATIONS,
 } from './catalogue.ts';
 import { PACK_EMOTES } from './emotepack.ts';
-import { TITLES } from './titles.ts';
-import { PACK_TITLES } from './titlepack.ts';
+import { ALL_TITLES } from './titles.ts';
 import { PACK_TATTOOS } from './tattoopack.ts';
 import { JUMPSHOTS } from '../shooting.ts';
 import type { StoreItem } from '../economy.ts';
+import { RANK_ITEMS } from './rankpack.ts';
 
 const jerseys: StoreItem[] = [
   { id: 'jersey-starter', name: 'Blank Practice Tank', category: 'jersey', price: 0, rarity: 'common', colors: ['#e8eef5', '#8a93a6'], description: 'The one everybody starts in.' },
@@ -156,6 +156,9 @@ const jumpshotItems: StoreItem[] = JUMPSHOTS.map((j) => ({
   price: j.price,
   rarity: j.price === 0 ? ('common' as const) : j.price > 12000 ? ('epic' as const) : ('rare' as const),
   colors: ['#3ef07a', '#0f6b3a'] as [string, string],
+  // A ranked shot is free and ungated on price alone, which would put it in
+  // everybody's starting loadout. The gate is what keeps it earned.
+  requirement: j.rankReward ? `Reach ${j.rankReward} and finish the season` : undefined,
   description: j.blurb,
 }));
 
@@ -177,7 +180,8 @@ const dunkItems: StoreItem[] = DUNK_PACKAGES.map((d) => ({
           : d.price > 8000
             ? ('epic' as const)
             : ('rare' as const)),
-  rotationOnly: d.mythic,
+  rotationOnly: d.mythic && !d.rankReward,
+  requirement: d.rankReward ? `Reach ${d.rankReward} and finish the season` : undefined,
   colors: (d.mythic ? ['#05060a', '#ff4d8d'] : ['#ff7a3d', '#ffd23d']) as [string, string],
   description: `${d.blurb} Requires ${d.requires} Dunk / ${d.requiresVertical} Vertical.`,
 }));
@@ -197,7 +201,7 @@ const animations: StoreItem[] = [
 
 // Every title is a store item so the locker can list them all — the two
 // starters are free and ungated, so they land in DEFAULT_UNLOCKS.
-const titleItems: StoreItem[] = [...TITLES, ...PACK_TITLES].map((t) => ({
+const titleItems: StoreItem[] = ALL_TITLES.map((t) => ({
   id: t.id,
   name: t.name,
   category: 'title' as const,
@@ -234,6 +238,7 @@ export const STORE_ITEMS: StoreItem[] = [
   ...jumpshotItems,
   ...dunkItems,
   ...animations,
+  ...RANK_ITEMS,
 ];
 
 export const STORE_BY_ID: Record<string, StoreItem> = Object.fromEntries(STORE_ITEMS.map((i) => [i.id, i]));

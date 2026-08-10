@@ -7,6 +7,8 @@ import {
   hashString,
   onlineRank,
   rankedOpponent,
+  seasonForTime,
+  seasonTimeRemaining,
   tierPopulation,
 } from '@hoops/shared';
 
@@ -30,6 +32,8 @@ export function renderRank(): HTMLElement {
   const played = record.wins + record.losses > 0;
   const position = store.position();
   const games = record.wins + record.losses;
+  const season = seasonForTime(Date.now());
+  const left = seasonTimeRemaining(Date.now());
 
   const root = el('div', { class: 'wrap' });
   root.append(
@@ -42,7 +46,18 @@ export function renderRank(): HTMLElement {
 
     panel(
       'Your rank',
-      el('div', { class: 'rank-hero' }, rankPanel(record, position)),
+      el(
+        'div',
+        { class: 'rank-hero' },
+        rankPanel(record, position),
+        // Next to the rank, because that is where the question "what do I get
+        // for this?" gets asked.
+        el(
+          'button',
+          { class: 'btn sm primary rank-path-btn', onclick: () => navigate('rankpath') },
+          'View path',
+        ),
+      ),
       el(
         'div',
         { class: 'grid cols-4', style: 'margin-top:14px' },
@@ -50,6 +65,11 @@ export function renderRank(): HTMLElement {
         stat('Losses', String(record.losses)),
         stat('Win rate', games > 0 ? `${Math.round((record.wins / games) * 100)}%` : '—'),
         stat('Best streak', String(record.bestStreak)),
+      ),
+      el(
+        'p',
+        { class: 'hint', style: 'margin:12px 0 0' },
+        `${season.name} ends in ${left.days}d ${left.hours}h. The ladder resets then and every rank you reached pays out.`,
       ),
       position !== null
         ? el(

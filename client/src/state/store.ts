@@ -23,6 +23,10 @@ import {
   EMOTE_SLOTS,
   type Appearance,
   applyRankedResult,
+  seasonPayout,
+  SEASON_EPOCH,
+  SEASON_LENGTH_MS,
+  type OnlineRecord,
 } from '@hoops/shared';
 
 import {
@@ -120,6 +124,9 @@ export function createPlayer(slot: number, name: string, build: BuildSpec): MyPl
       emoteSlots: ['emote-wave', 'emote-clap', 'emote-shrug', 'emote-point', null, null],
       courtId: 'court-standard',
       titleId: 'title-rookie',
+      auraId: null,
+      nameEffectId: null,
+      bannerId: null,
       shotMeterStyle: 'arcBar',
     },
     attributes: startingAttributes(build),
@@ -147,13 +154,31 @@ function createProfile(): Profile {
     activeSlot: 0,
     seasonId: season.id,
     battlePass: { seasonId: season.id, tier: 1, tierXp: 0, premium: false, claimed: [] },
+    seasonReport: null,
     challenges: syncChallengeStates(generateChallenges(now), []),
     settings: defaultSettings(),
     lastSyncedAt: 0,
     username: '',
     usernameChangedAt: 0,
-    online: { wins: 0, losses: 0, lifetimeWins: 0, streak: 0, bestStreak: 0, updatedAt: 0 },
+    online: freshOnlineRecord(),
   };
+}
+
+/**
+ * The display name of a season from its id alone.
+ *
+ * The report names the season that just ended, which by then is no longer the
+ * current one — so it is rebuilt from the id rather than read off the clock.
+ */
+function seasonNameFor(id: string): string {
+  const index = Number.parseInt(id.replace('S', ''), 10);
+  if (!Number.isFinite(index) || index < 1) return 'Last season';
+  return seasonForTime(SEASON_EPOCH + (index - 1) * SEASON_LENGTH_MS).name;
+}
+
+/** A standing with nothing on it — a new account, or a new season. */
+function freshOnlineRecord(): OnlineRecord {
+  return { wins: 0, losses: 0, lifetimeWins: 0, streak: 0, bestStreak: 0, updatedAt: 0, peakWins: 0 };
 }
 
 /**
@@ -236,6 +261,65 @@ class Store {
     return boardPositionOf(this.accountId);
   }
 
+  /**
+   * Ends a season and starts the next one.
+   *
+   * Three things happen together and they have to happen together: the ladder
+   * is paid out, the ladder is wiped, and the battle pass starts again. Paying
+   * without wiping would make every season's rewards cumulative for standing
+   * still; wiping without paying would make a season of climbing worth nothing.
+   *
+   * The payout settles against the *peak* rank held during the season, and it
+   * is written to a report rather than announced, because a season can end
+   * while the game is closed — the next launch reads the note.
+   */
+  private rollSeason(season: ReturnType<typeof seasonForTime>): void {
+    const previous = this.profile.seasonId;
+    const online = this.profile.online;
+    const peak = Math.max(online.peakWins ?? 0, online.wins);
+    const player = this.profile.players[this.profile.activeSlot];
+
+    const payout = player ? seasonPayout(peak, player.unlocked) : null;
+    if (payout && player) {
+      player.currency += payout.coins;
+      const granted = [...payout.items, ...payout.titles];
+      for (const id of granted) if (!player.unlocked.includes(id)) player.unlocked.push(id);
+      this.profile.seasonReport = {
+        seasonId: previous,
+        seasonName: seasonNameFor(previous),
+        peakWins: peak,
+        tierName: payout.tierName,
+        coins: payout.coins,
+        items: granted,
+        resetFrom: online.wins,
+      };
+    }
+
+    // The ladder is wiped whether or not there was anything to pay out. Lifetime
+    // wins and the best streak survive: those are a record of what you have
+    // done, and a season reset is not supposed to erase your history, only your
+    // standing.
+    this.profile.online = {
+      ...freshOnlineRecord(),
+      lifetimeWins: online.lifetimeWins,
+      bestStreak: online.bestStreak,
+    };
+    invalidateBoard();
+
+    this.profile.seasonId = season.id;
+    // Career statistics and the difficulty ladder carry over — a cleared
+    // difficulty stays cleared.
+    this.profile.battlePass = { seasonId: season.id, tier: 1, tierXp: 0, premium: false, claimed: [] };
+  }
+
+  /** Clears the season report once the player has been shown it. */
+  clearSeasonReport(): void {
+    if (!this.profile.seasonReport) return;
+    this.update((p) => {
+      p.seasonReport = null;
+    });
+  }
+
   /** Rolls the season over and refreshes the challenge board on load. */
   private migrate(): void {
     const now = Date.now();
@@ -243,7 +327,7 @@ class Store {
     // than version-bumped, because bumping the version throws the whole profile
     // away and nobody should lose their player to gain a rank of Bronze 3.
     if (!this.profile.online) {
-      this.profile.online = { wins: 0, losses: 0, lifetimeWins: 0, streak: 0, bestStreak: 0, updatedAt: 0 };
+      this.profile.online = freshOnlineRecord();
     }
     // Older shapes carried a server placement, which no longer exists — position
     // is worked out against the world at read time now.
@@ -253,12 +337,12 @@ class Store {
     if (typeof rec.lifetimeWins !== 'number') rec.lifetimeWins = rec.wins ?? 0;
     if (typeof this.profile.username !== 'string') this.profile.username = '';
     if (typeof this.profile.usernameChangedAt !== 'number') this.profile.usernameChangedAt = 0;
+    if (typeof rec.peakWins !== 'number') rec.peakWins = rec.wins ?? 0;
+    if (this.profile.seasonReport === undefined) this.profile.seasonReport = null;
+
     const season = seasonForTime(now);
     if (this.profile.seasonId !== season.id) {
-      this.profile.seasonId = season.id;
-      // Only the battle pass resets. Career statistics and the difficulty
-      // ladder carry over — a cleared difficulty stays cleared.
-      this.profile.battlePass = { seasonId: season.id, tier: 1, tierXp: 0, premium: false, claimed: [] };
+      this.rollSeason(season);
     }
     // Older saves can hold heights that the position no longer allows, so
     // every build is pulled back inside its legal band on load.
@@ -347,6 +431,8 @@ class Store {
         online.streak = 0;
       }
       online.updatedAt = Date.now();
+      // The high-water mark for the season, which is what the payout reads.
+      online.peakWins = Math.max(online.peakWins ?? 0, after);
     });
     // Written through rather than left to the debounce. The board reads saved
     // accounts, and the rank-change animation asks for the new placement in the
@@ -494,6 +580,7 @@ export function appearanceFor(player: MyPlayer): Appearance {
     emoteSlots: [...(l.emoteSlots ?? [])],
     celebrationId: l.celebrationId,
     threeCelebrationId: l.threeCelebrationId ?? 'three-hold',
+    auraId: l.auraId ?? null,
   };
 }
 

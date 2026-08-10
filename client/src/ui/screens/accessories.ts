@@ -26,6 +26,9 @@ const SECTIONS: { title: string; blurb: string; categories: StoreCategory[] }[] 
   { title: 'Accessories', blurb: 'The small stuff people notice.', categories: ['accessory', 'hairstyle', 'tattoo'] },
   { title: 'Animations', blurb: 'How your shot and your dunks look and feel.', categories: ['jumpshot', 'dunkPackage', 'animation'] },
   { title: 'Flair', blurb: 'What you do after a three, after a win, and the floor you do it on.', categories: ['threeCelebration', 'celebration', 'emote', 'court'] },
+  // Only the top of the ladder pays these out, so the section is empty for
+  // almost everybody — which is what makes it worth having.
+  { title: 'Ranked spoils', blurb: 'Won on the ladder. Nothing here is for sale.', categories: ['aura', 'nameEffect', 'banner'] },
 ];
 
 const CATEGORY_LABEL: Record<StoreCategory, string> = {
@@ -43,6 +46,9 @@ const CATEGORY_LABEL: Record<StoreCategory, string> = {
   threeCelebration: '3-point celebrations',
   emote: 'Emotes',
   court: 'Courts',
+  aura: 'Auras',
+  nameEffect: 'Name effects',
+  banner: 'Banners',
 };
 
 export function renderAccessories(): HTMLElement {
@@ -367,6 +373,12 @@ function isEquipped(item: StoreItem): boolean {
       return `jumpshot-${l.jumpshotId}` === item.id;
     case 'dunkPackage':
       return `dunk-${l.dunkPackageId}` === item.id;
+    case 'aura':
+      return l.auraId === item.id;
+    case 'nameEffect':
+      return l.nameEffectId === item.id;
+    case 'banner':
+      return l.bannerId === item.id;
     default:
       return false;
   }
@@ -414,6 +426,17 @@ export function equip(item: StoreItem): void {
         break;
       case 'dunkPackage':
         t.loadout.dunkPackageId = item.id.replace('dunk-', '');
+        break;
+      // The ranked spoils. Each is a single slot and equipping one replaces it;
+      // toggling off is done by equipping again, since there is only ever one.
+      case 'aura':
+        t.loadout.auraId = t.loadout.auraId === item.id ? null : item.id;
+        break;
+      case 'nameEffect':
+        t.loadout.nameEffectId = t.loadout.nameEffectId === item.id ? null : item.id;
+        break;
+      case 'banner':
+        t.loadout.bannerId = t.loadout.bannerId === item.id ? null : item.id;
         break;
       default:
         break;

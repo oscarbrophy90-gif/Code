@@ -15,6 +15,10 @@ import {
   wingspanFor,
 } from '../src/ratings.ts';
 import { scoutReport } from '../src/scouting.ts';
+import { RANK_REWARDS, rewardsUpTo, seasonPayout } from '../src/rankrewards.ts';
+import { RANK_ITEMS, RANK_TITLES } from '../src/data/rankpack.ts';
+import { TITLE_BY_ID } from '../src/data/titles.ts';
+import { SEASON_COVERS, SEASON_EPOCH, SEASON_LENGTH_DAYS, SEASON_LENGTH_MS } from '../src/seasons.ts';
 import { WORLD_SIZE, tierPopulation, worldLadder } from '../src/world.ts';
 import { DEFAULT_TITLES, newlyEarnedTitles, streakBadge } from '../src/data/titles.ts';
 import { DRILLS, SHOOT_AROUND, drillMedal, drillReward } from '../src/data/drills.ts';
@@ -1586,7 +1590,12 @@ test('a shelf is never all commons — every section shows a spread of tiers', (
 test('mythic stock is rare, rotation-only, and unbuyable off the shelf', () => {
   const mythics = STORE_ITEMS.filter((i) => i.rarity === 'mythic');
   assert.ok(mythics.length >= 80, `expected a deep mythic tier, found ${mythics.length}`);
-  for (const m of mythics) assert.equal(m.rotationOnly, true, 'mythic never sits in the permanent catalogue');
+  for (const m of mythics) {
+    // Either rotation-only stock, or a ranked reward that has no price at all.
+    // Both mean the same thing: you cannot walk into the shop and buy one.
+    const buyable = !m.rotationOnly && !(m.price === 0 && m.requirement);
+    assert.equal(buyable, false, `${m.id} is a mythic you could buy off the shelf`);
+  }
 
   // A month of windows, counting how often a section opens its sixteenth slot.
   const base = 1_800_000_000_000;
@@ -1633,21 +1642,30 @@ test('the catalogue is as deep as the shop claims', () => {
   const count = (c: string) => STORE_ITEMS.filter((i) => i.category === c).length;
   const mythic = (c: string) => STORE_ITEMS.filter((i) => i.category === c && i.rarity === 'mythic').length;
 
+  // Shop depth, plus whatever the ranked path adds on top of each category —
+  // the reward items are counted separately so a change to one cannot quietly
+  // paper over a loss in the other.
+  const ranked = (c: string) =>
+    STORE_ITEMS.filter((i) => i.category === c && i.price === 0 && i.requirement?.includes('finish the season')).length;
+
+  assert.equal(count('jersey') - ranked('jersey'), 150, 'jersey should have 150 on the shelf');
+  assert.equal(count('shoes') - ranked('shoes'), 150, 'shoes should have 150 on the shelf');
+  assert.equal(count('clothing') - ranked('clothing'), 150, 'clothing should have 150 on the shelf');
+  assert.equal(count('accessory') - ranked('accessory'), 150, 'accessory should have 150 on the shelf');
   for (const c of ['jersey', 'shoes', 'clothing', 'accessory']) {
-    assert.equal(count(c), 150, `${c} should have 150`);
-    assert.equal(mythic(c), 15, `${c} should have 15 mythics`);
+    assert.ok(mythic(c) >= 15, `${c} should have at least 15 mythics`);
   }
-  assert.equal(count('emote'), 200, 'the hundred-emote pack sits on top of the original hundred');
-  assert.equal(mythic('emote'), 15);
+  assert.equal(count('emote') - ranked('emote'), 200, 'the hundred-emote pack sits on top of the original hundred');
+  assert.ok(mythic('emote') >= 15);
   for (const c of ['celebration', 'threeCelebration']) {
-    assert.equal(count(c), 50, `${c} should have 50`);
-    assert.equal(mythic(c), 5, `${c} should have 5 mythics`);
+    assert.equal(count(c) - ranked(c), 50, `${c} should have 50 on the shelf`);
+    assert.ok(mythic(c) >= 5, `${c} should have at least 5 mythics`);
   }
 
   // The three packs sit on top of what was already there rather than replacing
   // it, so these are originals-plus-pack totals, not the pack size.
-  assert.equal(count('dunkPackage'), 144, '50 originals plus the 94 new names');
-  assert.equal(count('title'), 105, '23 originals plus the 82 new names');
+  assert.equal(count('dunkPackage') - ranked('dunkPackage'), 144, '50 originals plus the 94 new names');
+  assert.equal(count('title') - ranked('title'), 105, '23 originals plus the 82 new names');
   assert.equal(count('tattoo'), 108, '8 originals plus the 100 new designs');
   for (const c of ['dunkPackage', 'title', 'tattoo']) {
     assert.ok(mythic(c) >= 5, `${c} should carry mythics`);
@@ -2204,8 +2222,9 @@ test('the online ladder climbs five wins at a time, three divisions a tier', () 
   assert.equal(onlineRank(45).label, 'Platinum 3');
   assert.equal(onlineRank(60).label, 'Emerald 3');
   assert.equal(onlineRank(75).label, 'Sapphire 3');
-  assert.equal(onlineRank(90).label, 'Champion 3');
-  assert.equal(onlineRank(100).label, 'Champion 1', 'the last division before the top');
+  assert.equal(onlineRank(90).label, 'Diamond 3');
+  assert.equal(onlineRank(105).label, 'Champion 3');
+  assert.equal(onlineRank(115).label, 'Champion 1', 'the last division before the top');
 
   // Every division is exactly five wins wide, all the way up.
   for (let wins = 0; wins < WINS_TO_GRAND_CHAMP; wins++) {
@@ -2216,9 +2235,14 @@ test('the online ladder climbs five wins at a time, three divisions a tier', () 
     assert.equal(rank.grandChamp, false);
   }
 
-  // Seven tiers of three divisions at five wins each.
+  // Eight tiers of three divisions at five wins each, then Grand Champ.
+  assert.equal(ONLINE_TIERS.length, 9, 'Bronze through Grand Champ, Diamond included');
+  assert.deepEqual(
+    ONLINE_TIERS.map((t) => t.name),
+    ['Bronze', 'Silver', 'Gold', 'Platinum', 'Emerald', 'Sapphire', 'Diamond', 'Champion', 'Grand Champ'],
+  );
   assert.equal(WINS_TO_GRAND_CHAMP, (ONLINE_TIERS.length - 1) * DIVISIONS_PER_TIER * WINS_PER_DIVISION);
-  assert.equal(WINS_TO_GRAND_CHAMP, 105);
+  assert.equal(WINS_TO_GRAND_CHAMP, 120);
 });
 
 test('grand champ has no divisions and is ranked against the world', () => {
@@ -2307,7 +2331,7 @@ test('the ranked ladder puts a harder opponent in front of you as you climb', ()
   // The progression is the opponent. If climbing did not change who turns up,
   // the rank would be a number with nothing behind it.
   let lastOverall = 0;
-  for (const wins of [0, 15, 30, 45, 60, 75, 90, 105]) {
+  for (const wins of [0, 15, 30, 45, 60, 75, 90, 105, 120]) {
     const opp = rankedOpponent(wins);
     assert.ok(opp.overall >= lastOverall, `overall went backwards at ${wins} wins`);
     lastOverall = opp.overall;
@@ -2316,7 +2340,11 @@ test('the ranked ladder puts a harder opponent in front of you as you climb', ()
   assert.equal(rankedOpponent(0).difficulty, 'rookie', 'Bronze is a rookie game');
   // Grand Champ is above Hall of Fame, and that difficulty cannot be picked
   // from the Play menu — the only way to meet it is to earn it.
-  assert.equal(rankedOpponent(105).difficulty, 'grandChamp');
+  assert.equal(rankedOpponent(WINS_TO_GRAND_CHAMP).difficulty, 'grandChamp');
+  // Diamond and Champion sit between Superstar and the top, so the last three
+  // rungs are three different difficulties rather than one repeated.
+  assert.equal(rankedOpponent(90).difficulty, 'superstar', 'Diamond');
+  assert.equal(rankedOpponent(105).difficulty, 'hallOfFame', 'Champion');
   assert.ok(!(DIFFICULTIES as readonly string[]).includes('grandChamp'), 'it is not selectable');
   assert.ok(ALL_DIFFICULTIES.includes('grandChamp'), 'but the simulation knows it');
   const hof = DIFFICULTY_PRESETS.hallOfFame;
@@ -2330,6 +2358,34 @@ test('the ranked ladder puts a harder opponent in front of you as you climb', ()
 });
 
 
+
+test('a ranked win moves the rank up and a loss moves it down', () => {
+  // The complaint this covers: a win that does not move anything. A win is
+  // always worth exactly one, in both directions, and the promotion is reported
+  // on the win that crosses a division rather than on every win.
+  assert.equal(applyRankedResult(4, true), 5);
+  assert.equal(rankChange(4, 5), 'promoted', 'the fifth win is Bronze 2');
+  assert.equal(applyRankedResult(5, true), 6);
+  assert.equal(rankChange(5, 6), 'none', 'and the sixth is just a win');
+  assert.equal(applyRankedResult(5, false), 4);
+  assert.equal(rankChange(5, 4), 'demoted');
+  assert.equal(applyRankedResult(0, false), 0, 'Bronze 3 with nothing on it is the floor');
+
+  // Every win from the bottom to the top moves the count by one and never skips
+  // or repeats a rank on the way.
+  let wins = 0;
+  const seen: string[] = [onlineRank(0).label];
+  for (let i = 0; i < WINS_TO_GRAND_CHAMP; i++) {
+    const before = wins;
+    wins = applyRankedResult(wins, true);
+    assert.equal(wins, before + 1, `win ${i + 1} should be worth one`);
+    const label = onlineRank(wins).label;
+    if (label !== seen[seen.length - 1]) seen.push(label);
+  }
+  assert.equal(wins, WINS_TO_GRAND_CHAMP);
+  assert.equal(seen.length, ONLINE_TIERS.length * DIVISIONS_PER_TIER - 2, 'every division, once each');
+  assert.equal(seen[seen.length - 1], 'Grand Champ');
+});
 
 test('usernames are checked, and changing one is locked for thirty days', () => {
   assert.equal(validateUsername('Ace').ok, true);
@@ -2411,4 +2467,120 @@ test('world players gain wins over time, but the ladder stays catchable', () => 
 
   // Same elapsed time in, same board out — the caller owns the clock.
   assert.deepEqual(worldLadder(7 * day).map((p) => p.wins), week.map((p) => p.wins));
+});
+
+
+test('a season is twenty days, and every one has its own generated name and cover', () => {
+  const day = 24 * 60 * 60 * 1000;
+  assert.equal(SEASON_LENGTH_DAYS, 20);
+  assert.equal(SEASON_LENGTH_MS, 20 * day);
+
+  const first = seasonForTime(SEASON_EPOCH);
+  const second = seasonForTime(SEASON_EPOCH + 20 * day);
+  assert.equal(first.id, 'S1');
+  assert.equal(second.id, 'S2', 'twenty days later is the next season');
+  assert.equal(seasonForTime(SEASON_EPOCH + 19.9 * day).id, 'S1', 'and not a moment before');
+  assert.equal(first.endsAt, second.startsAt, 'no gap between them');
+
+  // Generated, not listed: forty seasons in a row without repeating the name,
+  // and each one deterministic.
+  const names = new Set<string>();
+  for (let i = 0; i < 40; i++) {
+    const s = seasonForTime(SEASON_EPOCH + i * SEASON_LENGTH_MS + day);
+    assert.equal(s.name, `Season ${i + 1}: ${s.title}`);
+    assert.ok(s.title.includes(' '), 'two halves make the name');
+    assert.ok(s.cover >= 0 && s.cover < SEASON_COVERS, 'and a cover the client can draw');
+    assert.ok(s.accent.startsWith('#') && s.accentAlt.startsWith('#'));
+    names.add(s.title);
+    // Asking twice gives the same season.
+    assert.deepEqual(seasonForTime(SEASON_EPOCH + i * SEASON_LENGTH_MS + day), s);
+  }
+  assert.ok(names.size >= 24, `expected a spread of names, got ${names.size} in 40 seasons`);
+});
+
+test('the rank path pays every rank below the one you reached', () => {
+  // One entry per tier, in ladder order, and each pays more than the last.
+  assert.equal(RANK_REWARDS.length, ONLINE_TIERS.length);
+  assert.deepEqual(RANK_REWARDS.map((r) => r.tierId), ONLINE_TIERS.map((t) => t.id));
+  for (let i = 1; i < RANK_REWARDS.length; i++) {
+    assert.ok(RANK_REWARDS[i].coins > RANK_REWARDS[i - 1].coins, 'a higher rank always pays more');
+    assert.ok(
+      RANK_REWARDS[i].items.length >= RANK_REWARDS[i - 1].items.length,
+      'and never fewer things',
+    );
+  }
+
+  // Every reward is a real item the game can equip, and every title is real.
+  for (const tier of RANK_REWARDS) {
+    assert.ok(TITLE_BY_ID[tier.titleId], `${tier.tierId} title should exist`);
+    for (const id of tier.items) {
+      const item = STORE_BY_ID[id];
+      assert.ok(item, `${id} should be a real store item`);
+    }
+  }
+
+  // Nothing is paid out by two different ranks.
+  const all = RANK_REWARDS.flatMap((r) => [...r.items, r.titleId]);
+  assert.equal(new Set(all).size, all.length, 'no reward is listed twice');
+
+  // Reaching a rank banks everything under it.
+  assert.equal(rewardsUpTo(0).length, 1, 'Bronze 3 has already earned Bronze');
+  assert.equal(rewardsUpTo(30).length, 3, 'Gold banks Bronze, Silver and Gold');
+  assert.equal(rewardsUpTo(WINS_TO_GRAND_CHAMP).length, ONLINE_TIERS.length, 'the top banks the lot');
+});
+
+test('a season payout settles against your peak and never pays the same gear twice', () => {
+  const gold = seasonPayout(32);
+  assert.ok(gold);
+  assert.equal(gold.tierName, 'Gold');
+  assert.equal(gold.coins, 10_000 + 20_000 + 30_000);
+  assert.ok(gold.titles.includes('title-rank-gold'));
+  assert.ok(gold.titles.includes('title-rank-bronze'), 'and the ones below it');
+
+  // A second season at the same rank pays the coins again but not the gear —
+  // the coins are the recurring part, the cosmetics are the once.
+  const owned = [...gold.items, ...gold.titles];
+  const again = seasonPayout(32, owned);
+  assert.ok(again);
+  assert.equal(again.coins, gold.coins, 'coins every season');
+  assert.equal(again.items.length, 0, 'gear only the first time');
+  assert.equal(again.titles.length, 0);
+
+  // Climbing further next season pays only the difference in gear.
+  const higher = seasonPayout(WINS_TO_GRAND_CHAMP, owned);
+  assert.ok(higher);
+  assert.equal(higher.tierName, 'Grand Champ');
+  assert.ok(higher.items.length > 0, 'the new ranks still pay');
+  for (const id of owned) assert.ok(!higher.items.includes(id), 'and never re-pay what you have');
+
+  // Grand Champ is the only rank that pays an aura, a name effect and a banner.
+  const top = RANK_REWARDS[RANK_REWARDS.length - 1];
+  for (const kind of ['aura', 'nameEffect', 'banner']) {
+    const fromTop = top.items.filter((id) => STORE_BY_ID[id]?.category === kind);
+    assert.equal(fromTop.length, 1, `Grand Champ pays exactly one ${kind}`);
+    const elsewhere = RANK_REWARDS.slice(0, -1).flatMap((r) => r.items).filter((id) => STORE_BY_ID[id]?.category === kind);
+    assert.equal(elsewhere.length, 0, `nothing below Grand Champ pays a ${kind}`);
+  }
+});
+
+test('nothing the ranked path pays out can be bought or is given away', () => {
+  const rewards = RANK_REWARDS.flatMap((r) => r.items);
+  for (const id of rewards) {
+    const item = STORE_BY_ID[id];
+    assert.ok(item, `${id} exists`);
+    // Either it is a reward with no price and a gate, or it is an item the shop
+    // already sold before the path existed (Quick Trigger, Too Small). What it
+    // must never be is free and ungated, which would put it in every new save.
+    const freeAndOpen = item.price === 0 && !item.requirement;
+    assert.equal(freeAndOpen, false, `${id} would be handed to everybody`);
+  }
+  for (const t of RANK_TITLES) {
+    assert.equal(t.price, 0, 'ranked titles are not for sale');
+    assert.ok(t.earn, 'and they say how they are earned');
+    assert.ok(!DEFAULT_UNLOCKS.includes(t.id), `${t.id} should not start unlocked`);
+  }
+  const rankedItemIds = new Set(RANK_ITEMS.map((i) => i.id));
+  for (const id of DEFAULT_UNLOCKS) {
+    assert.ok(!rankedItemIds.has(id), `${id} should be earned, not given`);
+  }
 });

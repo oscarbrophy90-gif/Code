@@ -101,6 +101,8 @@ export interface Appearance {
   celebrationId: string;
   /** performed the moment a three drops */
   threeCelebrationId: string;
+  /** ranked aura, drawn as light around the figure; null for almost everybody */
+  auraId: string | null;
 }
 
 /** Static per-player configuration handed to the sim. */

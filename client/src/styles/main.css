@@ -2785,3 +2785,282 @@ input[type='text']:focus {
 .rankchange.up .rankchange-card {
   filter: drop-shadow(0 0 40px rgba(62, 240, 122, 0.18));
 }
+
+/* ------------------------------------------------------------- rank path */
+
+/* The "what do I get for this" button, sat next to the rank itself. */
+.rank-path-btn {
+  margin-left: auto;
+  align-self: center;
+}
+
+.path-banked {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.path-banked-rank {
+  font-size: 22px;
+  font-weight: 900;
+  letter-spacing: -0.01em;
+}
+
+.path-banked-coins {
+  margin-left: auto;
+  text-align: right;
+}
+
+.path-banked-coins b {
+  display: block;
+  font-size: 24px;
+  font-weight: 900;
+  color: var(--amber);
+}
+
+.path-banked-coins span {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+/* A locked rung is dimmed rather than hidden: seeing what is above you is the
+   reason to look at this screen at all. */
+.path-card {
+  opacity: 0.62;
+  border-left: 3px solid var(--tint);
+}
+
+.path-card.reached {
+  opacity: 1;
+  background: linear-gradient(120deg, color-mix(in srgb, var(--tint) 10%, transparent), transparent 60%),
+    linear-gradient(180deg, var(--panel), var(--panel-2));
+}
+
+.path-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 12px;
+}
+
+.path-head-text {
+  min-width: 0;
+}
+
+.path-tier {
+  font-size: 18px;
+  font-weight: 900;
+  letter-spacing: -0.01em;
+}
+
+.path-alias {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-dim);
+}
+
+.path-state {
+  margin-left: auto;
+  text-align: right;
+  display: grid;
+  gap: 6px;
+  justify-items: end;
+}
+
+.path-coins {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--amber);
+}
+
+.path-rewards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.path-reward {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.02);
+  position: relative;
+}
+
+.path-reward.owned {
+  border-color: color-mix(in srgb, var(--tint) 55%, var(--line));
+  background: color-mix(in srgb, var(--tint) 9%, transparent);
+}
+
+.path-reward-kind {
+  display: block;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.path-reward-name {
+  display: block;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.path-reward-tick {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  font-weight: 900;
+  color: var(--tint);
+}
+
+/* --------------------------------------------------------- season cover */
+
+.season-hero {
+  position: relative;
+  overflow: hidden;
+}
+
+/* Sits behind the season's text rather than above it, so the title never has to
+   compete with the art. */
+.season-cover {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+}
+
+.season-hero > *:not(.season-cover) {
+  position: relative;
+  z-index: 1;
+}
+
+/* -------------------------------------------------------- season report */
+
+.season-report {
+  max-width: 460px;
+}
+
+.season-report-kicker {
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.24em;
+  color: var(--amber);
+}
+
+.season-report-title {
+  margin: 4px 0 16px;
+  font-size: 26px;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+}
+
+.season-report-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.season-report-rank {
+  font-size: 19px;
+  font-weight: 900;
+}
+
+.season-report-coins {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.season-report-coins b {
+  font-size: 30px;
+  font-weight: 900;
+  color: var(--amber);
+}
+
+.season-report-items {
+  display: grid;
+  gap: 5px;
+  max-height: 210px;
+  overflow-y: auto;
+  margin-bottom: 4px;
+}
+
+.season-report-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 5px 8px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--tint) 8%, transparent);
+}
+
+/* ------------------------------------------------------- ranked spoils */
+
+/* The gold name effect. Kept to a moving gradient rather than anything that
+   changes the layout, because it renders inline with ordinary text. */
+.name-gold {
+  background: linear-gradient(100deg, #a37c00 0%, #ffd23d 30%, #fff4c2 50%, #ffd23d 70%, #a37c00 100%);
+  background-size: 260% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: name-gold-sweep 3.4s linear infinite;
+  font-weight: 900;
+}
+
+@keyframes name-gold-sweep {
+  from {
+    background-position: 260% 0;
+  }
+  to {
+    background-position: -60% 0;
+  }
+}
+
+/* The banner behind a Grand Champion on the walkout. */
+.walkout-stage {
+  position: relative;
+  flex: none;
+  display: flex;
+}
+
+.walkout-banner {
+  position: absolute;
+  left: -22%;
+  right: -22%;
+  top: -8%;
+  bottom: 6%;
+  border-radius: 6px 6px 40% 40%;
+  background: linear-gradient(180deg, #1a0a14, #3d0f24 70%, #1a0a14);
+  border: 2px solid rgba(255, 92, 138, 0.55);
+  box-shadow: 0 0 40px rgba(255, 92, 138, 0.25);
+  display: flex;
+  justify-content: center;
+  padding-top: 10px;
+  z-index: 0;
+}
+
+.walkout-banner span {
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+  color: #ff9dbb;
+}
+
+.walkout-stage > .walkout-figure,
+.walkout-card > .walkout-figure,
+.walkout-card > .walkout-info {
+  position: relative;
+  z-index: 1;
+}

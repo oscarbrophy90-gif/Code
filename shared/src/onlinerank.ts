@@ -6,13 +6,17 @@
  * rewards and none of them move this. A rank you can farm off a bot is not a
  * rank.
  *
- * Seven tiers of three divisions, five wins each, and then Grand Champ. Grand
+ * Eight tiers of three divisions, five wins each, and then Grand Champ. Grand
  * Champ is deliberately not another division: once you are there the ladder
  * stops measuring how many wins you have and starts measuring how many you have
  * *compared to everyone else*, so being Grand Champ #1 means one person in the
  * world is above nobody, and #500 means five hundred people are ahead of you.
  * That only works as a live comparison against the whole population, which is
- * why placement comes from the server rather than from your own save.
+ * why placement is read off the leaderboard rather than stored on your save.
+ *
+ * The whole ladder is wiped at the end of every season. A rank you keep forever
+ * is a record of how long you have owned the game; a rank you have to win back
+ * is a record of how you are playing now.
  */
 
 /** Wins to clear one division. */
@@ -40,6 +44,7 @@ export const ONLINE_TIERS: OnlineTierDef[] = [
   { id: 'platinum', name: 'Platinum', color: '#9fe8ff', shade: '#3d8ba3' },
   { id: 'emerald', name: 'Emerald', color: '#3ef07a', shade: '#146b38' },
   { id: 'sapphire', name: 'Sapphire', color: '#5b8cff', shade: '#1f3f9e' },
+  { id: 'diamond', name: 'Diamond', color: '#8ff2ff', shade: '#1f7f96' },
   { id: 'champion', name: 'Champion', color: '#c77dff', shade: '#5f2c8f' },
   { id: 'grandchamp', name: 'Grand Champ', color: '#ff5c8a', shade: '#8f1f42' },
 ];

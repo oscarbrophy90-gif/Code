@@ -1,5 +1,6 @@
 import { badgeLevel } from './badges.ts';
 import type { Attributes, BadgeState } from './types.ts';
+import { RANK_JUMPSHOTS } from './data/rankpack.ts';
 
 export type ShotType =
   | 'jumper'
@@ -28,6 +29,12 @@ export interface JumpshotDef {
   /** unlock cost in currency; 0 = owned from the start */
   price: number;
   timingCue: 'setPoint' | 'release' | 'jumpApex';
+  /**
+   * The rank that pays this shot out, when it is a season reward rather than
+   * something you buy. A free price with no gate would land it in the default
+   * unlocks, which would hand every new player a Perfect Release.
+   */
+  rankReward?: string;
 }
 
 /**
@@ -42,6 +49,7 @@ export const JUMPSHOTS: JumpshotDef[] = [
   { id: 'silk', name: 'Silk', blurb: 'Smooth mid-speed release, very stable while drifting.', releaseTime: 0.58, greenWindow: 0.0205, falloff: 1.05, driftPenalty: 0.75, price: 10500, timingCue: 'setPoint' },
   { id: 'whip', name: 'Whip', blurb: 'Snappy sidearm flick. Great off stepbacks.', releaseTime: 0.5, greenWindow: 0.0165, falloff: 1.22, driftPenalty: 0.85, price: 13500, timingCue: 'release' },
   { id: 'metronome', name: 'Metronome', blurb: 'Widest window in the game, but slow enough to contest.', releaseTime: 0.84, greenWindow: 0.034, falloff: 0.8, driftPenalty: 1.35, price: 8000, timingCue: 'jumpApex' },
+  ...RANK_JUMPSHOTS,
 ];
 
 export const JUMPSHOT_BY_ID: Record<string, JumpshotDef> = Object.fromEntries(JUMPSHOTS.map((j) => [j.id, j]));

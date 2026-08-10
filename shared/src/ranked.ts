@@ -1,5 +1,5 @@
 import { DIFFICULTIES, type Difficulty } from './types.ts';
-import { ONLINE_TIERS, onlineRank } from './onlinerank.ts';
+import { ONLINE_TIERS, WINS_TO_GRAND_CHAMP, onlineRank } from './onlinerank.ts';
 
 /**
  * Ranked play.
@@ -97,7 +97,7 @@ export function rankedOpponent(wins: number): RankedOpponent {
   const tierIndex = ONLINE_TIERS.findIndex((t) => t.id === rank.tier.id);
 
   // Bronze starts at a genuine rookie and the top of the ladder is a max build.
-  const OVERALL_BY_TIER = [62, 68, 73, 78, 83, 87, 91, 99];
+  const OVERALL_BY_TIER = [62, 68, 73, 78, 83, 87, 91, 95, 99];
   const DIFFICULTY_BY_TIER: Difficulty[] = [
     'rookie',
     'semiPro',
@@ -106,6 +106,7 @@ export function rankedOpponent(wins: number): RankedOpponent {
     'allStar',
     'allStar',
     'superstar',
+    'hallOfFame',
     // The top of the ladder is the one difficulty you cannot select from the
     // Play menu, and it is harder than Hall of Fame.
     'grandChamp',
@@ -127,7 +128,7 @@ export function rankedOpponent(wins: number): RankedOpponent {
 export function rankedLadderPreview(): { tier: string; overall: number; difficulty: Difficulty }[] {
   return ONLINE_TIERS.map((tier, i) => {
     const wins = i * 15;
-    const opp = rankedOpponent(i === ONLINE_TIERS.length - 1 ? 105 : wins);
+    const opp = rankedOpponent(i === ONLINE_TIERS.length - 1 ? WINS_TO_GRAND_CHAMP : wins);
     return { tier: tier.name, overall: opp.overall, difficulty: opp.difficulty };
   });
 }

@@ -29,6 +29,9 @@ export interface WalkoutOptions {
    * rank comes from. Only yours — the opponent is a build, not an account.
    */
   identity?: { username: string; wins: number; losses: number; placement: number | null };
+  /** ranked spoils worn on the walkout: an effect on your name, a banner behind you */
+  nameEffectId?: string | null;
+  bannerId?: string | null;
   /**
    * Hide the difficulty on the title card.
    *
@@ -101,7 +104,7 @@ export function playWalkout(opts: WalkoutOptions): Promise<void> {
 
     const second = BEAT.intro + BEAT.card;
     at(second, () => {
-      body.appendChild(entrantCard(opts.player, 'left', 'And their opponent', opts.identity));
+      body.appendChild(entrantCard(opts.player, 'left', 'And their opponent', opts.identity, opts.nameEffectId, opts.bannerId));
       audio.play('ui', 1.15);
     });
 
@@ -117,6 +120,22 @@ export function playWalkout(opts: WalkoutOptions): Promise<void> {
 
 // --------------------------------------------------------------------- card
 
+/** The class that carries a name effect, or nothing at all. */
+function nameEffectClass(id: string | null | undefined): string {
+  return id === 'name-gold-rank' ? 'name-gold' : '';
+}
+
+/**
+ * The banner behind a Grand Champion.
+ *
+ * Drawn as markup rather than canvas because it sits behind a canvas figure and
+ * wants to scale with the card — a second canvas layer would have to track the
+ * first one's size for no gain.
+ */
+function bannerBack(id: string): HTMLElement {
+  return el('div', { class: `walkout-banner ${id === 'banner-grandchamp-rank' ? 'gc' : ''}` }, el('span', {}, 'GRAND CHAMPION'));
+}
+
 /**
  * One entrant.
  *
@@ -129,6 +148,8 @@ function entrantCard(
   side: 'left' | 'right',
   kicker: string,
   identity?: { username: string; wins: number; losses: number; placement: number | null },
+  nameEffectId?: string | null,
+  bannerId?: string | null,
 ): HTMLElement {
   const overall = computeOverall(cfg.attrs, cfg.position ?? 'SF');
   const report = scoutReport(cfg.attrs);
@@ -145,7 +166,10 @@ function entrantCard(
     // The badge stands beside the figure at the same height, because a rank is
     // part of the walkout rather than a statistic filed elsewhere.
     identity ? rankPillar(identity) : null,
-    figure,
+    // A banner hangs behind the figure, so it wraps the figure rather than
+    // being pinned to the card — the card is a row, and "behind" in a row means
+    // behind one item in it, not across all of them.
+    bannerId ? el('div', { class: 'walkout-stage' }, bannerBack(bannerId), figure) : figure,
     el(
       'div',
       { class: 'walkout-info' },
@@ -153,7 +177,15 @@ function entrantCard(
       el('div', { class: 'walkout-name' }, cfg.name),
       // The username sits under the build name: one person, several builds, and
       // the ladder ranks the person.
-      identity ? el('div', { class: 'walkout-username' }, identity.username) : null,
+      identity
+        ? el(
+            'div',
+            // A name effect is a ranked spoil, so it only ever renders for
+            // somebody who has one — everybody else gets the plain class.
+            { class: `walkout-username ${nameEffectClass(nameEffectId)}` },
+            identity.username,
+          )
+        : null,
       el(
         'div',
         { class: 'walkout-tags' },

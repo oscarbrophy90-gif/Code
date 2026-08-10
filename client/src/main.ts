@@ -12,6 +12,8 @@ import { renderControls } from './ui/screens/controls.ts';
 import { renderBuilder } from './ui/screens/builder.ts';
 import { renderMyPlayer } from './ui/screens/myplayer.ts';
 import { renderRank } from './ui/screens/rank.ts';
+import { renderRankPath } from './ui/screens/rankpath.ts';
+import { showSeasonReport } from './ui/seasonreport.ts';
 import { renderUsername } from './ui/screens/username.ts';
 import { renderSeason } from './ui/screens/season.ts';
 import { renderStore } from './ui/screens/store.ts';
@@ -31,6 +33,7 @@ export type Route =
   | 'builder'
   | 'myplayer'
   | 'rank'
+  | 'rankpath'
   | 'season'
   | 'store'
   | 'locker'
@@ -48,6 +51,7 @@ const SCREENS: Record<Route, (params: RouteParams) => HTMLElement> = {
   builder: renderBuilder,
   myplayer: renderMyPlayer,
   rank: renderRank,
+  rankpath: renderRankPath,
   season: renderSeason,
   store: renderStore,
   locker: renderAccessories,
@@ -256,6 +260,12 @@ function routeFromHash(): Route {
 }
 
 navigate(routeFromHash());
+
+// A season that ended while the game was closed leaves a note on the profile.
+// Read once, on the way in, and only when there is a player to have earned it.
+if (store.profile.seasonReport && store.hasPlayer) {
+  showSeasonReport(store.profile.seasonReport);
+}
 
 // Back and forward should move through the app, not out of it.
 window.addEventListener('hashchange', () => {

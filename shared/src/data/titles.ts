@@ -1,5 +1,7 @@
 import type { StoreItem } from '../economy.ts';
 import type { CareerStats, Difficulty } from '../types.ts';
+import { PACK_TITLES } from './titlepack.ts';
+import { RANK_TITLES } from './rankpack.ts';
 
 /**
  * Titles are the line under your name on the walkout screen. Some are bought,
@@ -103,7 +105,16 @@ function beat(stats: CareerStats, d: Difficulty): boolean {
   return (stats.winsByDifficulty?.[d] ?? 0) > 0;
 }
 
-export const TITLE_BY_ID: Record<string, TitleDef> = Object.fromEntries(TITLES.map((t) => [t.id, t]));
+/**
+ * Every title in the game, from all three sources.
+ *
+ * The lookup is built off this rather than off `TITLES` alone, because a title
+ * that the walkout cannot resolve is a title that renders as nothing under your
+ * name — and the pack and the ranked rewards are most of them.
+ */
+export const ALL_TITLES: TitleDef[] = [...TITLES, ...PACK_TITLES, ...RANK_TITLES];
+
+export const TITLE_BY_ID: Record<string, TitleDef> = Object.fromEntries(ALL_TITLES.map((t) => [t.id, t]));
 
 export const DEFAULT_TITLES = ['title-none', 'title-rookie'];
 

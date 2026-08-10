@@ -3,6 +3,7 @@ import {
   CURRENCY_SHORT,
   RARITY_COLOR,
   STORE_BY_ID,
+  SEASON_LENGTH_DAYS,
   XP_PER_TIER,
   buildBattlePass,
   generateChallenges,
@@ -17,6 +18,20 @@ import { store } from '../../state/store.ts';
 import { audio } from '../../engine/audio.ts';
 import { navigate, refresh } from '../../main.ts';
 import { bar, el, fmt, panel, tabs, toast } from '../dom.ts';
+import { drawSeasonCover } from '../seasoncover.ts';
+import { livePreview } from '../avatar.ts';
+
+/**
+ * The cover art, drawn live.
+ *
+ * Two of the six designs move, so it runs on the preview loop rather than being
+ * painted once — a still frame of the circuit design is just some lines.
+ */
+function seasonCover(season: ReturnType<typeof seasonForTime>): HTMLElement {
+  const canvas = el('canvas', { class: 'season-cover' }) as HTMLCanvasElement;
+  livePreview(canvas, (elapsed) => drawSeasonCover(canvas, season, elapsed));
+  return canvas;
+}
 
 type Tab = 'pass' | 'challenges' | 'rewards';
 let tab: Tab = 'pass';
@@ -33,12 +48,10 @@ export function renderSeason(): HTMLElement {
   root.append(
     el(
       'div',
-      {
-        class: 'panel clipped mb',
-        style: `background:linear-gradient(120deg, ${season.accent}22, ${season.accentAlt}18), linear-gradient(180deg, var(--panel), var(--panel-2))`,
-      },
-      el('div', { style: `font-size:11px;font-weight:900;letter-spacing:.2em;text-transform:uppercase;color:${season.accent}` }, `${season.id} · 8 week season`),
-      el('h1', { style: 'margin:4px 0 6px;font-size:clamp(24px,4vw,38px);font-weight:900;letter-spacing:-.02em' }, season.name.split(': ')[1] ?? season.name),
+      { class: 'panel clipped mb season-hero' },
+      seasonCover(season),
+      el('div', { style: `font-size:11px;font-weight:900;letter-spacing:.2em;text-transform:uppercase;color:${season.accent}` }, `${season.id} · ${SEASON_LENGTH_DAYS} day season`),
+      el('h1', { style: 'margin:4px 0 6px;font-size:clamp(24px,4vw,38px);font-weight:900;letter-spacing:-.02em' }, season.title),
       el('p', { class: 'dim', style: 'margin:0 0 16px' }, season.theme),
       el(
         'div',

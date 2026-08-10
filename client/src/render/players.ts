@@ -90,6 +90,10 @@ export class PlayerRenderer {
     const jersey = look.jerseyPrimary;
     const trim = look.jerseySecondary;
 
+    // The ranked aura goes down first, so the figure stands in its light rather
+    // than behind a wash of colour.
+    if (look.auraId) drawAura(ctx, px, py, s, heightFt, look.auraId, time);
+
     const speed = Math.hypot(p.vx, p.vz);
     // Stride phase is accumulated, never derived from time * frequency: with a
     // frequency that changes as you accelerate, phase = t * f jumps by tens of
@@ -528,6 +532,37 @@ export class PlayerRenderer {
       ctx.arc(head.x + headR * 0.34, head.y - headR * 0.05, headR * 0.3, 0, Math.PI * 2);
       ctx.stroke();
     }
+    if (worn === 'snapback') {
+      // Worn backwards: crown over the hair, brim out the back of the head.
+      ctx.fillStyle = look.accessoryPrimary;
+      ctx.beginPath();
+      ctx.arc(head.x, head.y - headR * 0.08, headR * 1.0, Math.PI * 1.02, Math.PI * 1.98);
+      ctx.fill();
+      ctx.fillRect(head.x - headR, head.y - headR * 0.22, headR * 2, headR * 0.26);
+      ctx.fillStyle = look.accessorySecondary;
+      ctx.fillRect(head.x - headR * 1.62, head.y - headR * 0.2, headR * 0.66, headR * 0.2);
+      // The button on top, which is the whole reason a cap reads as a cap.
+      ctx.beginPath();
+      ctx.arc(head.x, head.y - headR * 1.04, headR * 0.11, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    if (worn === 'crown') {
+      // Five points and a band. Small enough to play in, which is the joke.
+      const cy = head.y - headR * 0.9;
+      ctx.fillStyle = look.accessoryPrimary;
+      ctx.beginPath();
+      ctx.moveTo(head.x - headR * 0.9, cy);
+      for (let i = 0; i < 5; i++) {
+        const x = head.x - headR * 0.9 + (i / 4) * headR * 1.8;
+        ctx.lineTo(x, cy - headR * (i % 2 === 0 ? 0.52 : 0.28));
+        if (i < 4) ctx.lineTo(x + headR * 0.225, cy - headR * 0.06);
+      }
+      ctx.lineTo(head.x + headR * 0.9, cy);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = look.accessorySecondary;
+      ctx.fillRect(head.x - headR * 0.92, cy, headR * 1.84, headR * 0.2);
+    }
     if (worn === 'earrings') {
       ctx.fillStyle = look.accessoryPrimary;
       for (const sign of [-1, 1]) {
@@ -751,8 +786,67 @@ function fallbackAppearance(p: SimPlayer): Appearance {
     emoteSlots: [],
     celebrationId: 'celeb-nod',
     threeCelebrationId: 'three-none',
+    auraId: null,
   };
 }
+
+/**
+ * The aura, drawn on the floor under a player who has earned one.
+ *
+ * Light pooled at the feet and rising, rather than an outline around the body:
+ * an outline reads as a selection highlight and a UI element is the last thing
+ * a trophy should look like. It breathes slowly so it is alive without pulling
+ * the eye off the ball.
+ */
+function drawAura(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  scale: number,
+  heightFt: number,
+  auraId: string,
+  time: number,
+): void {
+  const colors = AURA_COLORS[auraId] ?? AURA_COLORS.default;
+  const breath = 0.86 + Math.sin(time * 1.6) * 0.14;
+  const rx = scale * 0.95 * breath;
+  const ry = scale * 0.34 * breath;
+
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+
+  // The pool on the floor.
+  const pool = ctx.createRadialGradient(x, y, 0, x, y, rx);
+  pool.addColorStop(0, `${colors[0]}8c`);
+  pool.addColorStop(0.55, `${colors[1]}4d`);
+  pool.addColorStop(1, `${colors[1]}00`);
+  ctx.fillStyle = pool;
+  ctx.beginPath();
+  ctx.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Embers climbing the figure. Seeded off the position so two players in the
+  // same aura are not in lockstep.
+  const bodyH = scale * heightFt * 0.42;
+  for (let i = 0; i < 7; i++) {
+    const phase = (time * 0.55 + i * 0.37 + x * 0.004) % 1;
+    const ex = x + Math.sin(phase * Math.PI * 2 + i) * scale * 0.42;
+    const ey = y - phase * bodyH;
+    const r = Math.max(0.8, scale * 0.055 * (1 - phase));
+    ctx.globalAlpha = 0.7 * (1 - phase);
+    ctx.fillStyle = i % 2 === 0 ? colors[0] : colors[1];
+    ctx.beginPath();
+    ctx.arc(ex, ey, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+/** Every aura's two colours, keyed by item id. */
+const AURA_COLORS: Record<string, [string, string]> = {
+  'aura-royal-rank': ['#ffd23d', '#ff5c8a'],
+  default: ['#ffd23d', '#ff7a3d'],
+};
 
 /**
  * Each hairstyle is a different silhouette on top of the head. At this size the
@@ -768,19 +862,20 @@ function drawHair(
   hair: string,
   skin: string,
 ): void {
-  if (styleId === 'hair-bald') return;
+  const style = hairKind(styleId);
+  if (style === 'bald') return;
   ctx.save();
   ctx.fillStyle = hair;
   ctx.strokeStyle = hair;
   ctx.lineCap = 'round';
 
-  switch (styleId) {
-    case 'hair-afro':
+  switch (style) {
+    case 'afro':
       ctx.beginPath();
       ctx.arc(x, y - r * 0.2, r * 0.98, Math.PI, Math.PI * 2);
       ctx.fill();
       break;
-    case 'hair-curls':
+    case 'curls':
       // A cap of overlapping curls rather than one smooth dome.
       for (let i = -2; i <= 2; i++) {
         ctx.beginPath();
@@ -788,15 +883,15 @@ function drawHair(
         ctx.fill();
       }
       break;
-    case 'hair-highfade':
+    case 'highfade':
       // Squared off and tall.
       ctx.fillRect(x - r * 0.74, y - r * 1.28, r * 1.48, r * 0.86);
       ctx.beginPath();
       ctx.arc(x, y - r * 0.42, r * 0.8, Math.PI, Math.PI * 2);
       ctx.fill();
       break;
-    case 'hair-braids':
-    case 'hair-cornrows': {
+    case 'braids':
+    case 'cornrows': {
       ctx.beginPath();
       ctx.arc(x, y - r * 0.06, r * 0.79, Math.PI * 1.02, Math.PI * 1.98);
       ctx.lineWidth = r * 0.44;
@@ -813,7 +908,7 @@ function drawHair(
       }
       break;
     }
-    case 'hair-locs':
+    case 'locs':
       ctx.beginPath();
       ctx.arc(x, y - r * 0.06, r * 0.8, Math.PI * 1.02, Math.PI * 1.98);
       ctx.lineWidth = r * 0.46;
@@ -826,7 +921,28 @@ function drawHair(
         ctx.stroke();
       }
       break;
-    case 'hair-topknot':
+    case 'twists':
+      // Short two-strand twists: a cap of paired coils with gaps between them,
+      // which is what separates them from curls at this size.
+      ctx.lineWidth = r * 0.17;
+      for (let i = -3; i <= 3; i++) {
+        const bx = x + i * r * 0.27;
+        const by = y - r * 0.34 - Math.max(0, 3 - Math.abs(i)) * r * 0.09;
+        ctx.beginPath();
+        ctx.moveTo(bx, by);
+        ctx.quadraticCurveTo(bx + r * 0.1, by - r * 0.22, bx - r * 0.04, by - r * 0.4);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(bx, by);
+        ctx.quadraticCurveTo(bx - r * 0.1, by - r * 0.22, bx + r * 0.06, by - r * 0.4);
+        ctx.stroke();
+      }
+      ctx.beginPath();
+      ctx.arc(x, y - r * 0.08, r * 0.82, Math.PI * 1.06, Math.PI * 1.94);
+      ctx.lineWidth = r * 0.2;
+      ctx.stroke();
+      break;
+    case 'topknot':
       ctx.beginPath();
       ctx.arc(x, y - r * 0.04, r * 0.82, Math.PI * 1.05, Math.PI * 1.95);
       ctx.lineWidth = r * 0.36;
@@ -835,13 +951,13 @@ function drawHair(
       ctx.arc(x, y - r * 1.05, r * 0.3, 0, Math.PI * 2);
       ctx.fill();
       break;
-    case 'hair-buzz':
+    case 'buzz':
       ctx.beginPath();
       ctx.arc(x, y - r * 0.02, r * 0.88, Math.PI * 1.06, Math.PI * 1.94);
       ctx.lineWidth = r * 0.2;
       ctx.stroke();
       break;
-    case 'hair-waves':
+    case 'waves':
       ctx.beginPath();
       ctx.arc(x, y - r * 0.02, r * 0.85, Math.PI * 1.05, Math.PI * 1.95);
       ctx.lineWidth = r * 0.3;
@@ -917,6 +1033,20 @@ const LEGACY_ACCESSORY: Record<string, string> = {
   'acc-mouthguard': 'mouthguard',
   'acc-earrings': 'earrings',
 };
+
+/**
+ * Which hairstyle to draw.
+ *
+ * Same second-segment convention as everything else, so `hair-braids-rank-elite`
+ * is braids and `hair-locs-rank-royal` is locs without either needing its own
+ * case. A ranked reward that renders as the default fade would be a reward
+ * nobody can see they won.
+ */
+export function hairKind(id: string | null | undefined): string {
+  if (!id) return 'fade';
+  const parts = id.split('-');
+  return parts.length > 1 ? parts[1] : 'fade';
+}
 
 export function clothingKind(id: string | null | undefined): string {
   return kindOf(id, LEGACY_CLOTHING, 'shorts');

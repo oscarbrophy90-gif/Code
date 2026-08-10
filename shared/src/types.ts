@@ -98,6 +98,10 @@ export interface Loadout {
   courtId: string;
   /** shown under your name on the walkout */
   titleId: string;
+  /** ranked spoils: light around you, an effect on your name, a banner */
+  auraId: string | null;
+  nameEffectId: string | null;
+  bannerId: string | null;
   shotMeterStyle: ShotMeterStyle;
 }
 
@@ -219,6 +223,13 @@ export interface Profile {
   activeSlot: number;
   seasonId: string;
   battlePass: BattlePassState;
+  /**
+   * The last season's payout, held until the player has seen it.
+   *
+   * A season can end while the game is closed, so the reset cannot announce
+   * itself as it happens — it has to leave a note that the next launch reads.
+   */
+  seasonReport: SeasonReport | null;
   challenges: ChallengeState[];
   settings: GameSettings;
   lastSyncedAt: number;
@@ -257,10 +268,32 @@ export interface OnlineRecord {
   bestStreak: number;
   /** when the last ranked game finished, 0 if never */
   updatedAt: number;
+  /**
+   * The highest `wins` reached this season.
+   *
+   * Season rewards settle against this rather than against where you finish, so
+   * one bad night on the last evening cannot take a month of climbing off you.
+   */
+  peakWins: number;
 }
 
 export const REGIONS = ['na-east', 'na-west', 'eu', 'apac', 'sa', 'oce'] as const;
 export type Region = (typeof REGIONS)[number];
+
+/** What the last season paid out, shown once and then cleared. */
+export interface SeasonReport {
+  /** the season that ended */
+  seasonId: string;
+  seasonName: string;
+  /** highest rank held during it */
+  peakWins: number;
+  tierName: string;
+  coins: number;
+  /** item and title ids granted */
+  items: string[];
+  /** how many ranked wins the reset took off you */
+  resetFrom: number;
+}
 
 export interface BattlePassState {
   seasonId: string;
