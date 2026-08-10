@@ -14,3 +14,7 @@ client/standalone-build/
 # Recovery copies the server writes when it finds a board it cannot parse.
 server/data/*.corrupt-*
 server/data/*.tmp
+
+# Playwright screenshots from acendri-os/test/browser.mjs
+acendri-os/test/screenshots/
+acendri-os/standalone-build/

@@ -5,17 +5,22 @@
   "description": "Hoops Elite - a competitive 1v1 basketball game with green-bar shooting, MyPlayer progression, badges, parks and seasons.",
   "workspaces": [
     "shared",
-    "client"
+    "client",
+    "acendri-os"
   ],
   "scripts": {
     "dev": "npm run dev --workspace=client",
     "build": "npm run build --workspace=client",
     "preview": "npm run preview --workspace=client",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test --experimental-strip-types shared/test/*.test.ts",
-    "build:standalone": "node client/build-standalone.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p acendri-os/tsconfig.json --noEmit",
+    "test": "node --test --experimental-strip-types shared/test/*.test.ts acendri-os/test/*.test.ts",
+    "build:standalone": "node client/build-standalone.mjs && node acendri-os/build-standalone.mjs",
     "start": "node server.js",
-    "server": "node --watch server.js"
+    "server": "node --watch server.js",
+    "acendri": "npm run dev --workspace=@acendri/os",
+    "acendri:build": "npm run build --workspace=@acendri/os",
+    "acendri:standalone": "node acendri-os/build-standalone.mjs",
+    "acendri:test": "node --test --experimental-strip-types acendri-os/test/*.test.ts"
   },
   "devDependencies": {
     "concurrently": "^9.1.2",

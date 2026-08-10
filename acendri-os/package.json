@@ -1,0 +1,16 @@
+{
+  "name": "@acendri/os",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Acendri OS — the app shell, accounts and persistent sign-in.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview --port 4174",
+    "build:standalone": "node build-standalone.mjs"
+  },
+  "devDependencies": {
+    "vite": "^8.0.0"
+  }
+}

@@ -214,6 +214,18 @@ throw from inside the arc, two from behind it, each worth a point.
 - [`docs/UI.md`](docs/UI.md) — screen-by-screen specification and the visual language
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — what is built, what is next, and the path to ship
 
+## Also in this repository
+
+[`acendri-os/`](acendri-os/README.md) — **Acendri OS**, a separate mobile-first app
+with local accounts: sign up, sign in and a session that survives a restart. It shares
+this repo's toolchain and nothing else; the game is untouched by it.
+
+```
+npm run acendri              # dev server on http://localhost:5174
+npm run acendri:test
+npm run acendri:standalone   # dist-standalone/AcendriOS.html
+```
+
 ## Original content only
 
 No NBA, 2K, club, player or brand assets are used. Teams like the Harbor Point Tide and
