@@ -3064,3 +3064,92 @@ input[type='text']:focus {
   position: relative;
   z-index: 1;
 }
+
+/* ------------------------------------------------------- matchmaking queue */
+
+.queue-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  background: rgba(6, 8, 14, 0.82);
+  backdrop-filter: blur(6px);
+}
+
+.queue-card {
+  width: min(420px, calc(100vw - 40px));
+  padding: 28px 26px 24px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: linear-gradient(180deg, var(--panel), var(--panel-2));
+  text-align: center;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+}
+
+.queue-kicker {
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.24em;
+  color: var(--accent);
+  margin-bottom: 18px;
+}
+
+/* Three dots that keep time. Motion is the only thing that separates "looking
+   for somebody" from "hung". */
+.queue-spinner {
+  display: flex;
+  justify-content: center;
+  gap: 7px;
+  margin-bottom: 18px;
+}
+
+.queue-spinner span {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: queue-bounce 1.05s ease-in-out infinite;
+}
+
+.queue-spinner span:nth-child(2) {
+  animation-delay: 0.14s;
+}
+
+.queue-spinner span:nth-child(3) {
+  animation-delay: 0.28s;
+}
+
+@keyframes queue-bounce {
+  0%, 70%, 100% { transform: translateY(0); opacity: 0.45; }
+  35% { transform: translateY(-8px); opacity: 1; }
+}
+
+.queue-status {
+  font-size: 18px;
+  font-weight: 900;
+  letter-spacing: -0.01em;
+}
+
+.queue-timer {
+  margin-top: 4px;
+  font-size: 30px;
+  font-weight: 900;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+
+.queue-detail {
+  margin: 8px 0 18px;
+  font-size: 12px;
+  color: var(--text-faint);
+  min-height: 32px;
+}
+
+.queue-card.failed .queue-status {
+  color: var(--red);
+}
+
+.queue-card.failed .queue-detail {
+  color: var(--text-dim);
+}

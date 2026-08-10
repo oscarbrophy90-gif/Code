@@ -321,6 +321,14 @@ export interface GameSettings {
   musicVolume: number;
   touchControls: boolean;
   reducedMotion: boolean;
+  /**
+   * Where the online server is.
+   *
+   * Empty means "wherever this page came from", which is right whenever the
+   * game is served by the server itself. The standalone copy has no origin to
+   * infer from, so that is the case this exists for.
+   */
+  serverUrl: string;
 }
 
 export interface Team {

@@ -3,20 +3,16 @@ import {
   ONLINE_TIERS,
   WINS_PER_DIVISION,
   computeOverall,
-  generateOpponent,
-  hashString,
   onlineRank,
-  rankedOpponent,
   seasonForTime,
   seasonTimeRemaining,
-  tierPopulation,
 } from '@hoops/shared';
 
 import { store } from '../../state/store.ts';
-import { boardSize, worldElapsedMs } from '../../state/board.ts';
+import { findPlayer } from '../matchmaking.ts';
+import { boardSize } from '../../state/board.ts';
 import { navigate } from '../../main.ts';
 import { el, panel } from '../dom.ts';
-import { startMatch } from '../session.ts';
 import { rankPanel, ladderStrip } from '../rankbadge.ts';
 
 /**
@@ -41,7 +37,7 @@ export function renderRank(): HTMLElement {
     el(
       'p',
       { class: 'page-sub' },
-      'Five wins clears a division, three divisions clears a tier. Every opponent is built to the rank you are standing on, so the further you climb the better they get.',
+      'Ranked is online. Every match is against another person who pressed Find Player at the same time as you, and it is the only thing in the game that moves your rank.',
     ),
 
     panel(
@@ -75,7 +71,7 @@ export function renderRank(): HTMLElement {
         ? el(
             'p',
             { class: 'hint', style: 'margin:12px 0 0' },
-            `You are #${position.toLocaleString()} of ${boardSize().toLocaleString()} on the board, with ${tierPopulation(rank.tier.id, worldElapsedMs()).toLocaleString()} other players in ${rank.tier.name}.`,
+            `You are #${position.toLocaleString()} of ${boardSize().toLocaleString()} on the board.`,
           )
         : el(
             'p',
@@ -94,11 +90,10 @@ export function renderRank(): HTMLElement {
           'div',
           {},
           el('div', { class: 'faint', style: 'font-size:11px;font-weight:800;letter-spacing:.1em' }, 'YOUR NEXT OPPONENT'),
-          // Deliberately not their rating or the difficulty. You find out who
-          // they are by playing them, which is the point of a ranked queue —
-          // knowing the number in advance turns every match into a decision
-          // about whether to bother.
-          el('div', { class: 'nextmatch-line' }, 'Somebody at your rank'),
+          // Deliberately not their rating. You find out who they are by playing
+          // them, which is the point of a queue — knowing in advance turns every
+          // match into a decision about whether to bother.
+          el('div', { class: 'nextmatch-line' }, 'A real player, somewhere'),
           el(
             'div',
             { class: 'hint', style: 'margin:6px 0 0' },
@@ -111,9 +106,10 @@ export function renderRank(): HTMLElement {
           'button',
           {
             class: 'btn primary lg',
-            onclick: () => playRanked(),
+            id: 'find-player',
+            onclick: () => void findPlayer(),
           },
-          'Play ranked match',
+          'Find Player',
         ),
       ),
     ),
@@ -161,29 +157,6 @@ function nextLabel(wins: number): string {
 
 function stat(label: string, value: string): HTMLElement {
   return el('div', { class: 'kv' }, el('span', { class: 'k' }, label), el('span', { class: 'v' }, value));
-}
-
-/**
- * Start a ranked game.
- *
- * The opponent is generated from the rank rather than picked, and seeded from
- * the number of games played so a match cannot be re-rolled by backing out and
- * coming in again.
- */
-function playRanked(): void {
-  const record = store.profile.online;
-  const spec = rankedOpponent(record.wins);
-  const seed = hashString(`ranked-${store.profile.userId}-${record.wins}-${record.losses}`);
-  const opponent = generateOpponent(spec.overall, seed);
-
-  startMatch({
-    opponent,
-    difficulty: spec.difficulty,
-    parkId: 'downtown',
-    playlist: 'ranked',
-    ranked: true,
-    eventName: 'Ranked match',
-  });
 }
 
 /** Overall of the current build, for the "you" side of the matchup line. */

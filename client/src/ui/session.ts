@@ -31,6 +31,8 @@ import { audio } from '../engine/audio.ts';
 import { dismissFullscreen, navigate, refresh, showFullscreen } from '../main.ts';
 import { createMatchScreen, type MatchResult } from './match.ts';
 import { playRankChange } from './rankchange.ts';
+import { applySettlement } from './matchmaking.ts';
+import type { Settled } from '../net/online.ts';
 import { bar, el, fmt, overlay, ratio, toast } from './dom.ts';
 import { playWalkout } from './walkout.ts';
 import { AvatarRenderer, livePreview } from './avatar.ts';
@@ -51,6 +53,17 @@ export interface StartMatchOptions {
   ranked?: boolean;
   /** timed training drill instead of a game */
   drill?: DrillDef | null;
+  /** online match: which end of the wire this client is */
+  net?: 'host' | 'guest' | null;
+  /** the person on the other side, when this is an online match */
+  opponentName?: string;
+  /**
+   * The server's verdict on an online match.
+   *
+   * Started before the game so the result cannot be missed while the walkout is
+   * playing, and awaited when the whistle goes.
+   */
+  onSettled?: Promise<Settled | null>;
 }
 
 /** True while a walkout is on screen, so a second one can never stack on it. */
@@ -99,6 +112,7 @@ function launchMatch(opts: StartMatchOptions): void {
     localSide: opts.localSide,
     seed: opts.seed,
     drill: opts.drill,
+    net: opts.net,
     onFinish: (result) => {
       dismissFullscreen();
       const rankBefore = opts.ranked ? store.profile.online.wins : null;
@@ -113,6 +127,17 @@ function launchMatch(opts: StartMatchOptions): void {
       // record. Redrawing it here is what makes a win actually show up; without
       // it you come back to the same rank and the same numbers you left.
       refresh();
+
+      // Online: the rank is whatever the server says it is, and it says so
+      // after both clients have reported. Wait for it, apply it, play whatever
+      // rank change it caused, then show the box score.
+      if (opts.onSettled) {
+        void opts.onSettled.then(async (settled) => {
+          await applySettlement(settled);
+          showResults(result, summary, opts);
+        });
+        return;
+      }
       // The rank change plays first and only when the rank actually moved. A
       // screen you see after every game is a screen you skip after the second
       // one, so it is kept for the moment that earned it.
@@ -171,7 +196,9 @@ function applyResult(result: MatchResult, opts: StartMatchOptions): RewardSummar
   // The rank moves here and nowhere else. A forfeit still counts as a loss —
   // quitting a ranked game you are losing should not be free.
   let rankMove: 'promoted' | 'demoted' | 'none' | undefined;
-  if (opts.ranked) {
+  // Offline ranked no longer exists, but the branch is kept honest: a local
+  // tally is only ever used when there is no server to have seen the match.
+  if (opts.ranked && !opts.net) {
     const moved = store.recordRanked(result.won);
     rankMove = rankChange(moved.before, moved.after);
   }

@@ -1,8 +1,9 @@
 # Hoops Elite
 
-A single-player 1v1 basketball game against CPU opponents: green-bar shooting, six
-genuinely different difficulty levels, a MyPlayer builder with real attribute ceilings,
-badges that level up by playing, five parks and 8-week seasons.
+A 1v1 basketball game: green-bar shooting, six genuinely different CPU difficulty
+levels, a MyPlayer builder with real attribute ceilings, badges that level up by
+playing, five parks, 20-day seasons, and **online ranked matches against real people**
+on a nine-tier ladder that resets every season and pays out when it does.
 
 Everything in it is original. There are no third-party league, club or player names,
 logos, likenesses or animations anywhere in the project — every team, court, crest,
@@ -13,6 +14,9 @@ runtime.
 
 Open **`dist-standalone/HoopsElite.html`** in any browser. It is a single self-contained
 file — no install, no terminal, no server. Progress saves to your browser.
+
+Everything except Ranked works that way. Ranked is played against other people, so it
+needs a server to match you up: see [Online play](#online-play).
 
 ### Run from source
 
@@ -89,24 +93,77 @@ deterministic function in `shared/`** — `stepMatch(state, [inputA, inputB], dt
 client drives side A with your input and side B with the AI. Nothing about that shape
 assumes a local opponent, which is what makes online an addition rather than a rewrite.
 
-## Online later
+## Online play
 
-The game is single-player today. The work needed to add online is already done in
-structure and mostly done in code:
+**Ranked is online. Online is ranked.** Nothing else in the game touches a network:
+Play, the Practice Gym and the drills are all local against the CPU, and none of them
+move your rank. The only way to move it is to beat another person.
 
-- The simulation takes **two input streams** and does not care where they come from.
-  Swapping the AI controller for a network adapter is a one-line change at the call site
-  in `client/src/ui/match.ts`.
-- `shared/src/protocol.ts` defines the wire format, and `shared/src/mmr.ts` the rating
-  and matchmaking maths.
-- `server/` contains a working authoritative server — matchmaking, match rooms running
-  the same `stepMatch`, snapshot broadcast and anti-cheat.
-- `client/src/net/client.ts` contains the prediction and reconciliation client.
+### Running the server
 
-That path was built and verified end to end (two browsers playing a live server-run
-match) before the game was scoped to single player, so what remains is real
-authentication and hosting, not architecture. See
-[`docs/NETWORKING.md`](docs/NETWORKING.md).
+```bash
+npm install
+npm run build      # builds the client, which the server then serves
+npm start          # http://localhost:8787
+```
+
+`server.js` is the whole thing: Express for the page and two JSON endpoints, Socket.io
+for everything live. It needs no build step and no database — records live in
+`server/data/db.json`, written atomically so a crash mid-write cannot corrupt the
+board.
+
+| Endpoint | What it is for |
+| --- | --- |
+| `GET /health` | Is it up, what version, how many are online and queued |
+| `GET /leaderboard` | The board as JSON — the same list the game shows |
+| `/` | The built game, when `client/dist` exists |
+
+### Playing against somebody
+
+Both players open the game, press **Find Player** on the Ranked screen, and the server
+pairs whoever is waiting. The queue screen says how long it has been looking and how
+many people are actually connected, because "Searching…" on its own is
+indistinguishable from broken.
+
+Two machines need to agree on where the server is:
+
+- **Served by the server** (`http://your-host:8787`) — nothing to configure. The game
+  talks to whatever served it.
+- **The standalone HTML**, opened off a desktop, has no origin to infer from. Put the
+  server's address into **Settings → Online server** on both machines. The *Test
+  connection* button tells you which of "wrong address", "server is down" and "wrong
+  version" you are looking at, because from the outside those three look identical.
+
+On one network, that address is the host machine's LAN IP — `http://192.168.1.42:8787`,
+not `localhost`, which means *this* machine on both of them and is why two laptops
+never find each other. To play over the internet, deploy `server.js` anywhere that runs
+Node (Render, Railway, Fly, a VPS) and use that URL.
+
+### How a match actually runs
+
+The server is a post office, not a referee. It matches two people, puts them in a
+Socket.io room and carries their messages; it never simulates the game.
+
+One of the two clients is the **host** and runs the simulation. The **guest** sends its
+input and draws what the host sends back, twenty snapshots a second, eased between
+frames so it looks continuous. That is a deliberate choice over the alternatives:
+
+- *Both simulate in lockstep.* Elegant with a deterministic simulation — and it is
+  deterministic, but only for arithmetic. `Math.sin` and friends are not required to be
+  bit-identical across engines or CPUs, so two browsers can drift apart on one jump shot
+  and never agree again. A desync you cannot detect is the worst failure available.
+- *The server simulates.* Correct, and it means shipping the whole game to the server
+  and keeping two implementations honest for ever.
+
+The unfairness host-authority would otherwise create — the host's presses landing
+instantly while the guest's arrive a round trip late — is paid off by holding the host's
+own input back by the measured one-way latency. Both players' presses then land the same
+distance from the moment they were made.
+
+Results are the server's. It writes both records, and the client takes its rank from
+that rather than counting its own wins, because a client that counts its own wins drifts
+the first time a result does not arrive — and drift in your favour is indistinguishable
+from cheating.
 
 ## Controls
 

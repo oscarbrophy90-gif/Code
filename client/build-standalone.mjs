@@ -65,9 +65,22 @@ html = html.replace(/<link[^>]*href="[^"]*app\.css"[^>]*>/, () => (css ? `<style
 // Vite hoists the bundle into <head>. A module script is deferred and would be
 // fine there, but a classic script is not — it would run before <div id="app">
 // exists. So the inline bundle goes last in <body>.
-html = html.replace('</body>', `<script>\n${js}\n</script>\n</body>`);
+// A function replacement, not a string one. `String.replace` treats `$&`, `$'`
+// and `` $` `` in a *string* replacement as substitution patterns, and the
+// bundle contains `` $` `` — which silently spliced the whole document head
+// into the middle of the JavaScript. A function argument is taken literally.
+html = html.replace('</body>', () => `<script>\n${js}\n</script>\n</body>`);
 
 if (html.includes('app.js')) throw new Error('failed to inline the script bundle');
+// Cheap proof the splice did not corrupt the bundle: the document's own doctype
+// must not appear inside the script it wrapped.
+{
+  const from = html.indexOf('<script>');
+  const to = html.lastIndexOf('</script>');
+  if (html.slice(from + 8, to).includes('doctype html')) {
+    throw new Error('the inlined bundle was corrupted by a substitution pattern');
+  }
+}
 if (!html.includes('</script>\n</body>')) throw new Error('failed to place the inline bundle in <body>');
 
 await mkdir(finalDir, { recursive: true });

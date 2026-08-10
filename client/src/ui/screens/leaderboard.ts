@@ -1,8 +1,9 @@
 import { ONLINE_TIERS, WINS_PER_DIVISION, grandChampLabel, onlineRank } from '@hoops/shared';
 
 import { store } from '../../state/store.ts';
-import { allAccounts, type AccountBuild } from '../../state/accounts.ts';
-import { fullBoard, type BoardEntry } from '../../state/board.ts';
+import { type AccountBuild } from '../../state/accounts.ts';
+import { boardError, cachedBoard, fetchBoard, localBuildsFor, type BoardEntry } from '../../state/board.ts';
+import { online } from '../../net/online.ts';
 import { el, panel } from '../dom.ts';
 import { rankPanel, drawRankBadge } from '../rankbadge.ts';
 import { navigate, refresh } from '../../main.ts';
@@ -10,85 +11,90 @@ import { navigate, refresh } from '../../main.ts';
 /**
  * The leaderboard.
  *
- * Everyone on it — the ranked world and everyone who has played on this copy —
- * on one list, ordered by ranked wins. Since the rank is the win count, that
- * ordering is the rank ordering: nobody is ever listed above somebody who
- * outranks them.
+ * Real players only. Every row is somebody who created a username and finished a
+ * ranked match against another person on this server. Nothing is generated to
+ * fill it out, so a board with three names on it means three people have played
+ * — which is the truth, and more useful than a convincing-looking lie.
  *
- * The world plays while you are away, so the names above you creep up over real
- * days. Climbing past one is worth something because it did not stand still to
- * let you.
+ * It is ordered by ranked wins, and since the rank *is* the win count, that
+ * ordering is the rank ordering: nobody is ever listed above a player who
+ * outranks them.
  */
-
-/** How many of the top are always shown. */
-const TOP_ROWS = 50;
-/** How many either side of you, when you are below that. */
-const WINDOW = 4;
-
 export function renderLeaderboard(): HTMLElement {
-  const board = fullBoard();
   const record = store.profile.online;
-  const myPosition = store.position();
+  const rows = cachedBoard();
 
   const root = el('div', { class: 'wrap' });
+  const listHost = el('div', {});
+
   root.append(
     el('h1', { class: 'page' }, 'Leaderboard'),
     el(
       'p',
       { class: 'page-sub' },
-      'Every ranked player, ordered by wins — so the higher your rank, the higher you sit. The rest of the ladder keeps playing while you are away, so the names above you are moving too.',
+      'Everybody who has played a ranked match on this server, ordered by wins. Real players only — nothing on this board is invented.',
     ),
 
-    panel('Your place', rankPanel(record, myPosition)),
+    panel('Your place', rankPanel(record, store.position())),
     el('div', { style: 'height:14px' }),
-    renderBoard(board, myPosition),
-    el('div', { style: 'height:14px' }),
-    panel(
-      'Add another player',
-      el(
-        'p',
-        { class: 'hint', style: 'margin:0 0 12px' },
-        'Passing the game to somebody else? Give them their own account and their own rank. Everyone who plays here takes their own place on the board.',
-      ),
-      accountSwitcher(),
-    ),
+    listHost,
   );
+
+  const draw = (entries: BoardEntry[], loading: boolean) => {
+    listHost.replaceChildren(
+      entries.length > 0 ? board(entries) : empty(loading),
+      el('div', { style: 'height:14px' }),
+      panel(
+        'Where this comes from',
+        el(
+          'p',
+          { class: 'hint', style: 'margin:0 0 12px' },
+          `The server at ${online.address} keeps the board. Your rank moves there and only there, which is why a result you did not play cannot appear on it.`,
+        ),
+        el(
+          'div',
+          { class: 'row', style: 'gap:8px' },
+          el(
+            'button',
+            {
+              class: 'btn sm',
+              onclick: () => {
+                void fetchBoard(true).then((next) => draw(next, false));
+              },
+            },
+            'Refresh',
+          ),
+          el('button', { class: 'btn sm', onclick: () => navigate('rank') }, 'Play ranked'),
+          el('button', { class: 'btn sm', onclick: () => navigate('settings') }, 'Server settings'),
+        ),
+        boardError() ? el('p', { class: 'hint', style: 'margin:12px 0 0;color:var(--red)' }, boardError()) : null,
+      ),
+    );
+  };
+
+  draw(rows, rows.length === 0);
+  void fetchBoard().then((next) => draw(next, false));
 
   return root;
 }
 
-/**
- * The rows worth drawing.
- *
- * Six hundred rows is a scroll nobody finishes, so it is the top fifty plus a
- * window around wherever you are. Being #418 and having to scroll past four
- * hundred strangers to find yourself is the one thing a leaderboard must not do.
- */
-function visibleRows(board: BoardEntry[], myPosition: number | null): (BoardEntry | 'gap')[] {
-  const rows: (BoardEntry | 'gap')[] = board.slice(0, TOP_ROWS);
-  if (myPosition === null || myPosition <= TOP_ROWS) return rows;
-
-  const from = Math.max(TOP_ROWS, myPosition - 1 - WINDOW);
-  const to = Math.min(board.length, myPosition + WINDOW);
-  if (from > TOP_ROWS) rows.push('gap');
-  rows.push(...board.slice(from, to));
-  return rows;
+function empty(loading: boolean): HTMLElement {
+  return panel(
+    loading ? 'Reading the board…' : 'Nobody has played yet',
+    el(
+      'p',
+      { class: 'hint', style: 'margin:0 0 12px' },
+      loading
+        ? `Asking ${online.address} who is on it.`
+        : 'The board fills up as people finish ranked matches. One game puts you on it.',
+    ),
+    el('button', { class: 'btn sm primary', onclick: () => navigate('rank') }, 'Find a player'),
+  );
 }
 
-function renderBoard(board: BoardEntry[], myPosition: number | null): HTMLElement {
-  const rows = visibleRows(board, myPosition);
-  const played = myPosition !== null;
-
+function board(entries: BoardEntry[]): HTMLElement {
   return panel(
-    `${board.length.toLocaleString()} ranked players`,
-    played
-      ? null
-      : el(
-          'p',
-          { class: 'hint', style: 'margin:0 0 12px' },
-          el('span', {}, 'You are not on it yet — one ranked match puts you on. '),
-          el('button', { class: 'btn sm primary', onclick: () => navigate('rank') }, 'Play a ranked match'),
-        ),
+    entries.length === 1 ? '1 ranked player' : `${entries.length} ranked players`,
     el(
       'div',
       { class: 'lb-head' },
@@ -98,7 +104,7 @@ function renderBoard(board: BoardEntry[], myPosition: number | null): HTMLElemen
       el('span', { style: 'text-align:right' }, 'Wins'),
       el('span', { style: 'text-align:right' }, 'Losses'),
     ),
-    ...rows.map((entry) => (entry === 'gap' ? gapRow() : row(entry, entry.position === myPosition))),
+    ...entries.map((entry) => row(entry)),
     el(
       'p',
       { class: 'hint', style: 'margin:12px 0 0' },
@@ -107,23 +113,19 @@ function renderBoard(board: BoardEntry[], myPosition: number | null): HTMLElemen
   );
 }
 
-function gapRow(): HTMLElement {
-  return el('div', { class: 'lb-gap' }, '···');
-}
-
-function row(entry: BoardEntry, isMe: boolean): HTMLElement {
+function row(entry: BoardEntry): HTMLElement {
   const rank = onlineRank(entry.wins);
   const label = rank.grandChamp ? grandChampLabel(entry.position) : rank.label;
 
   return el(
     'div',
-    { class: `lb-row ${isMe ? 'me' : ''}` },
+    { class: `lb-row ${entry.me ? 'me' : ''}` },
     el('span', { class: 'lb-pos' }, String(entry.position)),
     el(
       'button',
       { class: 'lb-name lb-link', onclick: () => showPlayer(entry) },
       entry.username,
-      isMe ? el('span', { class: 'lb-you' }, 'you') : null,
+      entry.me ? el('span', { class: 'lb-you' }, 'you') : null,
       entry.streak >= 3 ? el('span', { class: 'lb-streak' }, `${entry.streak} in a row`) : null,
     ),
     el('span', { class: 'lb-rank', style: `color:${rank.tier.color}` }, label),
@@ -132,61 +134,17 @@ function row(entry: BoardEntry, isMe: boolean): HTMLElement {
   );
 }
 
-/** Switching between the people who play on this copy. */
-function accountSwitcher(): HTMLElement {
-  const all = allAccounts();
-  return el(
-    'div',
-    { style: 'display:grid;gap:8px' },
-    ...all.map((account) =>
-      el(
-        'div',
-        { class: 'kv' },
-        el(
-          'span',
-          { class: 'k' },
-          account.username,
-          account.id === store.accountId ? el('span', { class: 'lb-you' }, 'playing') : null,
-        ),
-        account.id === store.accountId
-          ? el('span', { class: 'v faint' }, 'current')
-          : el(
-              'button',
-              {
-                class: 'btn sm',
-                onclick: () => {
-                  store.switchAccount(account.id);
-                  refresh();
-                },
-              },
-              'Switch to',
-            ),
-      ),
-    ),
-    el(
-      'button',
-      {
-        class: 'btn sm primary',
-        style: 'justify-self:start;margin-top:4px',
-        onclick: () => {
-          store.addAccount();
-          refresh();
-        },
-      },
-      'New player',
-    ),
-  );
-}
-
 /**
- * One player's card: their rank and every build they have played.
+ * One player's card.
  *
- * The same card for a real account and a world player, because the numbers mean
- * the same thing either way — these are the builds that earned that record.
+ * The record is the server's. The builds are only shown for people who play on
+ * this device, because that is the only place their builds exist — the server
+ * keeps standings, not wardrobes.
  */
 function showPlayer(entry: BoardEntry): void {
   const rank = onlineRank(entry.wins);
   const label = rank.grandChamp ? grandChampLabel(entry.position) : rank.label;
+  const builds = localBuildsFor(entry.username);
 
   const badge = el('canvas', { class: 'rank-badge', style: 'width:72px;height:80px' }) as HTMLCanvasElement;
   requestAnimationFrame(() => drawRankBadge(badge, entry.wins, entry.position));
@@ -209,13 +167,17 @@ function showPlayer(entry: BoardEntry): void {
           el(
             'div',
             { class: 'player-line' },
-            `#${entry.position} on the board · ${entry.wins}W ${entry.losses}L · ${entry.builds.length} build${entry.builds.length === 1 ? '' : 's'}`,
+            `#${entry.position} on the board · ${entry.wins}W ${entry.losses}L · ${entry.lifetimeWins} ranked wins all time · best streak ${entry.bestStreak}`,
           ),
         ),
       ),
-      entry.builds.length > 0
-        ? el('div', { class: 'player-builds' }, ...entry.builds.map(buildCard))
-        : el('p', { class: 'hint', style: 'margin:0 0 16px' }, 'No builds yet.'),
+      builds.length > 0
+        ? el('div', { class: 'player-builds' }, ...builds.map(buildCard))
+        : el(
+            'p',
+            { class: 'hint', style: 'margin:0 0 16px' },
+            'Builds are kept on the machine that made them, so only players who play here show theirs.',
+          ),
       el('button', { class: 'btn', onclick: () => overlay.remove() }, 'Close'),
     ),
   );

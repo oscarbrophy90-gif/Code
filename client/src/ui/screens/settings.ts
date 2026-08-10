@@ -8,6 +8,7 @@ import {
 } from '@hoops/shared';
 
 import { store } from '../../state/store.ts';
+import { online, defaultServerUrl } from '../../net/online.ts';
 import { nameTaken } from '../../state/board.ts';
 import { audio } from '../../engine/audio.ts';
 import { refresh } from '../../main.ts';
@@ -175,6 +176,16 @@ export function renderSettings(): HTMLElement {
           'The name you are known by on the leaderboard. It sits under your build name on the walkout. You can change it once every 30 days.',
         ),
         usernameEditor(),
+      ),
+
+      panel(
+        'Online server',
+        el(
+          'div',
+          { class: 'hint', style: 'margin:0 0 10px' },
+          'Ranked is played online against real people, and this is the server that matches you up. Leave it empty when the game is served by the server itself; type an address when you are running the game from a downloaded file.',
+        ),
+        serverEditor(),
       ),
 
       panel(
@@ -348,4 +359,62 @@ function usernameEditor(): HTMLElement {
     el('div', { class: 'row', style: 'gap:8px;margin-top:10px' }, save),
     message,
   );
+}
+
+
+/**
+ * The server address, with a button that actually checks it.
+ *
+ * A field you can type an address into and never find out whether it works is a
+ * field that generates support questions. The probe says which of "wrong
+ * address", "server is down" and "wrong version" you are looking at, because
+ * from the outside those three look identical.
+ */
+function serverEditor(): HTMLElement {
+  const input = el('input', {
+    type: 'text',
+    value: store.settings.serverUrl,
+    placeholder: defaultServerUrl(),
+    spellcheck: 'false',
+    style: 'width:100%',
+  }) as HTMLInputElement;
+
+  const message = el('div', { class: 'hint', style: 'margin:8px 0 0' }, `Currently using ${online.address}`);
+
+  const test = el(
+    'button',
+    {
+      class: 'btn sm',
+      onclick: async () => {
+        const url = input.value.trim() || defaultServerUrl();
+        message.textContent = `Asking ${url}…`;
+        message.style.color = '';
+        const result = await online.probe(url);
+        message.textContent = result.detail;
+        message.style.color = result.ok ? 'var(--green)' : 'var(--red)';
+      },
+    },
+    'Test connection',
+  );
+
+  const save = el(
+    'button',
+    {
+      class: 'btn sm primary',
+      onclick: () => {
+        const value = input.value.trim();
+        store.update((p) => {
+          p.settings.serverUrl = value;
+        });
+        // The open socket is pointed at the old address; drop it so the next
+        // search reconnects to the new one.
+        online.disconnect();
+        message.textContent = value ? `Saved — using ${value}` : 'Saved — using whatever served this page';
+        message.style.color = 'var(--green)';
+      },
+    },
+    'Save',
+  );
+
+  return el('div', {}, input, el('div', { class: 'row', style: 'gap:8px;margin-top:8px' }, save, test), message);
 }

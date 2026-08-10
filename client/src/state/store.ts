@@ -90,6 +90,7 @@ export function defaultSettings(): GameSettings {
     musicVolume: 0.4,
     touchControls: matchMedia('(pointer: coarse)').matches,
     reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
+    serverUrl: '',
   };
 }
 
@@ -442,6 +443,38 @@ class Store {
     this.saveNow();
     invalidateBoard();
     return { before, after };
+  }
+
+  /**
+   * Takes the server's word for your ranked record.
+   *
+   * Online is the only thing that moves the rank now, and the server is the one
+   * place that saw both halves of the match — so it is the record, and this
+   * overwrites the local one rather than adding to it. A client that counted its
+   * own wins would drift the first time a result did not arrive, and drift in
+   * your favour is indistinguishable from cheating.
+   */
+  applyServerRecord(rec: {
+    wins: number;
+    losses: number;
+    streak: number;
+    bestStreak: number;
+    lifetimeWins: number;
+  }): { before: number; after: number } {
+    const before = this.profile.online.wins;
+    this.update((p) => {
+      const online = p.online;
+      online.wins = Math.max(0, Math.floor(rec.wins));
+      online.losses = Math.max(0, Math.floor(rec.losses));
+      online.streak = rec.streak;
+      online.bestStreak = Math.max(online.bestStreak, rec.bestStreak);
+      online.lifetimeWins = Math.max(online.lifetimeWins, rec.lifetimeWins);
+      online.peakWins = Math.max(online.peakWins ?? 0, online.wins);
+      online.updatedAt = Date.now();
+    });
+    this.saveNow();
+    invalidateBoard();
+    return { before, after: this.profile.online.wins };
   }
 
   update(fn: (p: Profile) => void): void {
