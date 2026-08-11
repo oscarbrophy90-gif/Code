@@ -114,8 +114,15 @@ export interface PlannedActivity {
   target: ActivityTarget | null;
   tags: string[];
   load: Load;
-  kind: 'core' | 'keystone' | 'challenge';
+  /**
+   * `core` is the day's list, `keystone` its headline, `challenge` the optional
+   * bonus, and `extra` is work the user asked for by pressing Generate — which
+   * pays XP but never counts against the lock-in goal or a clean sheet.
+   */
+  kind: 'core' | 'keystone' | 'challenge' | 'extra';
   when: 'morning' | 'daytime' | 'evening' | null;
+  /** A generated routine's individual movements, shown as a checklist. */
+  steps?: string[];
 }
 
 /* ------------------------------------------------------------------ *

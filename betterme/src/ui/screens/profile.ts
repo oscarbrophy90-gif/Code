@@ -14,7 +14,8 @@ import {
 import { store } from '../../state/store.ts';
 import { bar, el, fmt, overlay, panel } from '../dom.ts';
 import { navigate } from '../router.ts';
-import { attributeRadar, attributeRow, overallRing, statTile, streakFlame } from '../widgets.ts';
+import { badgeLadder, overallBadge } from '../badge.ts';
+import { attributeRadar, attributeRow, statTile, streakFlame } from '../widgets.ts';
 
 /**
  * The player card.
@@ -43,7 +44,7 @@ export function renderProfile(): HTMLElement {
       el(
         'div',
         { class: 'card-top' },
-        overallRing(view.overall, { size: 128 }),
+        overallBadge(view.overall, { size: 118 }),
         el(
           'div',
           { class: 'card-id' },
@@ -78,6 +79,27 @@ export function renderProfile(): HTMLElement {
         statTile('Best streak', profile.streak.best, `${profile.streak.totalLockInDays} ${profile.streak.totalLockInDays === 1 ? 'day' : 'days'} locked in`),
         statTile('Days active', profile.stats.daysActive, `${fmt(profile.stats.activitiesCompleted)} activities`),
         statTile('Total XP', fmt(profile.totalXp), `${profile.stats.perfectDays} perfect days`),
+      ),
+    ),
+
+    panel(
+      'Rank badges',
+      badgeLadder(view.overall, (t) =>
+        overlay((close) =>
+          el(
+            'div',
+            { class: 'badge-detail', style: `--tier:${t.color}` },
+            overallBadge(t.min, { size: 132, tier: t, locked: view.overall < t.min, text: String(Math.max(25, t.min)) }),
+            el('h2', {}, t.label),
+            el('p', { class: 'dim' }, t.blurb),
+            el(
+              'p',
+              { class: view.overall >= t.min ? 'good' : 'dim' },
+              view.overall >= t.min ? '✓ Earned' : `${t.min - view.overall} more Overall to unlock.`,
+            ),
+            el('button', { class: 'btn primary wide', onclick: close }, 'Close'),
+          ),
+        ),
       ),
     ),
 

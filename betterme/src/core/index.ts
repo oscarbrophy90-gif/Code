@@ -15,6 +15,8 @@ export * from './survey.ts';
 export * from './seed.ts';
 export * from './catalog.ts';
 export * from './generator.ts';
+export * from './workouts.ts';
+export * from './extras.ts';
 export * from './challenges.ts';
 export * from './achievements.ts';
 export * from './milestones.ts';

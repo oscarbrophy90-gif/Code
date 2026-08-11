@@ -197,18 +197,31 @@ export interface RankTier {
   id: string;
   label: string;
   min: number;
+  /** Face colour of the badge. */
   color: string;
+  /** Darker edge colour, for the metal gradient. */
+  shade: string;
   blurb: string;
 }
 
+/**
+ * The badge ladder.
+ *
+ * Below 70 the badges are plain metal — you are climbing toward the ladder, not
+ * on it. From 70 up every five points is its own colour, which is what makes an
+ * Overall worth chasing past the point where the habits are already working.
+ */
 export const RANK_TIERS: RankTier[] = [
-  { id: 'rookie', label: 'Rookie', min: 0, color: '#8c98ad', blurb: 'Everyone starts here. The first week is the whole game.' },
-  { id: 'prospect', label: 'Prospect', min: 55, color: '#4aa3ff', blurb: 'The habits are showing up. Keep them boring and repeatable.' },
-  { id: 'starter', label: 'Starter', min: 65, color: '#2fd4c4', blurb: 'You are reliable now. Time to raise the weakest area.' },
-  { id: 'star', label: 'Rising Star', min: 73, color: '#3ef07a', blurb: 'Real, visible change. People have started to notice.' },
-  { id: 'allstar', label: 'All-Star', min: 80, color: '#ffc53d', blurb: 'Strong across the board. Very few people get here.' },
-  { id: 'superstar', label: 'Superstar', min: 87, color: '#ff7a3d', blurb: 'Elite consistency. The routine runs you now.' },
-  { id: 'legend', label: 'Legend', min: 93, color: '#ff5c8a', blurb: 'Top of the ladder. Nothing left but holding it.' },
+  { id: 'rookie', label: 'Rookie', min: 0, color: '#6f7a8c', shade: '#333b49', blurb: 'Everyone starts here. The first week is the whole game.' },
+  { id: 'prospect', label: 'Prospect', min: 55, color: '#8a94a6', shade: '#414a5a', blurb: 'The habits are showing up. Keep them boring and repeatable.' },
+  { id: 'starter', label: 'Starter', min: 62, color: '#aab4c6', shade: '#525c6e', blurb: 'You are reliable now. Time to raise the weakest area.' },
+  { id: 'bronze', label: 'Bronze', min: 70, color: '#d08b4a', shade: '#6d3d16', blurb: 'On the ladder. Seventy is further than most people ever get.' },
+  { id: 'silver', label: 'Silver', min: 75, color: '#dfe6f0', shade: '#6f7a8c', blurb: 'Real, visible change. People have started to notice.' },
+  { id: 'gold', label: 'Gold', min: 80, color: '#ffc53d', shade: '#8f5c07', blurb: 'Strong across the board and it is no longer an accident.' },
+  { id: 'amethyst', label: 'Amethyst', min: 85, color: '#b06bff', shade: '#4b2288', blurb: 'Elite consistency. The routine runs you now.' },
+  { id: 'diamond', label: 'Diamond', min: 90, color: '#6fc0ff', shade: '#14538f', blurb: 'Ninety. There is barely anyone up here.' },
+  { id: 'ruby', label: 'Ruby', min: 95, color: '#ff4d5e', shade: '#7c0f1c', blurb: 'Ninety-five. A different person to the one who filled in that survey.' },
+  { id: 'legend', label: 'Legend', min: 99, color: '#ffd75e', shade: '#9a6f08', blurb: 'The top of the ladder. Nothing left but holding it.' },
 ];
 
 export function rankTierFor(overall: number): RankTier {

@@ -42,12 +42,50 @@ survey → starting card → today's list → tick things off
    people, interests, and three free-text questions.
 2. **Starting card.** Nine attributes seeded 30–72, and an Overall.
 3. **Lock In screen.** 4–7 activities a day, sized to the time you said you had,
-   plus one optional bonus challenge.
+   plus one optional bonus challenge — and a live countdown to midnight, because
+   a daily game without a visible deadline is just a list.
 4. **Completing an activity** pays XP into your account level *and* into the
    attribute it belongs to. Enough attribute XP ticks the rating up.
 5. **Locking in the day** (60% of the core list) extends your streak.
 6. **End-of-day summary** shows what you did, what you earned, and whether the
    Overall moved.
+
+## Rank badges
+
+Overall earns a shield, and the ladder is the reason to keep pushing a number
+that already looks fine. Ten tiers: plain metal below 70 (Rookie, Prospect,
+Starter), then a colour every five points — Bronze 70, Silver 75, Gold 80,
+Amethyst 85, Diamond 90, Ruby 95, Legend 99.
+
+Drawn as inline SVG in `ui/badge.ts`, not shipped as images: sharp at any size,
+themed off the tier colour, and a new tier costs one line. Locked tiers keep
+their colour and show a padlock — the whole ladder is visible from day one,
+because "seven more Overall to Bronze" is a target and a grey box is not.
+
+## Generate more
+
+The daily plan is deliberately short. The **Generate more** button is the release
+valve for days you have more in you: pick a section — any of the nine, or
+*surprise me* — and get one more activity built for your current rating in it.
+
+Picking **Build me a workout** produces an actual session rather than a card that
+says "train": warm-up, main lifts by movement pattern, accessories, sets, reps,
+a coaching cue per exercise, and a cool-down (`core/workouts.ts`). If today's
+plan already says "gym session", the routine is written *into* that card instead
+of adding a second session.
+
+The rails are the same ones the daily generator obeys — asking for more work is
+never a way around them:
+
+- Six extras a day, maximum.
+- Barbell work 16+, loaded work 14+, bodyweight below that. Impact movements are
+  dropped entirely for an injury, and no session is built at all for someone who
+  reported limited mobility.
+- The weekly hard-session budget and the one-hard-session-a-day rule both hold.
+  When they bite, you get lighter work and a line saying exactly why.
+- Extras pay full XP but never count toward the lock-in goal, and leaving one
+  undone cannot cost you a clean sheet. Asking for more work must not be able to
+  make your day look worse.
 
 ## The numbers
 
@@ -169,12 +207,14 @@ betterme/
     seed.ts        survey → traits + starting ratings
     catalog.ts     every activity in the game
     generator.ts   what this person does today
+    workouts.ts    the exercise pool and session builder
+    extras.ts      "generate more", on demand, per section
     progress.ts    completing, undoing, streaks, day rollover
     challenges.ts  weekly objectives
     achievements.ts / milestones.ts / motivation.ts
   src/state/       localStorage persistence + subscribe/notify store
   src/ui/          plain-DOM screens, hand-rolled SVG charts
-  test/            38 tests driving the engine directly
+  test/            48 tests driving the engine directly
 ```
 
 `core/` being pure is what lets a test simulate a full year of progression in

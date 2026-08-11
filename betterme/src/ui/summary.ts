@@ -1,7 +1,7 @@
 import { ATTRIBUTE_META, daySummary, longDate, type DateKey } from '../core/index.ts';
 import { store } from '../state/store.ts';
 import { countUp, el, fmt, overlay } from './dom.ts';
-import { overallRing } from './widgets.ts';
+import { overallBadge } from './badge.ts';
 
 /**
  * End-of-day summary.
@@ -20,9 +20,9 @@ export function showDaySummary(date: DateKey): void {
 
   overlay(
     (close) => {
-      const ring = overallRing(summary.overallAfter, { size: 116, delta: overallUp > 0 ? overallUp : 0 });
-      const value = ring.querySelector('.ring-value');
-      if (value instanceof HTMLElement && overallUp > 0) countUp(value, summary.overallBefore, summary.overallAfter, 900);
+      const ring = overallBadge(summary.overallAfter, { size: 104 });
+      const value = ring.querySelector('.badge-number');
+      if (value && overallUp > 0) countUp(value, summary.overallBefore, summary.overallAfter, 900);
 
       return el(
         'div',

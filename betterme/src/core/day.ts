@@ -78,11 +78,33 @@ export function longDate(key: DateKey): string {
   return `${weekdayLabel(key)}, ${shortDate(key)}`;
 }
 
-/** Milliseconds until the next local midnight — used to roll the day over live. */
+/** Milliseconds until the next local midnight. */
 export function msUntilMidnight(now: number = Date.now()): number {
   const d = new Date(now);
-  const next = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1, 0, 0, 2, 0);
-  return Math.max(1000, next.getTime() - now);
+  const next = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1, 0, 0, 0, 0);
+  return Math.max(0, next.getTime() - now);
+}
+
+/**
+ * When to wake up and roll the day over. Two seconds past midnight, so the
+ * timer can never fire a hair early and regenerate *today* instead of tomorrow.
+ */
+export function msUntilRollover(now: number = Date.now()): number {
+  return Math.max(1000, msUntilMidnight(now) + 2000);
+}
+
+/**
+ * The countdown label. `6h 12m left today` above an hour, seconds below it —
+ * the last hour is when the number is actually doing any work.
+ */
+export function formatTimeLeft(ms: number): string {
+  const total = Math.floor(Math.max(0, ms) / 1000);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  if (hours > 0) return `${hours}h ${minutes}m left today`;
+  if (minutes > 0) return `${minutes}m ${String(seconds).padStart(2, '0')}s left today`;
+  return `${seconds}s left today`;
 }
 
 export type PartOfDay = 'morning' | 'afternoon' | 'evening' | 'night';

@@ -230,7 +230,7 @@ export function fillTokens(text: string, traits: Traits): string {
     .replace(/\{waterTarget\}/g, String(traits.waterTargetGlasses));
 }
 
-function instantiate(
+export function instantiate(
   template: ActivityTemplate,
   ctx: PlanContext,
   rng: Rng,
@@ -394,9 +394,14 @@ function sortPlan(plan: PlannedActivity[]): PlannedActivity[] {
   });
 }
 
+/** The activities the day is actually judged on: not the bonus, not the extras. */
+export function coreActivities(plan: PlannedActivity[]): PlannedActivity[] {
+  return plan.filter((a) => a.kind === 'core' || a.kind === 'keystone');
+}
+
 /** How many of the day's core activities count as "locked in". */
 export function lockInGoal(plan: PlannedActivity[]): number {
-  const core = plan.filter((a) => a.kind !== 'challenge').length;
+  const core = coreActivities(plan).length;
   return Math.max(1, Math.min(core, Math.ceil(core * 0.6)));
 }
 

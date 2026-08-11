@@ -8,7 +8,7 @@ import {
   type Milestone,
 } from '../core/index.ts';
 import { countUp, el, overlay, prefersReducedMotion, toast, toastHost } from './dom.ts';
-import { overallRing } from './widgets.ts';
+import { overallBadge } from './badge.ts';
 
 /**
  * The reward layer.
@@ -95,9 +95,9 @@ export function overallUpScene(from: number, to: number): void {
         const crossedTier = rankTierFor(from).id !== tier.id;
         const close = overlay(
           (dismiss) => {
-            const ring = overallRing(to, { size: 148 });
-            const value = ring.querySelector('.ring-value');
-            if (value instanceof HTMLElement) countUp(value, from, to, 900);
+            const ring = overallBadge(to, { size: 150 });
+            const value = ring.querySelector('.badge-number');
+            if (value) countUp(value, from, to, 900);
             const body = el(
               'div',
               { class: 'scene overall-up' },

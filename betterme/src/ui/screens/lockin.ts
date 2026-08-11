@@ -1,6 +1,8 @@
 import {
   ATTRIBUTE_META,
   comebackLine,
+  coreActivities,
+  extrasLeft,
   greeting,
   levelProgress,
   lockInGoal,
@@ -8,15 +10,17 @@ import {
   MAX_SWAPS_PER_DAY,
   partOfDay,
   profileView,
-  rankTierFor,
   tierLabel,
   type DayRecord,
   type PlannedActivity,
   type Profile,
 } from '../../core/index.ts';
 import { store } from '../../state/store.ts';
+import { overallBadge } from '../badge.ts';
 import { celebrate } from '../celebrate.ts';
+import { midnightCountdown } from '../countdown.ts';
 import { bar, el, fmt, toast } from '../dom.ts';
+import { openGenerateSheet } from '../generate.ts';
 import { navigate } from '../router.ts';
 import { showDaySummary } from '../summary.ts';
 import { streakFlame } from '../widgets.ts';
@@ -36,7 +40,7 @@ export function renderLockIn(): HTMLElement {
 
   const view = profileView(profile);
   const goal = lockInGoal(day.plan);
-  const core = day.plan.filter((a) => a.kind !== 'challenge');
+  const core = coreActivities(day.plan);
   const coreDone = core.filter((a) => day.completed.includes(a.id)).length;
 
   return el(
@@ -50,12 +54,12 @@ export function renderLockIn(): HTMLElement {
       { class: 'task-list' },
       day.plan.map((activity) => taskCard(activity, day)),
     ),
+    generateRow(),
     footer(day, coreDone, goal),
   );
 }
 
 function header(profile: Profile, view: ReturnType<typeof profileView>): HTMLElement {
-  const tier = rankTierFor(view.overall);
   const level = levelProgress(profile.totalXp);
 
   return el(
@@ -76,7 +80,7 @@ function header(profile: Profile, view: ReturnType<typeof profileView>): HTMLEle
     el(
       'button',
       { class: 'level-strip', onclick: () => navigate('profile'), 'aria-label': 'Open your profile' },
-      el('span', { class: 'ovr-pill', style: `--tier:${tier.color}` }, el('b', {}, String(view.overall)), el('em', {}, 'OVR')),
+      overallBadge(view.overall, { size: 52, className: 'badge-inline' }),
       el(
         'span',
         { class: 'level-body' },
@@ -126,6 +130,7 @@ function progressCard(day: DayRecord, goal: number, coreDone: number, coreTotal:
       el('div', { class: 'row gap center' }, el('b', { class: 'xp-total' }, `+${fmt(xp)}`), el('span', { class: 'dim' }, 'XP today')),
     ),
     bar(total === 0 ? 0 : done / total, '#3ef07a'),
+    midnightCountdown(),
     el(
       'p',
       { class: `lock-note ${day.lockedIn ? 'on' : ''}` },
@@ -169,11 +174,19 @@ function taskCard(activity: PlannedActivity, day: DayRecord): HTMLElement {
         el('span', { class: 'attr-tag' }, meta.icon, ' ', meta.label),
         activity.kind === 'challenge' ? el('span', { class: 'chip challenge' }, '★ Challenge') : null,
         activity.kind === 'keystone' ? el('span', { class: 'chip keystone' }, '◆ Keystone') : null,
+        activity.kind === 'extra' ? el('span', { class: 'chip extra' }, '+ Extra') : null,
         el('span', { class: `chip tier-${activity.tier}` }, tierLabel(activity.tier)),
         el('span', { class: 'xp-chip' }, `+${activity.xp}`),
       ),
       el('h4', {}, activity.title),
       el('p', { class: 'dim' }, activity.detail),
+      activity.steps
+        ? el(
+            'ol',
+            { class: 'routine' },
+            activity.steps.map((step) => el('li', {}, step)),
+          )
+        : null,
       el(
         'div',
         { class: 'task-foot' },
@@ -197,6 +210,29 @@ function taskCard(activity: PlannedActivity, day: DayRecord): HTMLElement {
   );
 
   return card;
+}
+
+function generateRow(): HTMLElement | null {
+  const profile = store.profile;
+  if (!profile) return null;
+  const left = extrasLeft(profile, store.today);
+  return el(
+    'div',
+    { class: 'generate-row' },
+    el(
+      'button',
+      { class: 'btn generate', onclick: openGenerateSheet, disabled: left <= 0 },
+      el('span', { class: 'generate-plus' }, '+'),
+      el('span', {}, left > 0 ? 'Generate more to do' : 'That is enough for today'),
+    ),
+    el(
+      'p',
+      { class: 'dim small center' },
+      left > 0
+        ? `Pick an area — gym session, study, sleep, anything — and get one more built for your rating. ${left} left today.`
+        : 'You have generated six extras today. Rest is part of it.',
+    ),
+  );
 }
 
 function toggle(activity: PlannedActivity, done: boolean, card: HTMLElement): void {

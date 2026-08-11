@@ -1,8 +1,10 @@
 import {
+  addExtra,
   createProfile,
   completeActivity,
   dateKey,
   daysBetween,
+  msUntilRollover,
   emptyAttributeXp,
   openDay,
   PROFILE_VERSION,
@@ -11,6 +13,8 @@ import {
   undoActivity,
   type CompletionResult,
   type DateKey,
+  type ExtraResult,
+  type ExtraSection,
   type DayOpened,
   type DayRecord,
   type PlannedActivity,
@@ -201,12 +205,10 @@ export class Store {
   private scheduleMidnight(now: number): void {
     if (this.midnightTimer) clearTimeout(this.midnightTimer);
     if (typeof setTimeout !== 'function') return;
-    const next = new Date(now);
-    next.setHours(24, 0, 2, 0);
     this.midnightTimer = setTimeout(() => {
       this.openToday();
       this.commit();
-    }, Math.max(1000, next.getTime() - now));
+    }, msUntilRollover(now));
   }
 
   /* -------------------------------------------------------------- *
@@ -229,6 +231,14 @@ export class Store {
     const ok = undoActivity(this.profile, this.today, activityId);
     if (ok) this.commit();
     return ok;
+  }
+
+  /** Generates one more activity for today in the section the user chose. */
+  generateExtra(section: ExtraSection): ExtraResult | null {
+    if (!this.profile) return null;
+    const result = addExtra(this.profile, this.today, section);
+    if (result) this.commit();
+    return result;
   }
 
   swapActivity(activityId: string): PlannedActivity | null {

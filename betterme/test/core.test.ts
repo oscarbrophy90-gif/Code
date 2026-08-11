@@ -16,9 +16,23 @@ import {
   daysBetween,
   defaultSurvey,
   deriveTraits,
+  formatTimeLeft,
+  msUntilMidnight,
+  msUntilRollover,
+  addExtra,
+  buildWorkout,
+  canBuildWorkout,
+  coreActivities,
+  EXERCISES,
+  extrasLeft,
   generatePlan,
   isEligible,
+  MAX_EXTRAS_PER_DAY,
   planContext,
+  RANK_TIERS,
+  rankTierFor,
+  Rng,
+  workoutAvailable,
   levelForXp,
   levelProgress,
   lockInGoal,
@@ -65,7 +79,12 @@ function survey(overrides: Partial<SurveyAnswers> = {}): SurveyAnswers {
 const START = '2026-03-02'; // a Monday
 
 function makeProfile(overrides: Partial<SurveyAnswers> = {}): Profile {
-  return createProfile(survey(overrides), Date.parse(`${START}T08:00:00`));
+  const profile = createProfile(survey(overrides), Date.parse(`${START}T08:00:00`));
+  // Profile ids carry a random component, and the generator is seeded off them.
+  // Pinning it here makes every plan in this file reproducible run to run —
+  // without it, assertions about variety and coverage are quietly flaky.
+  profile.id = `test-${JSON.stringify(overrides)}`;
+  return profile;
 }
 
 /** Completes every activity on `date`, returning total XP earned. */
@@ -92,6 +111,21 @@ test('date keys are local, ordered and reversible', () => {
   // Lexical order has to match chronological order — history pruning relies on it.
   assert.ok('2026-03-02' < '2026-03-10');
   assert.equal(dateKey(Date.parse('2026-03-02T23:59:00')), '2026-03-02');
+});
+
+test('the countdown reads down to local midnight', () => {
+  const evening = Date.parse('2026-03-02T18:30:00');
+  assert.equal(msUntilMidnight(evening), 5.5 * 3600 * 1000);
+  assert.equal(formatTimeLeft(msUntilMidnight(evening)), '5h 30m left today');
+
+  assert.equal(formatTimeLeft(48 * 60 * 1000 + 9000), '48m 09s left today');
+  assert.equal(formatTimeLeft(9000), '9s left today');
+  assert.equal(formatTimeLeft(0), '0s left today');
+  assert.equal(formatTimeLeft(-500), '0s left today');
+
+  // The rollover timer must always land *after* midnight, never a hair before.
+  const justBefore = Date.parse('2026-03-02T23:59:59');
+  assert.ok(msUntilRollover(justBefore) > msUntilMidnight(justBefore));
 });
 
 test('weeks are Monday-anchored and seven days long', () => {
@@ -649,6 +683,155 @@ test('milestones fire once and pay out once', () => {
   }
   assert.ok(seen.length > 0, 'forty days of work should hit some milestones');
   assert.equal(new Set(seen).size, seen.length, 'no milestone should fire twice');
+});
+
+/* ------------------------------------------------------------------ *
+ * Generate more — extras and workouts
+ * ------------------------------------------------------------------ */
+
+test('extras are added on demand, in the section asked for', () => {
+  const profile = makeProfile();
+  openDay(profile, START);
+  assert.equal(extrasLeft(profile, START), MAX_EXTRAS_PER_DAY);
+
+  const result = addExtra(profile, START, 'mindset');
+  assert.ok(result);
+  assert.equal(result.activity.kind, 'extra');
+  assert.equal(result.activity.attribute, 'mindset');
+  assert.ok(profile.days[START].plan.includes(result.activity));
+  assert.equal(extrasLeft(profile, START), MAX_EXTRAS_PER_DAY - 1);
+});
+
+test('extras pay XP and raise ratings like anything else', () => {
+  const profile = makeProfile();
+  openDay(profile, START);
+  const extra = addExtra(profile, START, 'skills');
+  assert.ok(extra);
+
+  const before = profile.attributeXp.skills;
+  const result = completeActivity(profile, START, extra.activity.id);
+  assert.ok(result);
+  assert.ok(result.xp.total > 0);
+  assert.ok(profile.attributeXp.skills > before);
+});
+
+test('extras never change the lock-in goal or spoil a clean sheet', () => {
+  const profile = makeProfile();
+  const { day } = openDay(profile, START);
+  const goalBefore = lockInGoal(day.plan);
+  const coreBefore = coreActivities(day.plan).length;
+
+  for (let i = 0; i < 3; i++) addExtra(profile, START, 'any');
+  assert.equal(lockInGoal(profile.days[START].plan), goalBefore, 'the bar to lock in must not move');
+  assert.equal(coreActivities(profile.days[START].plan).length, coreBefore);
+
+  // Clear the day's own list but leave the extras — still a clean sheet.
+  for (const activity of profile.days[START].plan.filter((a) => a.kind !== 'extra')) {
+    completeActivity(profile, START, activity.id);
+  }
+  assert.equal(profile.stats.perfectDays, 1, 'asking for more work should not cost a perfect day');
+  assert.ok(profile.days[START].plan.some((a) => a.kind === 'extra' && !profile.days[START].completed.includes(a.id)));
+});
+
+test('extras stop at the daily cap', () => {
+  const profile = makeProfile({ timeBudgetMinutes: 120 });
+  openDay(profile, START);
+  let added = 0;
+  for (let i = 0; i < MAX_EXTRAS_PER_DAY + 4; i++) if (addExtra(profile, START, 'any')) added++;
+  assert.ok(added <= MAX_EXTRAS_PER_DAY, `added ${added} extras, cap is ${MAX_EXTRAS_PER_DAY}`);
+  assert.equal(extrasLeft(profile, START), MAX_EXTRAS_PER_DAY - added);
+});
+
+test('extras obey the same safety rails as the daily plan', () => {
+  // Injured: no high-load work can be generated, however many times you ask.
+  const injured = makeProfile({ limitations: ['injury'], focus: ['fitness'] });
+  openDay(injured, START);
+  for (let i = 0; i < MAX_EXTRAS_PER_DAY; i++) {
+    const result = addExtra(injured, START, 'fitness');
+    if (!result) break;
+    assert.notEqual(result.activity.load, 'high');
+    assert.ok(!result.activity.tags.includes('impact'));
+  }
+
+  // The weekly hard-session budget cannot be spent twice by generating.
+  const beginner = makeProfile({ fitnessLevel: 1, focus: ['fitness'] });
+  openDay(beginner, START);
+  for (let i = 0; i < MAX_EXTRAS_PER_DAY; i++) addExtra(beginner, START, 'workout');
+  const heavy = beginner.days[START].plan.filter((a) => a.load === 'high').length;
+  assert.ok(heavy <= 1, `${heavy} high-load sessions in one day`);
+});
+
+test('asking for a workout fills in the session already on the plan', () => {
+  const profile = makeProfile({ equipment: ['gym'], focus: ['fitness'], fitnessLevel: 4, timeBudgetMinutes: 120 });
+  // Find a day whose plan actually contains the gym session.
+  let date = START;
+  for (let i = 0; i < 20; i++) {
+    const { day } = openDay(profile, date);
+    if (day.plan.some((a) => a.templateId === 'gym-strength')) break;
+    for (const activity of [...day.plan]) completeActivity(profile, date, activity.id);
+    date = addDays(date, 1);
+  }
+  const day = profile.days[date];
+  const session = day.plan.find((a) => a.templateId === 'gym-strength');
+  if (!session) return; // no gym day in the window; nothing to assert
+
+  const planSize = day.plan.length;
+  const result = addExtra(profile, date, 'workout');
+  assert.ok(result);
+  assert.equal(result.mode, 'filled', 'it should write the routine into the session, not add a second one');
+  assert.equal(profile.days[date].plan.length, planSize, 'no extra card for a session already planned');
+  assert.ok(session.steps && session.steps.length >= 4, 'the planned session now carries the routine');
+  assert.equal(extrasLeft(profile, date), MAX_EXTRAS_PER_DAY, 'filling in a routine is not spending an extra');
+});
+
+test('a generated workout is a real session, scaled to the rating', () => {
+  const profile = makeProfile({ equipment: ['gym'], age: 22 });
+  assert.equal(workoutAvailable(profile), true);
+
+  const light = buildWorkout(profile.traits, 38, new Rng(1));
+  const heavy = buildWorkout(profile.traits, 82, new Rng(1));
+  assert.ok(light && heavy);
+  assert.ok(light.steps.length >= 4, 'even a beginner session needs a warm-up, work and a cool-down');
+  assert.ok(heavy.steps.length > light.steps.length, 'a stronger person gets more work');
+  assert.ok(heavy.xp > light.xp);
+  assert.match(light.steps[0], /min/, 'every session opens with a warm-up');
+  assert.match(light.steps[light.steps.length - 1], /Cool down/);
+
+  // No duplicated movements inside one session.
+  const names = heavy.steps.slice(1, -1).map((s) => s.split(' — ')[0]);
+  assert.equal(new Set(names).size, names.length, 'a session should not repeat a movement');
+});
+
+test('workouts respect age and equipment', () => {
+  const teen = makeProfile({ age: 14, equipment: ['gym'] });
+  const workout = buildWorkout(teen.traits, 70, new Rng(7));
+  assert.ok(workout);
+  const barbell = EXERCISES.filter((e) => (e.minAge ?? 0) > 14).map((e) => e.name);
+  for (const step of workout.steps) {
+    for (const name of barbell) assert.ok(!step.startsWith(name), `${name} was programmed for a 14-year-old`);
+  }
+  assert.notEqual(workout.tier, 'elite', 'a teen never gets an elite session');
+
+  const bodyweightOnly = makeProfile({ equipment: [] });
+  const home = buildWorkout(bodyweightOnly.traits, 55, new Rng(3));
+  assert.ok(home, 'a session should still be buildable with no equipment at all');
+  assert.equal(home.place, 'home');
+
+  const limited = makeProfile({ limitations: ['low-mobility'] });
+  assert.equal(canBuildWorkout(limited.traits), false);
+});
+
+test('the badge ladder is ordered, gapless and covers every Overall', () => {
+  for (let i = 1; i < RANK_TIERS.length; i++) {
+    assert.ok(RANK_TIERS[i].min > RANK_TIERS[i - 1].min, 'tier thresholds must increase');
+  }
+  assert.equal(RANK_TIERS[0].min, 0, 'there has to be a badge for someone on day one');
+  assert.equal(new Set(RANK_TIERS.map((t) => t.id)).size, RANK_TIERS.length);
+  for (let overall = 25; overall <= 99; overall++) {
+    const tier = rankTierFor(overall);
+    assert.ok(overall >= tier.min, `Overall ${overall} resolved to a tier it has not reached`);
+  }
+  assert.equal(rankTierFor(99).id, 'legend');
 });
 
 /* ------------------------------------------------------------------ *

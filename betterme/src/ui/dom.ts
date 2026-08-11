@@ -147,8 +147,11 @@ export function panel(title: string | null, ...children: (Child | Child[])[]): H
   return el('section', { class: 'panel' }, title ? el('h3', { class: 'panel-title' }, title) : null, ...children);
 }
 
-/** Counts a number up, because a rating that ticks is worth more than one that appears. */
-export function countUp(node: HTMLElement, from: number, to: number, ms = 700): void {
+/**
+ * Counts a number up, because a rating that ticks is worth more than one that
+ * appears. Takes any Element — the Overall lives inside an SVG badge.
+ */
+export function countUp(node: Element, from: number, to: number, ms = 700): void {
   if (from === to || prefersReducedMotion()) {
     node.textContent = String(Math.round(to));
     return;

@@ -2,7 +2,8 @@ import { computeOverall, currentAttributes, emptyAttributeXp, progressFor, ratin
 import { newlyEarned, type Achievement } from './achievements.ts';
 import { refreshWeekly } from './challenges.ts';
 import { addDays, dateKey, daysBetween, type DateKey } from './day.ts';
-import { generatePlan, lockInGoal, swapActivity } from './generator.ts';
+import { coreActivities, generatePlan, lockInGoal, swapActivity } from './generator.ts';
+import { extrasLeft, generateExtra, type ExtraResult, type ExtraSection } from './extras.ts';
 import { levelForXp, levelProgress } from './levels.ts';
 import { reachedMilestones, type Milestone } from './milestones.ts';
 import { completionLine, lockInLine, summaryLine } from './motivation.ts';
@@ -295,7 +296,10 @@ export function completeActivity(
 
   const lockedInNow = evaluateLockIn(profile, day);
 
-  if (!day.perfectCounted && day.completed.length === day.plan.length && day.plan.length > 0) {
+  // A clean sheet is the day's own list. Generating extra work and leaving one
+  // undone must not be able to take it away — asking for more is not a failure.
+  const scored = day.plan.filter((a) => a.kind !== 'extra');
+  if (!day.perfectCounted && scored.length > 0 && scored.every((a) => day.completed.includes(a.id))) {
     day.perfectCounted = true;
     stats.perfectDays++;
   }
@@ -352,8 +356,7 @@ export function completeActivity(
 
 function evaluateLockIn(profile: Profile, day: DayRecord): boolean {
   if (day.lockedIn) return false;
-  const core = day.plan.filter((a) => a.kind !== 'challenge');
-  const done = core.filter((a) => day.completed.includes(a.id)).length;
+  const done = coreActivities(day.plan).filter((a) => day.completed.includes(a.id)).length;
   if (done < lockInGoal(day.plan)) return false;
 
   day.lockedIn = true;
@@ -442,8 +445,7 @@ export function undoActivity(profile: Profile, date: DateKey, activityId: string
     stats.perfectDays = Math.max(0, stats.perfectDays - 1);
   }
 
-  const core = day.plan.filter((a) => a.kind !== 'challenge');
-  const done = core.filter((a) => day.completed.includes(a.id)).length;
+  const done = coreActivities(day.plan).filter((a) => day.completed.includes(a.id)).length;
   if (day.lockedIn && done < lockInGoal(day.plan)) {
     day.lockedIn = false;
     // If this lock-in was the one that set the record, the record goes with it —
@@ -479,6 +481,27 @@ export function swap(profile: Profile, date: DateKey, activityId: string, now: n
   return replacement;
 }
 
+/**
+ * Adds one on-demand activity to today, in a section the user picked.
+ *
+ * Everything the daily generator refuses to do, this refuses to do too — age
+ * gates, injuries, the weekly hard-session budget. "Give me more" is a request
+ * for more work, not a way around the rails.
+ */
+export function addExtra(profile: Profile, date: DateKey, section: ExtraSection, now: number = Date.now()): ExtraResult | null {
+  const day = profile.days[date];
+  if (!day) return null;
+  const result = generateExtra(profile, date, section);
+  if (!result) return null;
+  if (result.mode === 'added') day.plan.push(result.activity);
+  profile.updatedAt = now;
+  return result;
+}
+
+export function extrasRemaining(profile: Profile, date: DateKey): number {
+  return extrasLeft(profile, date);
+}
+
 /* ------------------------------------------------------------------ *
  * Reading the day back
  * ------------------------------------------------------------------ */
@@ -505,7 +528,7 @@ export function daySummary(profile: Profile, date: DateKey): DaySummary | null {
   if (!day) return null;
   const completed = day.plan.filter((a) => day.completed.includes(a.id));
   const missed = day.plan.filter((a) => !day.completed.includes(a.id));
-  const core = day.plan.filter((a) => a.kind !== 'challenge');
+  const core = coreActivities(day.plan);
 
   const attributeDeltas = ATTRIBUTE_KEYS.map((key) => ({
     key,
@@ -519,7 +542,7 @@ export function daySummary(profile: Profile, date: DateKey): DaySummary | null {
     missed,
     xp: day.xpEarned,
     lockedIn: day.lockedIn,
-    perfect: day.plan.length > 0 && completed.length === day.plan.length,
+    perfect: day.perfectCounted,
     overallBefore: day.overallStart,
     overallAfter: day.overallEnd,
     attributeDeltas,

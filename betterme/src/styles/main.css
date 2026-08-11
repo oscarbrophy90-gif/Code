@@ -1967,3 +1967,218 @@ textarea.input {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ------------------------------------------------------------------ *
+ * Rank badges
+ * ------------------------------------------------------------------ */
+
+.badge {
+  position: relative;
+  flex-shrink: 0;
+  line-height: 0;
+}
+.badge-svg {
+  display: block;
+  filter: drop-shadow(0 6px 16px rgba(0, 0, 0, 0.5)) drop-shadow(0 0 14px color-mix(in srgb, var(--tier) 40%, transparent));
+}
+.badge.locked .badge-svg {
+  filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.5));
+  opacity: 0.75;
+}
+.badge-number {
+  font-family: var(--font);
+  font-size: 41px;
+  font-weight: 900;
+  letter-spacing: -0.03em;
+}
+.badge-ovr {
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0.22em;
+}
+.badge-inline .badge-svg {
+  filter: drop-shadow(0 0 10px color-mix(in srgb, var(--tier) 45%, transparent));
+}
+
+.badge-ladder {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(78px, 1fr));
+  gap: 10px 4px;
+}
+.ladder-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 0;
+  border-radius: 12px;
+  transition: transform 0.15s;
+}
+.ladder-item:active {
+  transform: scale(0.94);
+}
+.ladder-label {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* ------------------------------------------------------------------ *
+ * Countdown to midnight
+ * ------------------------------------------------------------------ */
+
+.countdown {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+.countdown b {
+  font-weight: 700;
+}
+.countdown-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 8px var(--green);
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+.countdown.soon {
+  color: var(--amber);
+}
+.countdown.soon .countdown-dot {
+  background: var(--amber);
+  box-shadow: 0 0 8px var(--amber);
+}
+@keyframes pulse-dot {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Generate more
+ * ------------------------------------------------------------------ */
+
+.generate-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 2px;
+}
+.btn.generate {
+  width: 100%;
+  gap: 10px;
+  background: linear-gradient(135deg, rgba(160, 107, 255, 0.18), rgba(74, 163, 255, 0.14));
+  border: 1px dashed rgba(160, 107, 255, 0.55);
+  color: #d9c7ff;
+}
+.btn.generate:active {
+  background: rgba(160, 107, 255, 0.26);
+}
+.generate-plus {
+  font-size: 20px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.generate-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.gen-workout {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  padding: 14px;
+  border-radius: 14px;
+  background: linear-gradient(135deg, rgba(255, 107, 74, 0.16), var(--panel-2));
+  border: 1px solid rgba(255, 107, 74, 0.45);
+}
+.gen-workout-icon {
+  font-size: 26px;
+}
+.gen-workout b {
+  display: block;
+  font-size: 15px;
+}
+.gen-workout em {
+  font-style: normal;
+  font-size: 12px;
+  line-height: 1.35;
+}
+.gen-arrow {
+  font-size: 22px;
+  color: var(--text-dim);
+}
+
+.gen-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.gen-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 12px 6px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--line);
+  transition: all 0.15s;
+}
+.gen-tile:active {
+  transform: scale(0.95);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.gen-tile.focus {
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.gen-icon {
+  font-size: 20px;
+}
+.gen-name {
+  font-size: 11px;
+  font-weight: 700;
+}
+.gen-rating {
+  font-size: 15px;
+  font-weight: 900;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Generated routines — the exercise list inside a task card. */
+.routine {
+  margin: 4px 0 8px;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.routine li {
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--text-dim);
+}
+.routine li::marker {
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.chip.extra {
+  color: #c7a6ff;
+  border-color: rgba(160, 107, 255, 0.5);
+  background: rgba(160, 107, 255, 0.12);
+}
+.task-card.kind-extra {
+  border-left-style: dashed;
+}
