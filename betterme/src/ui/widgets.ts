@@ -51,7 +51,11 @@ export function overallRing(overall: number, opts: { size?: number; label?: stri
 export function attributeRadar(attributes: Attributes, opts: { size?: number; compare?: Attributes } = {}): HTMLElement {
   const size = opts.size ?? 240;
   const center = size / 2;
-  const radius = center - 28;
+  const radius = center - 30;
+  // The axis labels sit outside the polygon, and the left/right ones are the
+  // widest words on the chart. The viewBox is stretched sideways so "Education"
+  // and "Discipline" have somewhere to go instead of being sliced off.
+  const gutter = 58;
   const keys = ATTRIBUTE_KEYS;
   const step = (Math.PI * 2) / keys.length;
 
@@ -81,8 +85,8 @@ export function attributeRadar(attributes: Attributes, opts: { size?: number; co
 
   const labels = keys.map((key, i) => {
     const angle = -Math.PI / 2 + i * step;
-    const x = center + Math.cos(angle) * (radius + 16);
-    const y = center + Math.sin(angle) * (radius + 16);
+    const x = center + Math.cos(angle) * (radius + 14);
+    const y = center + Math.sin(angle) * (radius + 14);
     return svg(
       'text',
       {
@@ -102,7 +106,12 @@ export function attributeRadar(attributes: Attributes, opts: { size?: number; co
     { class: 'radar' },
     svg(
       'svg',
-      { viewBox: `0 0 ${size} ${size}`, width: '100%', role: 'img', 'aria-label': 'Attribute radar' },
+      {
+        viewBox: `${-gutter} 0 ${size + gutter * 2} ${size}`,
+        width: '100%',
+        role: 'img',
+        'aria-label': 'Attribute radar',
+      },
       ...grid,
       opts.compare
         ? svg('polygon', { points: polygon(opts.compare), fill: 'rgba(255,255,255,.05)', stroke: 'rgba(255,255,255,.25)', 'stroke-width': 1, 'stroke-dasharray': '4 4' })

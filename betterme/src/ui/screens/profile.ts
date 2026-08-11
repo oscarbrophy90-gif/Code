@@ -75,7 +75,7 @@ export function renderProfile(): HTMLElement {
         'div',
         { class: 'card-stats' },
         statTile('Started at', view.seedOverall, `now ${view.overall}`),
-        statTile('Best streak', profile.streak.best, `${profile.streak.totalLockInDays} days locked in`),
+        statTile('Best streak', profile.streak.best, `${profile.streak.totalLockInDays} ${profile.streak.totalLockInDays === 1 ? 'day' : 'days'} locked in`),
         statTile('Days active', profile.stats.daysActive, `${fmt(profile.stats.activitiesCompleted)} activities`),
         statTile('Total XP', fmt(profile.totalXp), `${profile.stats.perfectDays} perfect days`),
       ),

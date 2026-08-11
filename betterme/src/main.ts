@@ -58,7 +58,7 @@ function renderNav(): void {
   }
 }
 
-function render(): void {
+function render(scrollTo?: number): void {
   if (!store.profile) {
     clear(root!);
     root!.appendChild(
@@ -71,11 +71,13 @@ function render(): void {
     return;
   }
   setReducedMotion(store.profile.settings.reducedMotion);
-  const previous = body.scrollTop;
-  if (previous > 0) scrollMemory.set(route, previous);
+  // Re-rendering in place (ticking a task off) must not move the page under the
+  // user's thumb, so the current scroll is held unless the caller asks for a
+  // specific position — which only happens when the route actually changes.
+  const y = scrollTo ?? body.scrollTop;
   clear(body);
   body.appendChild(SCREENS[route]());
-  body.scrollTop = scrollMemory.get(route) ?? 0;
+  body.scrollTop = y;
   renderNav();
 }
 
@@ -83,15 +85,14 @@ function mountShell(): void {
   clear(root!);
   root!.appendChild(body);
   root!.appendChild(nav);
-  render();
+  render(0);
   offerPendingSummary();
 }
 
 function go(next: Route): void {
   scrollMemory.set(route, body.scrollTop);
   route = next;
-  render();
-  body.scrollTop = scrollMemory.get(next) ?? 0;
+  render(scrollMemory.get(next) ?? 0);
 }
 
 setNavigator(go);
