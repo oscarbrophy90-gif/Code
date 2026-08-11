@@ -29,8 +29,25 @@ npm run build:standalone   # regenerate dist-standalone/HoopsElite.html
 Every game is against the CPU. The project is structured so online multiplayer can be
 added later without a rewrite — see [Online later](#online-later).
 
-`npm test` runs the simulation and balance tests. `npm run typecheck` covers all three
-packages. `npm run build` produces the production client bundle.
+`npm test` runs both apps' test suites. `npm run typecheck` covers every package.
+`npm run build` produces the production client bundle.
+
+## Also in this repo: BetterMe
+
+**[BetterMe](docs/BETTERME.md)** is a second, separate app living in `betterme/` — a
+real-life progression game built on the same idea as MyPlayer, except the card is you.
+You fill in a survey about your actual life, it gives you nine attributes and an
+Overall, and then it hands you a short list of real things to do each day: train,
+study, sleep, practise, call someone. Doing them raises the numbers.
+
+```
+npm run dev:betterme      # http://localhost:5174
+npm run build:betterme
+npm run test:betterme
+```
+
+It shares nothing with Hoops Elite but the toolchain — separate workspace, separate
+build, separate save data.
 
 ## What actually works
 

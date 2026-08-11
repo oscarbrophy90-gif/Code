@@ -7,5 +7,14 @@
       "@hoops/shared/*": ["./shared/src/*"]
     }
   },
-  "include": ["shared/src/**/*.ts", "shared/test/**/*.ts", "client/src/**/*.ts", "server/src/**/*.ts", "client/vite.config.ts"]
+  "include": [
+    "shared/src/**/*.ts",
+    "shared/test/**/*.ts",
+    "client/src/**/*.ts",
+    "server/src/**/*.ts",
+    "client/vite.config.ts",
+    "betterme/src/**/*.ts",
+    "betterme/test/**/*.ts",
+    "betterme/vite.config.ts"
+  ]
 }

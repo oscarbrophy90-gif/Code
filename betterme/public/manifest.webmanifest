@@ -1,0 +1,18 @@
+{
+  "name": "BetterMe",
+  "short_name": "BetterMe",
+  "description": "Level up yourself, not a character.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#07090e",
+  "theme_color": "#07090e",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

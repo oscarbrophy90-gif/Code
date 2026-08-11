@@ -5,14 +5,20 @@
   "description": "Hoops Elite - a competitive 1v1 basketball game with green-bar shooting, MyPlayer progression, badges, parks and seasons.",
   "workspaces": [
     "shared",
-    "client"
+    "client",
+    "betterme"
   ],
   "scripts": {
     "dev": "npm run dev --workspace=client",
     "build": "npm run build --workspace=client",
     "preview": "npm run preview --workspace=client",
+    "dev:betterme": "npm run dev --workspace=@betterme/app",
+    "build:betterme": "npm run build --workspace=@betterme/app",
+    "preview:betterme": "npm run preview --workspace=@betterme/app",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test --experimental-strip-types shared/test/*.test.ts",
+    "test": "npm run test:hoops && npm run test:betterme",
+    "test:hoops": "node --test --experimental-strip-types shared/test/*.test.ts",
+    "test:betterme": "node --test --experimental-strip-types betterme/test/*.test.ts",
     "build:standalone": "node client/build-standalone.mjs",
     "start": "node server.js",
     "server": "node --watch server.js"
