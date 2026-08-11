@@ -20,6 +20,7 @@
     "test:hoops": "node --test --experimental-strip-types shared/test/*.test.ts",
     "test:betterme": "node --test --experimental-strip-types betterme/test/*.test.ts",
     "build:standalone": "node client/build-standalone.mjs",
+    "build:standalone:betterme": "node betterme/build-standalone.mjs",
     "start": "node server.js",
     "server": "node --watch server.js"
   },

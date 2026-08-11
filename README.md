@@ -40,9 +40,12 @@ You fill in a survey about your actual life, it gives you nine attributes and an
 Overall, and then it hands you a short list of real things to do each day: train,
 study, sleep, practise, call someone. Doing them raises the numbers.
 
+Open **`dist-standalone/BetterMe.html`** to try it — same deal as Hoops Elite,
+one self-contained file, no server.
+
 ```
-npm run dev:betterme      # http://localhost:5174
-npm run build:betterme
+npm run dev:betterme                 # http://localhost:5174
+npm run build:standalone:betterme    # regenerate dist-standalone/BetterMe.html
 npm run test:betterme
 ```
 

@@ -8,11 +8,24 @@ do every day. Doing them raises real numbers.
 
 Lives at `betterme/`, entirely separate from Hoops Elite.
 
+### Just open it
+
+**`dist-standalone/BetterMe.html`** — one self-contained file. Double-click it,
+or drag it into any browser. No install, no terminal, no server. Your profile
+saves to that browser.
+
+The save is tied to the file's location, so moving or renaming the file looks
+like a fresh start. Settings → Export backup gets your data out, and Import puts
+it back.
+
+### Run from source
+
 ```
-npm run dev:betterme      # http://localhost:5174
-npm run build:betterme
+npm run dev:betterme                 # http://localhost:5174
+npm run build:betterme               # production bundle
+npm run build:standalone:betterme    # regenerate dist-standalone/BetterMe.html
 npm run test:betterme
-npm run typecheck         # covers both apps
+npm run typecheck                    # covers both apps
 ```
 
 ---

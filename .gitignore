@@ -10,6 +10,7 @@ server/data/*.json
 *.tsbuildinfo
 
 client/standalone-build/
+betterme/standalone-build/
 
 # Recovery copies the server writes when it finds a board it cannot parse.
 server/data/*.corrupt-*
