@@ -24,6 +24,7 @@ import {
   STORE_BY_ID,
   ballThroughRim,
   dribbleBounceIndex,
+  type CourtSurface,
 } from '@hoops/shared';
 
 import { createGuestLink, createHostLink, type NetLink } from '../net/netlink.ts';
@@ -68,6 +69,8 @@ export interface MatchOptions {
    * game, which is everything except ranked.
    */
   net?: 'host' | 'guest' | null;
+  /** the court drawn for this game; falls back to the park's own palette */
+  surface?: CourtSurface | null;
   onFinish: (result: MatchResult) => void;
 }
 
@@ -129,7 +132,11 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
   let drillReps = 0;
   let drillTimeLeft = drill ? drill.durationSeconds : 0;
   let drillRunning = false;
-  const courtColor = courtColorFor(store.player.loadout.courtId);
+  // The drawn court wins over an equipped one: the draw is the whole point of
+  // the reel, and a cosmetic that quietly overrode it would make the animation
+  // a lie.
+  const surface = opts.surface ?? null;
+  const courtColor = surface ? surface.floor : courtColorFor(store.player.loadout.courtId);
 
   // ------------------------------------------------------------------ canvas
   let width = 0;
@@ -626,7 +633,7 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
     }
 
     courtRenderer.drawBackdrop(ctx, park, width, height, state.time);
-    courtRenderer.drawCourt(ctx, cam, park, courtColor);
+    courtRenderer.drawCourt(ctx, cam, park, courtColor, surface);
     courtRenderer.drawHoop(ctx, cam, park, netSwing);
 
     // Shadows first so nobody's shadow lands on a body.

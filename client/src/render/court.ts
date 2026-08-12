@@ -1,4 +1,4 @@
-import { COURT, type ParkDef } from '@hoops/shared';
+import { COURT, type CourtSurface, type ParkDef } from '@hoops/shared';
 import type { Camera } from '../engine/camera.ts';
 
 /** Draws the park backdrop and the halfcourt itself in projected 3D. */
@@ -155,7 +155,20 @@ export class CourtRenderer {
     ctx.stroke();
   }
 
-  drawCourt(ctx: CanvasRenderingContext2D, cam: Camera, park: ParkDef, courtColor: string | null): void {
+  drawCourt(
+    ctx: CanvasRenderingContext2D,
+    cam: Camera,
+    park: ParkDef,
+    courtColor: string | null,
+    surface: CourtSurface | null = null,
+  ): void {
+    // A drawn court replaces the park's palette wholesale — floor, key, lines
+    // and apron — and always brings the cage with it. Anything less and the
+    // card on the reel would not match the floor you land on.
+    const palette = surface
+      ? { ...park.palette, floor: surface.floor, paint: surface.paint, line: surface.line, apron: surface.apron, fence: true }
+      : park.palette;
+    park = { ...park, palette };
     const floor = courtColor ?? park.palette.floor;
     const HW = COURT.halfWidth;
     const D = COURT.playDepth;

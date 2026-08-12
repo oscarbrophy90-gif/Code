@@ -17,6 +17,7 @@ import {
 import { scoutReport } from '../src/scouting.ts';
 import { RANK_REWARDS, rewardsUpTo, seasonPayout } from '../src/rankrewards.ts';
 import { RANK_ITEMS, RANK_TITLES } from '../src/data/rankpack.ts';
+import { COURT_SURFACES, buildReel, pickCourtSurface } from '../src/data/courts.ts';
 import { TITLE_BY_ID } from '../src/data/titles.ts';
 import { SEASON_COVERS, SEASON_EPOCH, SEASON_LENGTH_DAYS, SEASON_LENGTH_MS } from '../src/seasons.ts';
 import { DEFAULT_TITLES, newlyEarnedTitles, streakBadge } from '../src/data/titles.ts';
@@ -2514,5 +2515,53 @@ test('nothing the ranked path pays out can be bought or is given away', () => {
   const rankedItemIds = new Set(RANK_ITEMS.map((i) => i.id));
   for (const id of DEFAULT_UNLOCKS) {
     assert.ok(!rankedItemIds.has(id), `${id} should be earned, not given`);
+  }
+});
+
+
+test('the court draw is seeded, weighted, and lands where the reel says', () => {
+  // Same seed, same court — which is what makes two clients in an online match
+  // stand on the same floor.
+  for (const seed of [1, 99, 123456, 0xffff]) {
+    assert.equal(pickCourtSurface(seed).id, pickCourtSurface(seed).id);
+  }
+
+  // Every court can come up, and the rare one is genuinely rarer.
+  const counts = new Map<string, number>();
+  for (let seed = 0; seed < 4000; seed++) {
+    const id = pickCourtSurface(seed).id;
+    counts.set(id, (counts.get(id) ?? 0) + 1);
+  }
+  for (const court of COURT_SURFACES) {
+    assert.ok((counts.get(court.id) ?? 0) > 0, `${court.name} never came up in 4000 draws`);
+  }
+  const common = counts.get('cage-green') ?? 0;
+  const rare = counts.get('midnight-blacktop') ?? 0;
+  assert.ok(rare < common, 'the rare court should be rarer than a common one');
+  assert.ok(rare > 40, `expected the rare court sometimes, got ${rare} in 4000`);
+
+  // The reel is a way of showing a decision already made: the winner sits at
+  // the index the animation stops on, every time.
+  for (const seed of [7, 4242, 987654]) {
+    const winner = pickCourtSurface(seed);
+    const strip = buildReel(seed, winner);
+    assert.equal(strip.length, 44);
+    assert.equal(strip[38].id, winner.id, 'the card under the marker is the winner');
+    // And no court repeats inside a three-card window, or the reel reads as a
+    // rendering fault rather than a shuffle.
+    for (let i = 2; i < strip.length; i++) {
+      if (i === 38 || i === 37 || i === 36) continue; // the winner is placed, not shuffled
+      assert.notEqual(strip[i].id, strip[i - 1].id);
+      assert.notEqual(strip[i].id, strip[i - 2].id);
+    }
+  }
+
+  // Every court is drawable: the card and the floor read the same six fields.
+  for (const court of COURT_SURFACES) {
+    for (const key of ['floor', 'paint', 'line', 'apron', 'tint'] as const) {
+      assert.match(court[key], /^#[0-9a-f]{6}$/i, `${court.name}.${key} should be a hex colour`);
+    }
+    assert.ok(court.weight > 0);
+    assert.ok(court.name.length > 0 && court.blurb.length > 0);
   }
 });

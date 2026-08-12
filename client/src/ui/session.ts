@@ -17,6 +17,8 @@ import {
   drillReward,
   MEDAL_COLOR,
   PARK_BY_ID,
+  hashString,
+  type CourtSurface,
   type DrillDef,
   type BadgeState,
   type ChallengeMetric,
@@ -31,6 +33,7 @@ import { audio } from '../engine/audio.ts';
 import { dismissFullscreen, navigate, refresh, showFullscreen } from '../main.ts';
 import { createMatchScreen, type MatchResult } from './match.ts';
 import { playRankChange } from './rankchange.ts';
+import { playCourtRoll } from './courtroll.ts';
 import { applySettlement } from './matchmaking.ts';
 import type { Settled } from '../net/online.ts';
 import { bar, el, fmt, overlay, ratio, toast } from './dom.ts';
@@ -55,6 +58,8 @@ export interface StartMatchOptions {
   drill?: DrillDef | null;
   /** online match: which end of the wire this client is */
   net?: 'host' | 'guest' | null;
+  /** the court drawn for this game, filled in by the draw */
+  surface?: CourtSurface | null;
   /** the person on the other side, when this is an online match */
   opponentName?: string;
   /**
@@ -97,9 +102,12 @@ export function startMatch(opts: StartMatchOptions): void {
     },
     nameEffectId: store.player.loadout.nameEffectId,
     bannerId: store.player.loadout.bannerId,
-  }).then(() => {
+  }).then(async () => {
     walkoutUp = false;
-    launchMatch(opts);
+    // The court draw. Seeded from the match, so an online pair sees the same
+    // reel land on the same floor.
+    const surface = await playCourtRoll(document.body, opts.seed ?? hashString(`court-${Date.now()}`));
+    launchMatch({ ...opts, surface });
   });
 }
 
@@ -113,6 +121,7 @@ function launchMatch(opts: StartMatchOptions): void {
     seed: opts.seed,
     drill: opts.drill,
     net: opts.net,
+    surface: opts.surface ?? null,
     onFinish: (result) => {
       dismissFullscreen();
       const rankBefore = opts.ranked ? store.profile.online.wins : null;
