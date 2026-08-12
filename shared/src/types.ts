@@ -359,6 +359,10 @@ export interface ParkDef {
     line: string;
     accent: string;
     ambient: string;
+    /** the surround outside the lines; defaults to a darkened floor */
+    apron?: string;
+    /** caged outdoor court: chain-link perimeter, benches, portable stanchion */
+    fence?: boolean;
   };
   timeOfDay: 'dawn' | 'day' | 'dusk' | 'night';
   courts: number;

@@ -160,13 +160,16 @@ export class CourtRenderer {
     const HW = COURT.halfWidth;
     const D = COURT.playDepth;
 
-    // Apron beyond the playing surface so the court sits in a place.
+    // The apron: the surround outside the lines. On a caged court it is a
+    // colour in its own right — the orange band the fence stands in — rather
+    // than a darker version of the playing surface.
+    const apron = park.palette.apron ?? mix(floor, '#05070b', 0.55);
     this.poly(ctx, cam, [
       [-HW - 9, -5],
       [HW + 9, -5],
       [HW + 9, D + 10],
       [-HW - 9, D + 10],
-    ], mix(floor, '#05070b', 0.55));
+    ], apron);
 
     // Main surface with a subtle depth gradient painted per-strip.
     const strips = 22;
@@ -189,13 +192,19 @@ export class CourtRenderer {
 
     const line = park.palette.line;
 
-    // Paint / key.
+    // Paint / key. Solid on a caged court, tinted on an indoor floor.
     this.poly(ctx, cam, [
       [-COURT.keyHalfWidth, 0],
       [COURT.keyHalfWidth, 0],
       [COURT.keyHalfWidth, COURT.freeThrowZ],
       [-COURT.keyHalfWidth, COURT.freeThrowZ],
-    ], hexA(park.palette.paint, 0.85), 0.01);
+    ], park.palette.fence ? park.palette.paint : hexA(park.palette.paint, 0.85), 0.01);
+
+    // The half-court circle, painted the same colour as the key. Only half of
+    // it is on this floor — a 1v1 court is one end of a full one.
+    if (park.palette.fence) {
+      this.poly(ctx, cam, arc(0, D, 6, -6, 6, 32).concat([[6, D], [-6, D]]), park.palette.paint, 0.008);
+    }
 
     // Sidelines and baseline.
     this.strokePath(ctx, cam, [
@@ -234,6 +243,161 @@ export class CourtRenderer {
       [-HW, D],
       [HW, D],
     ], hexA(line, 0.55), 0.22);
+
+    if (park.palette.fence) this.drawCage(ctx, cam, park);
+  }
+
+  /**
+   * The cage: chain-link perimeter, courtside benches and the hoop's stanchion.
+   *
+   * Drawn as geometry in the same projected space as the floor rather than as a
+   * backdrop image, so it sits in the world properly — a player running to the
+   * corner passes in front of the fence, and the posts get smaller with depth
+   * exactly as the court lines do.
+   */
+  private drawCage(ctx: CanvasRenderingContext2D, cam: Camera, park: ParkDef): void {
+    const HW = COURT.halfWidth + 7;
+    const back = -4;
+    const front = COURT.playDepth + 8;
+    const H = 10;
+
+    // Benches down both sides, behind the fence line.
+    for (const sign of [-1, 1]) {
+      for (let row = 0; row < 2; row++) {
+        const x = sign * (HW - 1.6 - row * 2.6);
+        const y = 1.4 + row * 1.2;
+        const z0 = 4 + row * 3;
+        const z1 = front - 8 - row * 3;
+        // Seat plank.
+        this.poly(ctx, cam, [
+          [x - 0.9, z0],
+          [x + 0.9, z0],
+          [x + 0.9, z1],
+          [x - 0.9, z1],
+        ], row === 0 ? '#b0763a' : '#96612c', y);
+        // The front edge, so the plank reads as a solid thing with a thickness.
+        this.poly(ctx, cam, [
+          [x - 0.9, z0],
+          [x - 0.9, z1],
+          [x - 0.9, z1],
+          [x - 0.9, z0],
+        ], '#7d4f22', y);
+      }
+    }
+
+    // Chain-link. A mesh tone plus uprights: at this distance the weave reads
+    // as a wash and the posts are what tell you it is a fence.
+    //
+    // The run along the front is deliberately missing. The camera stands behind
+    // the baseline looking up the floor, so a fence there would be between you
+    // and the game — and the near halves of the side runs are behind the camera
+    // entirely, which is what `fenceRun` clips away segment by segment.
+    const runs: [number, number, number, number][] = [
+      [-HW, back, HW, back],
+      [-HW, back, -HW, front],
+      [HW, back, HW, front],
+    ];
+    for (const [x0, z0, x1, z1] of runs) {
+      this.fenceRun(ctx, cam, x0, z0, x1, z1, H);
+    }
+
+    // The portable stanchion the backboard is bolted to, standing on the apron
+    // behind the baseline.
+    const sz = COURT.backboardZ - 3.2;
+    this.poly(ctx, cam, [[-2.2, sz - 1.8], [2.2, sz - 1.8], [2.2, sz + 1.2], [-2.2, sz + 1.2]], '#23262e', 0.35);
+    // The mast, drawn as a tapering column from the base up to the board.
+    const baseL = cam.project(-0.5, 0.4, sz);
+    const baseR = cam.project(0.5, 0.4, sz);
+    const topL = cam.project(-0.28, COURT.backboardBottomY + 0.6, sz + 0.6);
+    const topR = cam.project(0.28, COURT.backboardBottomY + 0.6, sz + 0.6);
+    if (baseL.depth > 0 && topR.depth > 0) {
+      ctx.beginPath();
+      ctx.moveTo(baseL.x, baseL.y);
+      ctx.lineTo(baseR.x, baseR.y);
+      ctx.lineTo(topR.x, topR.y);
+      ctx.lineTo(topL.x, topL.y);
+      ctx.closePath();
+      ctx.fillStyle = '#2b2f37';
+      ctx.fill();
+    }
+    // The arm that carries the board out over the baseline.
+    const armA = cam.project(0, COURT.backboardBottomY + 1.1, sz + 0.6);
+    const armB = cam.project(0, COURT.backboardBottomY + 1.1, COURT.backboardZ);
+    if (armA.depth > 0 && armB.depth > 0) {
+      ctx.strokeStyle = '#2b2f37';
+      ctx.lineWidth = Math.max(2, armA.scale * 0.09);
+      ctx.beginPath();
+      ctx.moveTo(armA.x, armA.y);
+      ctx.lineTo(armB.x, armB.y);
+      ctx.stroke();
+    }
+  }
+
+  /**
+   * One run of chain-link: a translucent mesh panel and its posts.
+   *
+   * Walked in segments rather than drawn as one quad. A run down the side of
+   * the court starts behind the camera and ends forty feet up the floor, and a
+   * single quad through the camera plane projects into a wild diagonal across
+   * the sky — which is exactly what it did. Per-segment, anything behind the
+   * camera is simply skipped and the rest lands where it should.
+   */
+  private fenceRun(
+    ctx: CanvasRenderingContext2D,
+    cam: Camera,
+    x0: number,
+    z0: number,
+    x1: number,
+    z1: number,
+    height: number,
+  ): void {
+    const segments = 18;
+    ctx.save();
+
+    for (let i = 0; i < segments; i++) {
+      const ta = i / segments;
+      const tb = (i + 1) / segments;
+      const ax = x0 + (x1 - x0) * ta;
+      const az = z0 + (z1 - z0) * ta;
+      const bx = x0 + (x1 - x0) * tb;
+      const bz = z0 + (z1 - z0) * tb;
+
+      const foot0 = cam.project(ax, 0, az);
+      const foot1 = cam.project(bx, 0, bz);
+      const top0 = cam.project(ax, height, az);
+      const top1 = cam.project(bx, height, bz);
+      if (foot0.depth <= 0.2 || foot1.depth <= 0.2 || top0.depth <= 0.2 || top1.depth <= 0.2) continue;
+
+      // The weave, as a flat wash. Drawing every link would be thousands of
+      // lines a frame for something that reads as a grey haze anyway.
+      ctx.beginPath();
+      ctx.moveTo(foot0.x, foot0.y);
+      ctx.lineTo(foot1.x, foot1.y);
+      ctx.lineTo(top1.x, top1.y);
+      ctx.lineTo(top0.x, top0.y);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(198, 210, 222, 0.16)';
+      ctx.fill();
+
+      // Top rail.
+      ctx.strokeStyle = 'rgba(26, 30, 38, 0.75)';
+      ctx.lineWidth = Math.max(1, top0.scale * 0.03);
+      ctx.beginPath();
+      ctx.moveTo(top0.x, top0.y);
+      ctx.lineTo(top1.x, top1.y);
+      ctx.stroke();
+
+      // A post every third segment, so spacing stays even along the run.
+      if (i % 3 === 0) {
+        ctx.strokeStyle = 'rgba(22, 26, 33, 0.9)';
+        ctx.lineWidth = Math.max(1, foot0.scale * 0.04);
+        ctx.beginPath();
+        ctx.moveTo(foot0.x, foot0.y);
+        ctx.lineTo(top0.x, top0.y);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
   }
 
   /** Backboard, rim and net, drawn after the floor and before the players. */

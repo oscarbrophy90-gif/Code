@@ -23,11 +23,15 @@ export const PARKS: ParkDef[] = [
     tagline: 'Chain nets, cracked asphalt, and a crowd that never leaves.',
     palette: {
       sky: ['#3d5a80', '#98c1d9'],
-      floor: '#4a4f5c',
-      paint: '#33384a',
-      line: '#e8eef5',
+      // The caged blacktop: green playing surface, orange key and apron, white
+      // lines. Everything else about the park is unchanged.
+      floor: '#1f8f6b',
+      paint: '#d8542f',
+      line: '#f4f8fb',
       accent: '#ee6c4d',
       ambient: '#c9d6e3',
+      apron: '#c94a29',
+      fence: true,
     },
     timeOfDay: 'day',
     courts: 6,
