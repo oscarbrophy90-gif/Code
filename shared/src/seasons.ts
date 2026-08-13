@@ -79,7 +79,17 @@ const SEASON_ACCENTS: [string, string][] = [
 export const SEASON_COVERS = 6;
 
 export function seasonForTime(time: number): SeasonDef {
-  const index = Math.max(0, Math.floor((time - SEASON_EPOCH) / SEASON_LENGTH_MS));
+  return seasonByIndex(Math.max(0, Math.floor((time - SEASON_EPOCH) / SEASON_LENGTH_MS)));
+}
+
+/**
+ * A season from its number alone.
+ *
+ * The season that just ended is the one a report is about, and by the time the
+ * report is read the clock has already moved on — so it has to be reachable by
+ * index rather than only by asking what time it is.
+ */
+export function seasonByIndex(index: number): SeasonDef {
   const rng = new Rng(hashString(`hoops-season-${index}`));
   // Drawn in a fixed order so the same index always builds the same season.
   const first = SEASON_FIRST[rng.int(0, SEASON_FIRST.length)];
@@ -102,6 +112,13 @@ export function seasonForTime(time: number): SeasonDef {
     accentAlt,
     cover,
   };
+}
+
+/** The season an id like "S12" names, or null if it is not one. */
+export function seasonFromId(id: string): SeasonDef | null {
+  const m = /^S(\d+)$/.exec(id);
+  if (!m) return null;
+  return seasonByIndex(Math.max(0, Number(m[1]) - 1));
 }
 
 export function seasonTimeRemaining(time: number): { days: number; hours: number; minutes: number; percent: number } {

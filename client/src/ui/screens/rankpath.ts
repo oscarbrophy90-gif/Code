@@ -1,7 +1,7 @@
 import {
   DIVISIONS_PER_TIER,
   ONLINE_TIERS,
-  RANK_REWARDS,
+  rankRewardsFor,
   STORE_BY_ID,
   TITLE_BY_ID,
   POINTS_PER_DIVISION,
@@ -33,8 +33,10 @@ export function renderRankPath(): HTMLElement {
   const left = seasonTimeRemaining(Date.now());
   const owned = new Set(store.hasPlayer ? store.player.unlocked : []);
 
-  const banked = RANK_REWARDS.filter((_, i) => i <= peakIndex);
-  const bankedCoins = banked.reduce((sum, tier) => sum + tier.coins, 0);
+  // The path belongs to the season, so this is the one currently being played
+  // for — the reason nothing on it is ticked off the morning a season starts.
+  const path = rankRewardsFor(season);
+  const bankedCoins = path.slice(0, peakIndex + 1).reduce((sum, tier) => sum + tier.coins, 0);
 
   const root = el('div', { class: 'wrap' });
   root.append(
@@ -47,7 +49,7 @@ export function renderRankPath(): HTMLElement {
     el(
       'p',
       { class: 'page-sub' },
-      `Every rank pays out when the season ends, and it pays against the highest rank you held — not where you finish. Reaching a rank banks everything below it too.`,
+      `Every rank pays out when the season ends, and it pays against the highest rank you held — not where you finish. Reaching a rank banks everything below it too. This path belongs to ${season.title}: when the season turns over the ladder resets and a new path, named after the new season, takes its place.`,
     ),
 
     panel(
@@ -83,7 +85,7 @@ export function renderRankPath(): HTMLElement {
     el('div', { style: 'height:14px' }),
   );
 
-  RANK_REWARDS.forEach((tier, i) => {
+  path.forEach((tier, i) => {
     root.append(tierCard(tier, i, peakIndex, owned), el('div', { style: 'height:10px' }));
   });
 

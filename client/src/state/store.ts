@@ -10,6 +10,7 @@ import {
   generateChallenges,
   levelForXp,
   seasonForTime,
+  seasonByIndex,
   startingAttributes,
   STORE_BY_ID,
   syncChallengeStates,
@@ -25,6 +26,8 @@ import {
   applyRankedResult,
   type RankedMove,
   seasonPayout,
+  seasonFromId,
+  registerOwnedSeasons,
   SEASON_EPOCH,
   SEASON_LENGTH_MS,
   type OnlineRecord,
@@ -285,7 +288,11 @@ class Store {
     const peak = Math.max(online.peakRp ?? 0, online.rp);
     const player = this.profile.players[this.profile.activeSlot];
 
-    const payout = player ? seasonPayout(peak, player.unlocked) : null;
+    // The path that is being paid out belongs to the season that just *ended*,
+    // which by now is not the current one — settling against the incoming
+    // season would hand out the new path before anybody had climbed it.
+    const ending = seasonFromId(previous) ?? seasonByIndex(Math.max(0, season.index - 1));
+    const payout = player ? seasonPayout(peak, ending, player.unlocked) : null;
     if (payout && player) {
       player.currency += payout.coins;
       const granted = [...payout.items, ...payout.titles];
@@ -386,6 +393,10 @@ class Store {
         }
       }
     }
+
+    // Every season the save is carrying rewards from has to be resolvable, or
+    // an item earned four seasons ago quietly vanishes out of the Locker.
+    registerOwnedSeasons(this.profile.players.flatMap((p) => p.unlocked), now);
 
     this.profile.challenges = syncChallengeStates(generateChallenges(now), this.profile.challenges);
     this.profile.settings = { ...defaultSettings(), ...this.profile.settings };

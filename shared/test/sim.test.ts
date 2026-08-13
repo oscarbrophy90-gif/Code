@@ -15,13 +15,13 @@ import {
   wingspanFor,
 } from '../src/ratings.ts';
 import { scoutReport } from '../src/scouting.ts';
-import { RANK_REWARDS, rewardsUpTo, seasonPayout } from '../src/rankrewards.ts';
+import { rankRewardsFor, registerOwnedSeasons, rewardsUpTo, seasonPayout } from '../src/rankrewards.ts';
 import { RANK_ITEMS, RANK_TITLES } from '../src/data/rankpack.ts';
 import { COURT_SURFACES, buildReel, pickCourtSurface } from '../src/data/courts.ts';
 import { LADDER_SIZE, generatePlayerName, ladderBoard, ladderRivals } from '../src/data/ladder.ts';
 import type { RankedContext } from '../src/ranked.ts';
 import { TITLE_BY_ID } from '../src/data/titles.ts';
-import { SEASON_COVERS, SEASON_EPOCH, SEASON_LENGTH_DAYS, SEASON_LENGTH_MS } from '../src/seasons.ts';
+import { SEASON_COVERS, SEASON_EPOCH, SEASON_LENGTH_DAYS, SEASON_LENGTH_MS, seasonByIndex } from '../src/seasons.ts';
 import { DEFAULT_TITLES, newlyEarnedTitles, streakBadge } from '../src/data/titles.ts';
 import { DRILLS, SHOOT_AROUND, drillMedal, drillReward } from '../src/data/drills.ts';
 import { DEFAULT_UNLOCKS, STORE_BY_ID, STORE_ITEMS } from '../src/data/cosmetics.ts';
@@ -41,7 +41,7 @@ import { generateChallenges, seasonForTime, buildBattlePass } from '../src/seaso
 import { computeMatchReward } from '../src/economy.ts';
 import { emptyInput, emptyStats, type SimEvent } from '../src/sim/state.ts';
 import { ALL_DIFFICULTIES, ATTRIBUTE_KEYS, DIFFICULTIES, EMOTE_SLOTS, POSITIONS, type BuildSpec, type CareerStats, type Difficulty } from '../src/types.ts';
-import { shotAttribute } from '../src/shooting.ts';
+import { shotAttribute, JUMPSHOT_BY_ID } from '../src/shooting.ts';
 import { COURT, distanceToRim, isBeyondArc } from '../src/sim/court.ts';
 
 /** A zeroed career, so a title test starts from a player who has done nothing. */
@@ -2537,72 +2537,170 @@ test('a season is twenty days, and every one has its own generated name and cove
 });
 
 test('the rank path pays every rank below the one you reached', () => {
+  const season = seasonByIndex(11);
+  const path = rankRewardsFor(season);
+
   // One entry per tier, in ladder order, and each pays more than the last.
-  assert.equal(RANK_REWARDS.length, ONLINE_TIERS.length);
-  assert.deepEqual(RANK_REWARDS.map((r) => r.tierId), ONLINE_TIERS.map((t) => t.id));
-  for (let i = 1; i < RANK_REWARDS.length; i++) {
-    assert.ok(RANK_REWARDS[i].coins > RANK_REWARDS[i - 1].coins, 'a higher rank always pays more');
-    assert.ok(
-      RANK_REWARDS[i].items.length >= RANK_REWARDS[i - 1].items.length,
-      'and never fewer things',
-    );
+  assert.equal(path.length, ONLINE_TIERS.length);
+  assert.deepEqual(path.map((r) => r.tierId), ONLINE_TIERS.map((t) => t.id));
+  for (let i = 1; i < path.length; i++) {
+    assert.ok(path[i].coins > path[i - 1].coins, 'a higher rank always pays more');
+    assert.ok(path[i].items.length >= path[i - 1].items.length, 'and never fewer things');
   }
+  assert.equal(path.reduce((sum, t) => sum + t.coins, 0), 450_000, 'the whole ladder is 450k');
 
   // Every reward is a real item the game can equip, and every title is real.
-  for (const tier of RANK_REWARDS) {
+  for (const tier of path) {
     assert.ok(TITLE_BY_ID[tier.titleId], `${tier.tierId} title should exist`);
-    for (const id of tier.items) {
-      const item = STORE_BY_ID[id];
-      assert.ok(item, `${id} should be a real store item`);
-    }
+    for (const id of tier.items) assert.ok(STORE_BY_ID[id], `${id} should be a real store item`);
   }
 
   // Nothing is paid out by two different ranks.
-  const all = RANK_REWARDS.flatMap((r) => [...r.items, r.titleId]);
+  const all = path.flatMap((r) => [...r.items, r.titleId]);
   assert.equal(new Set(all).size, all.length, 'no reward is listed twice');
 
   // Reaching a rank banks everything under it.
-  assert.equal(rewardsUpTo(0).length, 1, 'Bronze 3 has already earned Bronze');
-  assert.equal(rewardsUpTo(600).length, 3, 'Gold banks Bronze, Silver and Gold');
-  assert.equal(rewardsUpTo(POINTS_TO_GRAND_CHAMP).length, ONLINE_TIERS.length, 'the top banks the lot');
+  assert.equal(rewardsUpTo(0, season).length, 1, 'Bronze 3 has already earned Bronze');
+  assert.equal(rewardsUpTo(600, season).length, 3, 'Gold banks Bronze, Silver and Gold');
+  assert.equal(rewardsUpTo(POINTS_TO_GRAND_CHAMP, season).length, ONLINE_TIERS.length, 'the top banks the lot');
+});
+
+test('a new season is a new path, not last season\'s already ticked off', () => {
+  const a = rankRewardsFor(seasonByIndex(11));
+  const b = rankRewardsFor(seasonByIndex(12));
+
+  // The bug this exists to catch: the season rolls over, the ladder resets, and
+  // the path you are meant to climb is already fully owned because it is the
+  // same nine sets of ids it was last season.
+  const idsA = new Set(a.flatMap((t) => [...t.items, t.titleId]));
+  const idsB = b.flatMap((t) => [...t.items, t.titleId]);
+  for (const id of idsB) {
+    assert.equal(idsA.has(id), false, `${id} is paid out by two different seasons`);
+  }
+
+  // And they are not the same items under different ids either — the names move
+  // too, or a "new" season is last season with the serial numbers filed off.
+  const namesA = new Set(a.flatMap((t) => t.items.map((id) => STORE_BY_ID[id]?.name)));
+  const namesB = b.flatMap((t) => t.items.map((id) => STORE_BY_ID[id]?.name));
+  const shared = namesB.filter((n) => namesA.has(n));
+  assert.ok(shared.length < namesB.length * 0.2, `${shared.length} of ${namesB.length} names carried over: ${shared.slice(0, 6).join(', ')}`);
+
+  // Titles say which rank and which season, so the claim can be checked.
+  for (const tier of a) {
+    const title = TITLE_BY_ID[tier.titleId];
+    assert.ok(title.name.includes(tier.tierName), `${title.name} should name the rank`);
+    assert.ok(title.name.includes(seasonByIndex(11).title), `${title.name} should name the season`);
+  }
+});
+
+test("this season's path is the one it was specified as", () => {
+  // Season 12 is Concrete Break, and its path was written out rather than
+  // generated. If the naming templates drift, this is what notices.
+  const season = seasonByIndex(11);
+  assert.equal(season.title, 'Concrete Break');
+  const path = rankRewardsFor(season);
+  const named = (tier: number) => path[tier].items.map((id) => STORE_BY_ID[id]?.name);
+
+  assert.equal(TITLE_BY_ID[path[0].titleId].name, 'Concrete Break — Bronze');
+  assert.deepEqual(named(0), ['Ball Bounce', 'Finger Point']);
+  assert.deepEqual(named(1), ['Asphalt Hoodie', 'Ball Roll', 'Street Fade']);
+  assert.deepEqual(named(2), ['Jump Shot: Quick Flick', 'Asphalt Runners', 'Walk Away']);
+  assert.deepEqual(named(3), [
+    'Dunk Package: Concrete Crush', 'Wrist Tape', 'Blacktop Compression Set', 'Ankle Breaker', 'Cracked Blacktop',
+  ]);
+  assert.deepEqual(named(4), [
+    'Dunk Package: Phantom Finish', 'Jump Shot: Ghost Release', 'Phantom Runners', 'Disappear', 'Cold Shoulder',
+  ]);
+  assert.deepEqual(named(5), [
+    'Dunk Package: Rim Shatter', 'Jump Shot: Sniper Release', 'Assassin 1s', 'Asphalt Headband', 'No Look Back', 'Underground Court',
+  ]);
+  assert.deepEqual(named(6), [
+    'Dunk Package: Earthquake', 'Jump Shot: Deadeye', 'Legend 1s', 'Street Legend Jersey', 'Legend Locs',
+    'Too Cold', 'Ice In The Concrete', 'Walk Of Fame',
+  ]);
+  assert.deepEqual(named(7), [
+    'Dunk Package: Rim Destroyer', "Jump Shot: King's Release", 'King 1s', 'Concrete King Jersey', "King's Sleeve",
+    'Royal Braids', "You Can't Guard Me", 'Crown The Three', 'Take The Throne', 'The Concrete Arena',
+  ]);
+  assert.deepEqual(named(8), [
+    'Dunk Package: Meteor', 'Jump Shot: Perfect Storm', 'Blacktop Gods', 'Grand Blacktop Jersey', 'Crown Locs',
+    'Grand Champion Crown', 'Unstoppable', 'Rain From The Sky', "The King's Entrance", 'The Forbidden Blacktop',
+    'Cracked Energy', 'Animated Concrete Name', 'King of the Blacktop', 'Concrete Breaker',
+  ]);
+});
+
+test('season rewards draw and animate as the thing they are named after', () => {
+  const CLOTHING = new Set(['shorts', 'compression', 'hoodie', 'cutoff', 'longshorts', 'tracksuit']);
+  const ACCESSORY = new Set(['headband', 'armsleeve', 'chain', 'goggles', 'wristbands', 'kneepad', 'crown', 'earrings']);
+  const HAIR = new Set(['fade', 'braids', 'locs', 'cornrows', 'afro', 'waves', 'topknot']);
+
+  for (let index = 8; index < 20; index++) {
+    for (const tier of rankRewardsFor(seasonByIndex(index))) {
+      for (const id of tier.items) {
+        const item = STORE_BY_ID[id];
+        const parts = id.split('-');
+        if (item.category === 'clothing') assert.ok(CLOTHING.has(parts[1]), `${id} draws as an unknown garment`);
+        if (item.category === 'accessory') assert.ok(ACCESSORY.has(parts[1]), `${id} draws as an unknown accessory`);
+        if (item.category === 'hairstyle') assert.ok(HAIR.has(parts[1]), `${id} draws as an unknown hairstyle`);
+        // A shot or a package is only real if the sim can find its numbers.
+        if (item.category === 'jumpshot') assert.ok(JUMPSHOT_BY_ID[id.replace('jumpshot-', '')], `${id} has no release`);
+        if (item.category === 'dunkPackage') assert.ok(DUNK_PACKAGE_BY_ID[id.replace('dunk-', '')], `${id} has no package`);
+      }
+    }
+  }
 });
 
 test('a season payout settles against your peak and never pays the same gear twice', () => {
-  const gold = seasonPayout(640);
+  const season = seasonByIndex(11);
+  const path = rankRewardsFor(season);
+
+  const gold = seasonPayout(640, season);
   assert.ok(gold);
   assert.equal(gold.tierName, 'Gold');
   assert.equal(gold.coins, 10_000 + 20_000 + 30_000);
-  assert.ok(gold.titles.includes('title-rank-gold'));
-  assert.ok(gold.titles.includes('title-rank-bronze'), 'and the ones below it');
+  assert.ok(gold.titles.includes(path[2].titleId));
+  assert.ok(gold.titles.includes(path[0].titleId), 'and the ones below it');
 
   // A second season at the same rank pays the coins again but not the gear —
   // the coins are the recurring part, the cosmetics are the once.
   const owned = [...gold.items, ...gold.titles];
-  const again = seasonPayout(640, owned);
+  const again = seasonPayout(640, season, owned);
   assert.ok(again);
   assert.equal(again.coins, gold.coins, 'coins every season');
   assert.equal(again.items.length, 0, 'gear only the first time');
   assert.equal(again.titles.length, 0);
 
   // Climbing further next season pays only the difference in gear.
-  const higher = seasonPayout(POINTS_TO_GRAND_CHAMP, owned);
+  const higher = seasonPayout(POINTS_TO_GRAND_CHAMP, season, owned);
   assert.ok(higher);
   assert.equal(higher.tierName, 'Grand Champ');
   assert.ok(higher.items.length > 0, 'the new ranks still pay');
   for (const id of owned) assert.ok(!higher.items.includes(id), 'and never re-pay what you have');
 
   // Grand Champ is the only rank that pays an aura, a name effect and a banner.
-  const top = RANK_REWARDS[RANK_REWARDS.length - 1];
+  const top = path[path.length - 1];
   for (const kind of ['aura', 'nameEffect', 'banner']) {
     const fromTop = top.items.filter((id) => STORE_BY_ID[id]?.category === kind);
     assert.equal(fromTop.length, 1, `Grand Champ pays exactly one ${kind}`);
-    const elsewhere = RANK_REWARDS.slice(0, -1).flatMap((r) => r.items).filter((id) => STORE_BY_ID[id]?.category === kind);
+    const elsewhere = path.slice(0, -1).flatMap((r) => r.items).filter((id) => STORE_BY_ID[id]?.category === kind);
     assert.equal(elsewhere.length, 0, `nothing below Grand Champ pays a ${kind}`);
   }
 });
 
+test('an old save can still resolve the rewards it is carrying', () => {
+  // Ids from a season nobody has built the path for yet. Registering by what
+  // the player owns is what stops those turning into blanks in the Locker.
+  const stale = ['jersey-s3-diamond-something', 'emote-s5-bronze-whatever'];
+  registerOwnedSeasons(stale);
+  for (const index of [2, 4]) {
+    for (const tier of rankRewardsFor(seasonByIndex(index))) {
+      for (const id of tier.items) assert.ok(STORE_BY_ID[id], `${id} should resolve after registration`);
+    }
+  }
+});
+
 test('nothing the ranked path pays out can be bought or is given away', () => {
-  const rewards = RANK_REWARDS.flatMap((r) => r.items);
+  const rewards = rankRewardsFor(seasonByIndex(11)).flatMap((r) => r.items);
   for (const id of rewards) {
     const item = STORE_BY_ID[id];
     assert.ok(item, `${id} exists`);
