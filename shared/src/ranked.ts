@@ -1,4 +1,5 @@
 import { DIFFICULTIES, type Difficulty } from './types.ts';
+import { hashString, Rng } from './rng.ts';
 import { DIVISIONS_PER_TIER, ONLINE_TIERS, POINTS_PER_DIVISION, onlineRank } from './onlinerank.ts';
 
 /**
@@ -131,6 +132,10 @@ export interface RankedOpponentSpec {
   overall: number;
   /** which preset drives their decision making */
   difficulty: Difficulty;
+  /** true when the win-streak band is what picked that difficulty */
+  streakActive: boolean;
+  /** the coin multiplier a win would pay: 1, or 2 on an Emerald+ streak */
+  coinBonus: number;
   /**
    * Extra sharpening on top of the preset, 0 to 1.
    *
@@ -151,40 +156,92 @@ export interface RankedContext {
   level: number;
   /** current win streak */
   streak: number;
+  /** seeds the draw inside a band, so the same standing draws the same fight */
+  seed?: number;
 }
 
 /** Base overall per tier, before the player's own build is taken into account. */
 const OVERALL_BY_TIER = [62, 67, 72, 76, 80, 84, 88, 92, 96];
 
-const DIFFICULTY_BY_TIER: Difficulty[] = [
-  'rookie',
-  'semiPro',
-  'pro',
-  'pro',
-  'allStar',
-  'allStar',
-  'superstar',
-  'hallOfFame',
-  'grandChamp',
+/**
+ * Where the streak system stops.
+ *
+ * Bronze through Platinum, and nowhere else. Below Emerald the ladder is still
+ * teaching you the game, so a run of wins is the signal that it should stop
+ * going easy — that is what the streak band is for. From Emerald up there is
+ * nothing to signal: the floor is already Hall of Fame and the difficulty is
+ * the rank, permanently. Stacking a streak bonus on top of that would take an
+ * already brutal tier and make it arbitrary.
+ */
+export const STREAK_DIFFICULTY_TOP_TIER = 3; // platinum
+
+/** How many wins in a row it takes before the ladder starts pushing back. */
+export const STREAK_THRESHOLD = 2;
+
+/** Where the doubled coin reward starts. */
+export const STREAK_BONUS_MIN_TIER = 4; // emerald
+
+/**
+ * A band of difficulty: the floor, the ceiling, and how often you meet the
+ * ceiling rather than the floor at the bottom and the top of the tier.
+ *
+ * Two levels with a chance between them, rather than one level per tier,
+ * because a whole tier of the ladder is a lot of games to spend against exactly
+ * one opponent. Bronze 3 is nearly all Rookie and Bronze 1 is nearly all
+ * Semi-Pro, and the games in between are a mix.
+ */
+interface Band {
+  floor: Difficulty;
+  ceiling: Difficulty;
+  /** chance of the ceiling at the bottom of the tier */
+  atFloorOfTier: number;
+  /** chance of the ceiling at the top of the tier */
+  atTopOfTier: number;
+}
+
+/**
+ * The normal ladder, with no streak running.
+ *
+ * Bronze Rookie to Semi-Pro, Silver Pro to All-Star, Gold Superstar, Platinum
+ * Superstar with Hall of Fame showing up for the players near the top of it.
+ * Then Emerald, where Hall of Fame stops being the ceiling and becomes the
+ * floor, and everything above it is its own rung.
+ */
+const NORMAL_BAND: Band[] = [
+  { floor: 'rookie', ceiling: 'semiPro', atFloorOfTier: 0.05, atTopOfTier: 0.8 },       // Bronze
+  { floor: 'pro', ceiling: 'allStar', atFloorOfTier: 0.1, atTopOfTier: 0.8 },           // Silver
+  { floor: 'superstar', ceiling: 'superstar', atFloorOfTier: 0, atTopOfTier: 0 },       // Gold
+  { floor: 'superstar', ceiling: 'hallOfFame', atFloorOfTier: 0, atTopOfTier: 0.35 },   // Platinum
+  { floor: 'hallOfFame', ceiling: 'hallOfFame', atFloorOfTier: 0, atTopOfTier: 0 },     // Emerald
+  { floor: 'legend', ceiling: 'legend', atFloorOfTier: 0, atTopOfTier: 0 },             // Sapphire
+  { floor: 'immortal', ceiling: 'immortal', atFloorOfTier: 0, atTopOfTier: 0 },         // Diamond
+  { floor: 'untouchable', ceiling: 'untouchable', atFloorOfTier: 0, atTopOfTier: 0 },   // Champion
+  { floor: 'grandChamp', ceiling: 'grandChamp', atFloorOfTier: 0, atTopOfTier: 0 },     // Grand Champ
 ];
 
 /**
- * How much a win streak is allowed to raise the difficulty, per tier.
+ * The band while a streak is running, Bronze through Platinum only.
  *
- * Deliberately tiny at the bottom. A new player who wins two games should not
- * suddenly meet somebody who beats them for the next hour — that is how people
- * stop playing. By Champion a streak is worth a lot, because at that point the
- * ladder is supposed to be looking for a reason to stop you.
+ * A player who can win four in a row at Bronze is not a Bronze player yet, and
+ * the fastest way to find that out is to stop handing them Rookies. The band
+ * jumps a clear step: Bronze meets Pro and All-Star, Silver meets Superstar,
+ * Gold and Platinum meet Hall of Fame. Lose once and the streak is zero and
+ * this table stops applying on the very next game.
  */
-const STREAK_CAP_BY_TIER = [0.12, 0.16, 0.22, 0.26, 0.32, 0.38, 0.45, 0.5, 0.55];
+const STREAK_BAND: (Band | null)[] = [
+  { floor: 'pro', ceiling: 'allStar', atFloorOfTier: 0.15, atTopOfTier: 0.7 },          // Bronze
+  { floor: 'superstar', ceiling: 'superstar', atFloorOfTier: 0, atTopOfTier: 0 },       // Silver
+  { floor: 'hallOfFame', ceiling: 'hallOfFame', atFloorOfTier: 0, atTopOfTier: 0 },     // Gold
+  { floor: 'hallOfFame', ceiling: 'hallOfFame', atFloorOfTier: 0, atTopOfTier: 0 },     // Platinum
+  null, null, null, null, null,                                                          // Emerald and up
+];
 
 /**
  * Who you face in a ranked match.
  *
- * Four inputs, in order of how much they matter: your rank, your build's
- * overall, your win streak, and your level. Rank sets the shape of the
- * opponent; the rest adjust it so a 62-overall rookie at Gold is not handed the
- * same player as a 90-overall at Gold.
+ * Rank picks the band; where you sit inside the tier and how long your streak
+ * is decide where in the band you land. The streak part only exists below
+ * Emerald — see `STREAK_DIFFICULTY_TOP_TIER`.
  */
 export function rankedOpponent(ctx: RankedContext): RankedOpponentSpec {
   const rank = onlineRank(ctx.points);
@@ -204,24 +261,70 @@ export function rankedOpponent(ctx: RankedContext): RankedOpponentSpec {
   // A high-level account has been playing a while; nudge, do not swing.
   overall += Math.min(3, ctx.level / 12);
 
-  // The streak. Capped hard at low ranks so two wins never turns into a wall.
-  const streakCap = STREAK_CAP_BY_TIER[tier];
-  const streakPressure = Math.min(streakCap, Math.max(0, ctx.streak - 1) * 0.09);
-  overall += streakPressure * 14;
+  const streak = Math.max(0, ctx.streak);
+  const streaking = streak >= STREAK_THRESHOLD && tier <= STREAK_DIFFICULTY_TOP_TIER;
+  // How far into the streak, 0 to 1. Four wins past the threshold is as hard as
+  // it gets — the longer the run, the more consistently the ceiling comes up.
+  const heat = streaking ? Math.min(1, (streak - STREAK_THRESHOLD + 1) / 4) : 0;
+
+  const band = (streaking ? STREAK_BAND[tier] : null) ?? NORMAL_BAND[tier];
+
+  // Chance of the top of the band: position inside the tier, then the streak
+  // pushing it the rest of the way up.
+  const positional = band.atFloorOfTier + (band.atTopOfTier - band.atFloorOfTier) * within;
+  const ceilingChance = Math.min(1, positional + heat * (1 - positional) * 0.85);
+  // Deterministic: the same standing draws the same opponent, so backing out of
+  // a match and coming back cannot re-roll an easier one.
+  const roll = new Rng(hashString(`ranked-draw-${ctx.seed ?? 0}-${ctx.points}-${streak}`)).next();
+  const difficulty = roll < ceilingChance ? band.ceiling : band.floor;
+
+  // The streak still nudges the opponent's build below Emerald, so a run feels
+  // like it is being answered even in the games that stay on the band's floor.
+  overall += streaking ? heat * 4 : 0;
 
   // Never more than a little above the player, and never below the tier floor —
   // a ranked opponent should always be a real test, but not a hopeless one.
-  overall = Math.max(base - 2, Math.min(ctx.playerOverall + 7, overall));
+  // Emerald and up are allowed further above you, because that is the point of
+  // them, but the ceiling is still a ceiling.
+  const headroom = tier >= STREAK_BONUS_MIN_TIER ? 11 : 7;
+  overall = Math.max(base - 2, Math.min(ctx.playerOverall + headroom, overall));
 
-  // The edge: position inside the tier plus whatever the streak has added,
-  // again capped by tier so the bottom of the ladder stays fair.
-  const edge = Math.max(0, Math.min(1, within * 0.45 + streakPressure * 1.3 + tier * 0.03));
+  // The edge sharpens *within* a difficulty, so Sapphire 1 is meaningfully
+  // harder than Sapphire 3 without jumping a whole rung.
+  //
+  // Two things it deliberately does *not* do. It carries no flat per-tier term:
+  // the tier already chose the difficulty, and adding sharpening on top of that
+  // was charging for the same climb twice — measured, it left a rank-appropriate
+  // player winning 28% at Gold against a break-even of 42%, which is a ladder
+  // nobody gets off. And on a streak it only applies where the band has a single
+  // level in it, because that is the only case where "the harder end of the
+  // range" has nowhere else to live. Where the streak already jumped the
+  // difficulty a whole rung — Gold meeting Hall of Fame — sharpening on top of
+  // the jump made those games essentially unwinnable rather than merely hard.
+  const singleLevel = band.floor === band.ceiling;
+  const edge = Math.max(0, Math.min(1, within * 0.45 + (singleLevel && streaking ? heat * 0.3 : 0)));
 
   return {
     overall: Math.round(Math.max(58, Math.min(99, overall))),
-    difficulty: DIFFICULTY_BY_TIER[tier] ?? 'rookie',
+    difficulty,
     edge: Math.round(edge * 100) / 100,
+    streakActive: streaking,
+    coinBonus: coinBonusFor(ctx.points, ctx.streak),
   };
+}
+
+/**
+ * Whether a win right now pays double.
+ *
+ * Emerald and above, with a streak already running when the match starts. The
+ * streak going *into* the game is what counts, so the first win after a loss
+ * pays normally and every win after that is doubled for as long as the run
+ * lasts. One loss and it is gone the same instant the streak is.
+ */
+export function coinBonusFor(points: number, streakBefore: number): number {
+  const tier = tierIndexFor(points);
+  if (tier < STREAK_BONUS_MIN_TIER) return 1;
+  return streakBefore >= 1 ? 2 : 1;
 }
 
 /** Every rung of the ladder and what it puts in front of you, for the UI. */

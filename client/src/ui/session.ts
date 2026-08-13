@@ -66,6 +66,14 @@ export interface StartMatchOptions {
    * whole difficulty level.
    */
   aiEdge?: number;
+  /**
+   * Coin multiplier for a win, from the Emerald+ ranked streak bonus.
+   *
+   * Decided before the match rather than after it, off the streak you came in
+   * with — so the doubling is a thing you can see on the way in rather than a
+   * surprise on the results screen.
+   */
+  coinMultiplier?: number;
 }
 
 /** True while a walkout is on screen, so a second one can never stack on it. */
@@ -193,6 +201,7 @@ function applyResult(result: MatchResult, opts: StartMatchOptions): RewardSummar
     xpMultiplier: activeXpMultiplier(Date.now()),
     premiumPass: store.profile.battlePass.premium,
     winStreak: player.stats.currentWinStreak,
+    coinMultiplier: opts.coinMultiplier ?? 1,
   });
 
   const badgeUps = mergeBadges(player.badges, result.simBadges);

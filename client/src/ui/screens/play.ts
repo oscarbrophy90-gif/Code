@@ -325,9 +325,18 @@ export function blurbColor(d: Difficulty | null | undefined): string {
   return (DIFFICULTY_BLURB as Partial<Record<Difficulty, DifficultyBlurb>>)[d]?.color ?? 'var(--pink)';
 }
 
-/** Higher difficulties also field a slightly better build, not just better AI. */
+/**
+ * Higher difficulties also field a slightly better build, not just better AI.
+ *
+ * The four above Hall of Fame are ranked-only, so nothing in the Play menu ever
+ * asks for their bump — they are listed anyway so the map is total and a new
+ * difficulty can never silently fall through to `undefined`.
+ */
 function difficultyOverallBump(d: Difficulty): number {
-  return { rookie: -8, semiPro: -4, pro: 0, allStar: 3, superstar: 6, hallOfFame: 9, grandChamp: 12 }[d];
+  return {
+    rookie: -8, semiPro: -4, pro: 0, allStar: 3, superstar: 6, hallOfFame: 9,
+    legend: 11, immortal: 13, untouchable: 15, grandChamp: 17,
+  }[d];
 }
 
 function describeDifficulty(d: Difficulty): string {

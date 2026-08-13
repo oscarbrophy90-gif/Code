@@ -156,13 +156,19 @@ export interface CareerStats {
 export const DIFFICULTIES = ['rookie', 'semiPro', 'pro', 'allStar', 'superstar', 'hallOfFame'] as const;
 
 /**
- * Every difficulty the simulation can run, including the one you cannot choose.
+ * The four difficulties above Hall of Fame, which exist only on the ranked
+ * ladder.
  *
- * `grandChamp` sits above Hall of Fame and is reachable only by getting to the
- * top of the ranked ladder. It is deliberately not in `DIFFICULTIES`, so it
- * never appears in the Play menu — the only way to meet it is to earn it.
+ * They are deliberately not in `DIFFICULTIES`, so none of them ever appears in
+ * the Play menu — the only way to meet a Legend is to climb to Sapphire, and
+ * the only way to meet a Grand Champ is to get to the top. Emerald is where
+ * Hall of Fame becomes the *floor* rather than the ceiling; everything above it
+ * is a rung nobody can pick off a dropdown.
  */
-export const ALL_DIFFICULTIES = [...DIFFICULTIES, 'grandChamp'] as const;
+export const RANKED_ONLY_DIFFICULTIES = ['legend', 'immortal', 'untouchable', 'grandChamp'] as const;
+
+/** Every difficulty the simulation can run, including the ones you cannot choose. */
+export const ALL_DIFFICULTIES = [...DIFFICULTIES, ...RANKED_ONLY_DIFFICULTIES] as const;
 export type Difficulty = (typeof ALL_DIFFICULTIES)[number];
 export type SelectableDifficulty = (typeof DIFFICULTIES)[number];
 
@@ -173,6 +179,9 @@ export const DIFFICULTY_LABEL: Record<Difficulty, string> = {
   allStar: 'All-Star',
   superstar: 'Superstar',
   hallOfFame: 'Hall of Fame',
+  legend: 'Legend',
+  immortal: 'Immortal',
+  untouchable: 'Untouchable',
   grandChamp: 'Grand Champ',
 };
 

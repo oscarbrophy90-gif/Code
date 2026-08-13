@@ -120,6 +120,14 @@ export interface SimPlayerConfig {
   jerseySecondary: string;
   skinTone: number;
   isBot: boolean;
+  /**
+   * 0..1 extra danger on this player's handle, set for high-difficulty bots.
+   *
+   * The sim owns the ankle-breaker maths and knows nothing about AI presets, so
+   * the difficulty writes its threat here and the maths reads it. Absent or
+   * zero for every human and every bot below Hall of Fame.
+   */
+  ankleThreat?: number;
   // ---- presentation only. The simulation never reads these. ----
   /** shown on the walkout card */
   position?: Position;

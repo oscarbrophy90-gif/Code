@@ -4,6 +4,12 @@ import {
   POINTS_PER_DIVISION,
   computeOverall,
   onlineRank,
+  rankedOpponent,
+  DIFFICULTY_LABEL,
+  STREAK_THRESHOLD,
+  STREAK_DIFFICULTY_TOP_TIER,
+  STREAK_BONUS_MIN_TIER,
+  hashString,
   seasonForTime,
   seasonTimeRemaining,
 } from '@hoops/shared';
@@ -94,6 +100,7 @@ export function renderRank(): HTMLElement {
           // them, which is the point of a queue — knowing in advance turns every
           // match into a decision about whether to bother.
           el('div', { class: 'nextmatch-line' }, 'Somebody at your rank'),
+          nextMatchNotes(),
           el(
             'div',
             { class: 'hint', style: 'margin:6px 0 0' },
@@ -162,4 +169,59 @@ function stat(label: string, value: string): HTMLElement {
 /** Overall of the current build, for the "you" side of the matchup line. */
 export function myOverall(): number {
   return computeOverall(store.player.attributes, store.player.build.position);
+}
+
+/**
+ * What the next game is actually going to be.
+ *
+ * The opponent's rating stays hidden — you find that out by playing them — but
+ * the *difficulty* is not a secret worth keeping. A player on a five-game run at
+ * Gold who suddenly cannot buy a win deserves to know the ladder did that on
+ * purpose, and an Emerald player needs to see the doubled coins before the game
+ * rather than after it, or the bonus is a surprise instead of a reason.
+ */
+function nextMatchNotes(): HTMLElement | null {
+  const record = store.profile.online;
+  const rank = onlineRank(record.rp);
+  const tier = ONLINE_TIERS.findIndex((t) => t.id === rank.tier.id);
+  const overall = store.hasPlayer ? computeOverall(store.player.attributes, store.player.build.position) : 75;
+  const seed = hashString(`ranked-${store.profile.userId}-${record.rp}-${record.wins}-${record.losses}`);
+  const spec = rankedOpponent({
+    points: record.rp,
+    playerOverall: overall,
+    level: store.hasPlayer ? store.player.level : 1,
+    streak: record.streak,
+    seed,
+  });
+
+  const tags: HTMLElement[] = [
+    el('span', { class: 'nextmatch-tag diff', style: `--tint:${rank.tier.color}` }, DIFFICULTY_LABEL[spec.difficulty]),
+  ];
+  if (spec.streakActive) {
+    tags.push(el('span', { class: 'nextmatch-tag hot' }, `Streak ${record.streak} · harder`));
+  }
+  if (spec.coinBonus > 1) {
+    tags.push(el('span', { class: 'nextmatch-tag coin' }, `${spec.coinBonus}× Coins on a win`));
+  }
+
+  // What the streak system is going to do next, so it is a rule rather than a
+  // thing that happens to you.
+  let note = '';
+  if (tier >= STREAK_BONUS_MIN_TIER) {
+    note = spec.coinBonus > 1
+      ? 'Every win while this run lasts pays double Coins. One loss and it is gone.'
+      : 'Hall of Fame or harder, every game, whatever your record. Win one, and every win after it pays double Coins until you lose.';
+  } else if (spec.streakActive) {
+    note = 'The ladder has noticed. Lose once and it drops straight back to normal.';
+  } else if (tier <= STREAK_DIFFICULTY_TOP_TIER) {
+    const left = Math.max(1, STREAK_THRESHOLD - record.streak);
+    note = `${left} more win${left === 1 ? '' : 's'} in a row and the opponents get harder until you lose.`;
+  }
+
+  return el(
+    'div',
+    { style: 'margin-top:8px' },
+    el('div', { class: 'nextmatch-tags' }, ...tags),
+    note ? el('div', { class: 'hint', style: 'margin:6px 0 0' }, note) : null,
+  );
 }

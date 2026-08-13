@@ -26,7 +26,7 @@ export function renderHome(): HTMLElement {
   const cleared = DIFFICULTIES.filter((d) => (player.stats.winsByDifficulty[d] ?? 0) > 0).length;
   const best = player.stats.highestDifficultyBeaten;
   const ladderColor = best
-    ? { rookie: '#4aa3ff', semiPro: '#3ef07a', pro: '#ffc53d', allStar: '#ff7a3d', superstar: '#a06bff', hallOfFame: '#ff5c8a', grandChamp: '#ff5c8a' }[best]
+    ? { rookie: '#4aa3ff', semiPro: '#3ef07a', pro: '#ffc53d', allStar: '#ff7a3d', superstar: '#a06bff', hallOfFame: '#ff5c8a', legend: '#ff5c8a', immortal: '#ff5c8a', untouchable: '#ff5c8a', grandChamp: '#ff5c8a' }[best]
     : '#3b4252';
   const challenges = generateChallenges(now).filter((c) => c.scope === 'daily');
 

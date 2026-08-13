@@ -3283,6 +3283,44 @@ input[type='text']:focus {
   color: var(--text-faint);
 }
 
+/* ------------------------------------------------- what the next game is */
+
+.nextmatch-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.nextmatch-tag {
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 4px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-dim);
+}
+
+.nextmatch-tag.diff {
+  color: var(--tint);
+  border-color: color-mix(in srgb, var(--tint) 50%, transparent);
+}
+
+/* A streak the ladder is answering reads as heat, not as a reward. */
+.nextmatch-tag.hot {
+  color: #ff9a4d;
+  border-color: rgba(255, 154, 77, 0.5);
+  background: rgba(255, 154, 77, 0.1);
+}
+
+.nextmatch-tag.coin {
+  color: var(--amber);
+  border-color: color-mix(in srgb, var(--amber) 55%, transparent);
+  background: color-mix(in srgb, var(--amber) 12%, transparent);
+}
+
 /* ------------------------------------------------------------- loot boxes */
 
 /* The crate card in the shop. Taller art than a normal item swatch, because a

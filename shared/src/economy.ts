@@ -30,6 +30,15 @@ export interface RewardContext {
   premiumPass: boolean;
   /** consecutive wins going into this game */
   winStreak: number;
+  /**
+   * Coin multiplier from the ranked streak bonus: 1 normally, 2 for an Emerald
+   * or higher player who came into this game already on a run.
+   *
+   * Coins only. Doubling XP as well would make a streak the fastest way to
+   * level rather than the most rewarding way to play, and levels gate nothing
+   * you can buy.
+   */
+  coinMultiplier?: number;
 }
 
 export function computeMatchReward(ctx: RewardContext): MatchReward {
@@ -75,6 +84,16 @@ export function computeMatchReward(ctx: RewardContext): MatchReward {
   const lengthFactor = Math.min(1, Math.max(0.25, ctx.durationSeconds / 150));
   currency = Math.max(0, Math.round(currency * lengthFactor));
   xp = Math.max(0, Math.round(xp * lengthFactor));
+
+  // The streak bonus lands last, on the final number, so it really is double
+  // what the same game would otherwise have paid — applied inside the breakdown
+  // it would be doubling a subtotal and quietly paying less than it says.
+  const multiplier = ctx.won ? Math.max(1, ctx.coinMultiplier ?? 1) : 1;
+  if (multiplier > 1) {
+    const bonus = Math.round(currency * (multiplier - 1));
+    breakdown.push({ label: `Win streak x${multiplier} Coins`, currency: bonus, xp: 0 });
+    currency += bonus;
+  }
 
   return { currency, xp, breakdown };
 }

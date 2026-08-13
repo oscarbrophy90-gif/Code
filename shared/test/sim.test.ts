@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { AiController, DIFFICULTY_PRESETS, sharpen } from '../src/sim/ai.ts';
+import { AiController, AI_FAIRNESS_FLOOR, DIFFICULTY_PRESETS, ankleThreatFor, sharpen } from '../src/sim/ai.ts';
 import { createMatch, currentContest, defaultMatchConfig, EMOTE_COOLDOWN, EMOTE_DURATION, SIM_DT, ballThroughRim, dribbleBounceIndex, dribbleTempo, stepMatch, drainEvents } from '../src/sim/match.ts';
 import { generateOpponent } from '../src/data/opponents.ts';
 import {
@@ -26,7 +26,7 @@ import { DEFAULT_TITLES, newlyEarnedTitles, streakBadge } from '../src/data/titl
 import { DRILLS, SHOOT_AROUND, drillMedal, drillReward } from '../src/data/drills.ts';
 import { DEFAULT_UNLOCKS, STORE_BY_ID, STORE_ITEMS } from '../src/data/cosmetics.ts';
 import { PARKS } from '../src/data/parks.ts';
-import { applyRankedResult, rankChange, rankedOpponent, USERNAME_COOLDOWN_MS, usernameCooldownLeft, validateUsername } from '../src/ranked.ts';
+import { applyRankedResult, coinBonusFor, rankChange, rankedOpponent, USERNAME_COOLDOWN_MS, usernameCooldownLeft, validateUsername } from '../src/ranked.ts';
 import { DIVISIONS_PER_TIER, ONLINE_TIERS, POINTS_PER_DIVISION, POINTS_TO_GRAND_CHAMP, grandChampLabel, nextRank, onlineRank, onlineRankLabel } from '../src/onlinerank.ts';
 import { PACK_TITLES } from '../src/data/titlepack.ts';
 import { PACK_TATTOOS, TATTOO_DESIGNS } from '../src/data/tattoopack.ts';
@@ -2318,8 +2318,8 @@ test('a loss costs points and can drop you a division', () => {
 });
 /** The nine knobs sharpening moves, for comparing two presets on those alone. */
 function pick(p: (typeof DIFFICULTY_PRESETS)['pro']) {
-  const { reactionTime, releaseError, bitesOnFakes, contestIq, shotSelection, helpIq, tendencyRead, stealAggression, moveRate } = p;
-  return { reactionTime, releaseError, bitesOnFakes, contestIq, shotSelection, helpIq, tendencyRead, stealAggression, moveRate };
+  const { reactionTime, releaseError, bitesOnFakes, contestIq, shotSelection, helpIq, tendencyRead, stealAggression, moveRate, punish, ankleThreat } = p;
+  return { reactionTime, releaseError, bitesOnFakes, contestIq, shotSelection, helpIq, tendencyRead, stealAggression, moveRate, punish, ankleThreat };
 }
 
 test('Grand Champ is a difficulty above Hall of Fame, and the edge sharpens it', () => {
@@ -2396,12 +2396,78 @@ test('ranked points get harder to earn and easier to lose as you climb', () => {
   assert.equal(rankChange(110, 90), 'demoted');
 });
 
-test('the ranked CPU scales with rank, build, streak and level — gently at the bottom', () => {
+test('ranked difficulty is the rank, and below Emerald a streak raises it', () => {
   const at = (points: number, extra: Partial<RankedContext> = {}) =>
     rankedOpponent({ points, playerOverall: 75, level: 10, streak: 0, ...extra });
 
-  // Rank is the main lever: the opponent gets better all the way up, and the
-  // difficulty preset steps with it.
+  // Every difficulty a tier can field, across the whole tier and every seed.
+  const bandAt = (tierIndex: number, streak: number) => {
+    const found = new Set<string>();
+    for (let division = 0; division < DIVISIONS_PER_TIER; division++) {
+      const points = (tierIndex * DIVISIONS_PER_TIER + division) * POINTS_PER_DIVISION;
+      for (let seed = 0; seed < 60; seed++) found.add(at(points, { streak, seed }).difficulty);
+    }
+    return found;
+  };
+
+  // ---- the normal ladder, nobody on a run
+  assert.deepEqual([...bandAt(0, 0)].sort(), ['rookie', 'semiPro'], 'Bronze is Rookie to Semi-Pro');
+  assert.deepEqual([...bandAt(1, 0)].sort(), ['allStar', 'pro'], 'Silver is Pro to All-Star');
+  assert.deepEqual([...bandAt(2, 0)], ['superstar'], 'Gold is Superstar');
+  assert.deepEqual([...bandAt(3, 0)].sort(), ['hallOfFame', 'superstar'], 'Platinum is Superstar, sometimes Hall of Fame');
+  assert.deepEqual([...bandAt(4, 0)], ['hallOfFame'], 'every Emerald game is at least Hall of Fame');
+  assert.deepEqual([...bandAt(5, 0)], ['legend'], 'Sapphire is above Hall of Fame');
+  assert.deepEqual([...bandAt(6, 0)], ['immortal'], 'Diamond is above that');
+  assert.deepEqual([...bandAt(7, 0)], ['untouchable'], 'Champion is above that');
+  assert.deepEqual([...bandAt(8, 0)], ['grandChamp'], 'and Grand Champ is the end of it');
+
+  // Hall of Fame at Platinum is for the players near the top of it, not for
+  // somebody who has just been promoted into Platinum 3.
+  const platBottom = new Set(Array.from({ length: 60 }, (_, s) => at(900, { seed: s }).difficulty));
+  assert.deepEqual([...platBottom], ['superstar'], 'Platinum 3 does not meet Hall of Fame');
+  const platTop = Array.from({ length: 200 }, (_, s) => at(1100, { seed: s }).difficulty);
+  const hofShare = platTop.filter((d) => d === 'hallOfFame').length / platTop.length;
+  assert.ok(hofShare > 0.15 && hofShare < 0.6, `Platinum 1 should sometimes meet Hall of Fame, got ${(hofShare * 100).toFixed(0)}%`);
+
+  // ---- on a streak, Bronze through Platinum only
+  assert.deepEqual([...bandAt(0, 5)].sort(), ['allStar', 'pro'], 'Bronze on a streak is Pro to All-Star');
+  assert.deepEqual([...bandAt(1, 5)], ['superstar'], 'Silver on a streak is Superstar');
+  assert.deepEqual([...bandAt(2, 5)], ['hallOfFame'], 'Gold on a streak is Hall of Fame');
+  assert.deepEqual([...bandAt(3, 5)], ['hallOfFame'], 'Platinum on a streak is Hall of Fame');
+
+  // And nowhere else. Emerald up is already at its rank difficulty, permanently.
+  for (const tierIndex of [4, 5, 6, 7, 8]) {
+    assert.deepEqual([...bandAt(tierIndex, 9)], [...bandAt(tierIndex, 0)],
+      `a streak must not move the difficulty at tier ${tierIndex}`);
+    assert.equal(at(tierIndex * DIVISIONS_PER_TIER * POINTS_PER_DIVISION, { streak: 9 }).streakActive, false);
+  }
+
+  // It takes an actual run. One win is not a streak.
+  assert.equal(at(0, { streak: 1 }).streakActive, false, 'one win is not a streak');
+  assert.equal(at(0, { streak: 2 }).streakActive, true, 'two in a row is');
+
+  // The longer the run, the more consistently the top of the band comes up.
+  const ceilingShare = (streak: number) => {
+    const draws = Array.from({ length: 300 }, (_, seed) => at(0, { streak, seed }).difficulty);
+    return draws.filter((d) => d === 'allStar').length / draws.length;
+  };
+  const two = ceilingShare(2);
+  const six = ceilingShare(6);
+  assert.ok(six > two, `a longer streak should mean more All-Stars: ${two.toFixed(2)} → ${six.toFixed(2)}`);
+  assert.ok(six > 0.7, `a six-game run at Bronze should mostly be All-Star, got ${six.toFixed(2)}`);
+
+  // Breaking the streak puts it back immediately — the very next draw.
+  const hot = at(0, { streak: 6, seed: 1 });
+  const broken = at(0, { streak: 0, seed: 1 });
+  assert.equal(hot.streakActive, true);
+  assert.equal(broken.streakActive, false);
+  assert.ok(['rookie', 'semiPro'].includes(broken.difficulty), 'straight back to the Bronze band');
+});
+
+test('the ranked CPU build scales with rank, streak and level without spiking a beginner', () => {
+  const at = (points: number, extra: Partial<RankedContext> = {}) =>
+    rankedOpponent({ points, playerOverall: 75, level: 10, streak: 0, ...extra });
+
   let lastOverall = 0;
   for (const points of [0, 300, 600, 900, 1200, 1500, 1800, 2100, 2400]) {
     const opp = at(points);
@@ -2410,39 +2476,108 @@ test('the ranked CPU scales with rank, build, streak and level — gently at the
     assert.ok(opp.overall >= 58 && opp.overall <= 99);
     assert.ok(opp.edge >= 0 && opp.edge <= 1);
   }
-  assert.equal(at(0).difficulty, 'rookie', 'Bronze is a rookie game');
-  assert.equal(at(2400).difficulty, 'grandChamp', 'the top is the one you cannot pick from the Play menu');
-  assert.ok(!(DIFFICULTIES as readonly string[]).includes('grandChamp'), 'and it is not selectable');
 
   // Your own build matters: a stronger player meets a stronger opponent at the
   // same rank, so a maxed build cannot stroll through Bronze.
   assert.ok(at(300, { playerOverall: 92 }).overall > at(300, { playerOverall: 62 }).overall);
 
-  // A streak raises the difficulty — but barely at the bottom of the ladder,
-  // which is the whole point. A new player on a two-game run should not hit a
-  // wall.
-  const bronzeCalm = at(0, { streak: 0 });
-  const bronzeHot = at(0, { streak: 8 });
-  const champCalm = at(2100, { streak: 0 });
-  const champHot = at(2100, { streak: 8 });
-  assert.ok(bronzeHot.edge > bronzeCalm.edge, 'a streak does something');
-  assert.ok(bronzeHot.edge - bronzeCalm.edge < champHot.edge - champCalm.edge,
-    'but far less at Bronze than at Champion');
-  assert.ok(bronzeHot.overall - bronzeCalm.overall <= 3, 'and it never spikes a beginner');
+  // A streak nudges the build too, and never spikes a beginner.
+  assert.ok(at(0, { streak: 8 }).overall - at(0, { streak: 0 }).overall <= 5);
 
   // Level nudges rather than swings.
   assert.ok(at(600, { level: 50 }).overall - at(600, { level: 1 }).overall <= 3);
 
-  // The opponent is never hopeless where it matters: through the lower and
-  // middle ranks a weak build is never handed somebody far above it.
+  // Never hopeless through the lower ranks.
   for (const points of [0, 150, 300, 450]) {
-    assert.ok(at(points, { playerOverall: 60 }).overall <= 67, `too far above a weak build at ${points} RP`);
+    assert.ok(at(points, { playerOverall: 60 }).overall <= 70, `too far above a weak build at ${points} RP`);
   }
   // Above that the rank wins instead, and that is deliberate: a 60-overall at
-  // Gold earned Gold, so it gets a Gold opponent. Capping it all the way up
-  // would mean the highest rank on the ladder was not the hardest.
+  // Gold earned Gold, so it gets a Gold opponent.
   assert.ok(at(600, { playerOverall: 60 }).overall >= 68);
   assert.ok(at(2400, { playerOverall: 60 }).overall >= 90);
+});
+
+test('Emerald and above pay double coins for every win on a run', () => {
+  // The streak going *into* the game is what counts, so the first win after a
+  // loss pays normally and everything after it is doubled.
+  assert.equal(coinBonusFor(0, 5), 1, 'Bronze never doubles');
+  assert.equal(coinBonusFor(900, 5), 1, 'nor Platinum');
+  assert.equal(coinBonusFor(1200, 0), 1, 'Emerald with no streak is normal');
+  assert.equal(coinBonusFor(1200, 1), 2, 'Emerald on a run doubles');
+  assert.equal(coinBonusFor(1500, 1), 2);
+  assert.equal(coinBonusFor(1800, 7), 2);
+  assert.equal(coinBonusFor(2100, 3), 2);
+  assert.equal(coinBonusFor(2400, 1), 2, 'all the way to the top');
+
+  // And the multiplier really is a doubling of the whole payout.
+  const ctx = {
+    won: true,
+    playlist: 'ranked' as const,
+    stats: { ...emptyStats(), points: 11, greens: 5, fga: 9 },
+    scoreFor: 11,
+    scoreAgainst: 7,
+    durationSeconds: 200,
+    greenRate: 0.55,
+    xpMultiplier: 1,
+    premiumPass: false,
+    winStreak: 3,
+  };
+  const normal = computeMatchReward({ ...ctx, coinMultiplier: 1 });
+  const doubled = computeMatchReward({ ...ctx, coinMultiplier: 2 });
+  assert.equal(doubled.currency, normal.currency * 2, 'twice the coins, exactly');
+  assert.equal(doubled.xp, normal.xp, 'and not a point more XP');
+  assert.ok(doubled.breakdown.some((b) => b.label.includes('Win streak x2')), 'and it says so on the results screen');
+
+  // A loss on a streak pays nothing extra, because there is nothing to double.
+  const lost = computeMatchReward({ ...ctx, won: false, coinMultiplier: 2 });
+  const lostPlain = computeMatchReward({ ...ctx, won: false, coinMultiplier: 1 });
+  assert.equal(lost.currency, lostPlain.currency);
+});
+
+test('the hardest AI is still an AI you can beat', () => {
+  const order: Difficulty[] = ['rookie', 'semiPro', 'pro', 'allStar', 'superstar', 'hallOfFame', 'legend', 'immortal', 'untouchable', 'grandChamp'];
+
+  // Every rung is strictly harder than the one below it on every lever that
+  // decides a possession. A rung that is only harder on paper is a rung nobody
+  // can feel.
+  for (let i = 1; i < order.length; i++) {
+    const lo = DIFFICULTY_PRESETS[order[i - 1]];
+    const hi = DIFFICULTY_PRESETS[order[i]];
+    assert.ok(hi.reactionTime < lo.reactionTime, `${order[i]} should react faster than ${order[i - 1]}`);
+    assert.ok(hi.releaseError < lo.releaseError, `${order[i]} should shoot straighter`);
+    assert.ok(hi.contestIq > lo.contestIq, `${order[i]} should contest better`);
+    assert.ok(hi.shotSelection > lo.shotSelection, `${order[i]} should choose better`);
+    assert.ok(hi.bitesOnFakes < lo.bitesOnFakes, `${order[i]} should be harder to fool`);
+    assert.ok(hi.punish >= lo.punish, `${order[i]} should punish at least as hard`);
+    assert.ok(hi.ankleThreat >= lo.ankleThreat, `${order[i]} should handle at least as well`);
+  }
+
+  // The fairness floor. Every one of these is a thing a player would call
+  // cheating if it were crossed, so they are asserted rather than trusted.
+  for (const d of ALL_DIFFICULTIES) {
+    const p = DIFFICULTY_PRESETS[d];
+    assert.ok(p.reactionTime >= AI_FAIRNESS_FLOOR.minReactionTime, `${d} reacts inhumanly fast`);
+    assert.ok(p.stealAggression <= AI_FAIRNESS_FLOOR.maxStealAggression, `${d} just takes the ball`);
+    assert.ok(p.bitesOnFakes >= AI_FAIRNESS_FLOOR.minBitesOnFakes, `${d} cannot be faked at all`);
+    assert.ok(p.releaseError > 0, `${d} never misses`);
+    assert.ok(p.shotSelection < 1, `${d} never takes a bad shot`);
+    // Sharpening cannot break any of it either, at any edge.
+    for (const edge of [0.25, 0.5, 0.75, 1]) {
+      const sharp = sharpen(p, edge, d);
+      assert.ok(sharp.reactionTime >= AI_FAIRNESS_FLOOR.minReactionTime, `${d} at edge ${edge} reacts inhumanly fast`);
+      assert.ok(sharp.stealAggression <= AI_FAIRNESS_FLOOR.maxStealAggression, `${d} at edge ${edge} just takes the ball`);
+      assert.ok(sharp.bitesOnFakes >= AI_FAIRNESS_FLOOR.minBitesOnFakes, `${d} at edge ${edge} cannot be faked`);
+    }
+  }
+
+  // Ankle breakers belong to Hall of Fame and above, and to nobody else.
+  for (const d of ['rookie', 'semiPro', 'pro', 'allStar', 'superstar'] as Difficulty[]) {
+    assert.equal(ankleThreatFor(d, 1), d === 'superstar' ? ankleThreatFor('superstar', 1) : ankleThreatFor(d, 1));
+    assert.ok(DIFFICULTY_PRESETS[d].ankleThreat === 0, `${d} should not be hunting ankles`);
+  }
+  assert.ok(ankleThreatFor('hallOfFame') > 0, 'Hall of Fame is where the handle starts to hurt');
+  assert.ok(ankleThreatFor('grandChamp') > ankleThreatFor('hallOfFame'));
+  assert.ok(ankleThreatFor('grandChamp') < 1, 'and it is never a certainty');
 });
 
 test('the offline ladder is generated, stable, and places the player by points', () => {

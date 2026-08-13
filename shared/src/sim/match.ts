@@ -945,6 +945,17 @@ function tryDribbleMove(state: MatchState, side: Side, moveId: DribbleMoveId, in
   resolveAnkleBreaker(state, side, def.ankleBase, def.misdirection, dir, rng);
 }
 
+/**
+ * The hardest an ankle-breaker can ever be to avoid.
+ *
+ * One in four, at the very top, with a defender already lunging. Without a
+ * ceiling the Grand Champ bot's handle plus a combo plus a bad lean stacks past
+ * a coin flip, and a game where being crossed is the default is not a game you
+ * are playing any more. It also takes *two* breakdowns inside six seconds to
+ * actually put somebody on the floor, so a flooring is rarer still.
+ */
+const ANKLE_BREAKER_CEILING = 0.25;
+
 function resolveAnkleBreaker(
   state: MatchState,
   side: Side,
@@ -968,7 +979,16 @@ function resolveAnkleBreaker(
 
   const proximity = clamp01(1 - dist / 8);
   const comboBonus = Math.min(3, p.comboCount) * 0.035;
-  const chance = clamp01(base * misdirection * (0.35 + ratio * 1.6) * (0.4 + wrongWay) * (0.45 + proximity) + comboBonus);
+  // A high-difficulty bot's handle is more dangerous, but only through the same
+  // terms everybody else goes through: it still needs the defender leaning, it
+  // still loses to a good perimeter defender, and it is still capped. Standing
+  // square keeps `wrongWay` near zero, which keeps this near zero whatever the
+  // difficulty is — which is the whole promise that good defence still works.
+  const threat = 1 + clamp01(p.cfg.ankleThreat ?? 0) * 0.7;
+  const chance = Math.min(
+    ANKLE_BREAKER_CEILING,
+    clamp01(base * misdirection * threat * (0.35 + ratio * 1.6) * (0.4 + wrongWay) * (0.45 + proximity) + comboBonus),
+  );
 
   if (rng.chance(chance)) {
     const severity = clamp01(0.55 + ratio * 0.6 + wrongWay * 0.3);

@@ -5,6 +5,7 @@ import {
   onlineRank,
   rankChange,
   rankedOpponent,
+  ankleThreatFor,
 } from '@hoops/shared';
 
 import { store } from '../state/store.ts';
@@ -31,18 +32,24 @@ export function playRankedMatch(): void {
 
   const record = store.profile.online;
   const overall = computeOverall(store.player.attributes, store.player.build.position);
+
+  // Seeded from the standing rather than from the clock, so backing out of a
+  // match and coming in again gives you the same opponent. Re-rolling until the
+  // draw is favourable is not a skill the ladder should reward — which is also
+  // why the same seed decides where inside the difficulty band you land.
+  const seed = hashString(`ranked-${store.profile.userId}-${record.rp}-${record.wins}-${record.losses}`);
   const spec = rankedOpponent({
     points: record.rp,
     playerOverall: overall,
     level: store.player.level,
     streak: record.streak,
+    seed,
   });
 
-  // Seeded from the standing rather than from the clock, so backing out of a
-  // match and coming in again gives you the same opponent. Re-rolling until the
-  // draw is favourable is not a skill the ladder should reward.
-  const seed = hashString(`ranked-${store.profile.userId}-${record.rp}-${record.wins}-${record.losses}`);
   const opponent = generateOpponent(spec.overall, seed);
+  // The sim owns the ankle-breaker maths and knows nothing about difficulty, so
+  // the difficulty's handle threat rides along on the opponent's config.
+  opponent.ankleThreat = ankleThreatFor(spec.difficulty, spec.edge);
 
   startMatch({
     opponent,
@@ -52,7 +59,8 @@ export function playRankedMatch(): void {
     playlist: 'ranked',
     ranked: true,
     seed,
-    eventName: 'Ranked match',
+    coinMultiplier: spec.coinBonus,
+    eventName: spec.streakActive ? 'Ranked match · streak' : 'Ranked match',
   });
 }
 

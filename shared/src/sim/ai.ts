@@ -1,7 +1,7 @@
 import { Rng } from '../rng.ts';
 import { COURT, distanceToRim, isBeyondArc } from './court.ts';
 import { DRIBBLE_MOVES, type DribbleMoveId } from './moves.ts';
-import { emptyInput, type MatchState, type PlayerInput, type Side } from './state.ts';
+import { emptyInput, type MatchState, type PlayerInput, type SimPlayer, type Side } from './state.ts';
 
 import { DIFFICULTIES, type Difficulty } from '../types.ts';
 
@@ -33,6 +33,27 @@ export interface AiProfile {
   tendencyRead: number;
   /** 0..1 chance it jumps at a pump fake or bites on a size-up */
   bitesOnFakes: number;
+  /**
+   * 0..1 how hard it converts your mistakes.
+   *
+   * Separate from reaction time on purpose. Reaction time is how fast it sees
+   * *everything*; this is how much faster it moves when you have specifically
+   * given it something — you are staggered, you have lost your feet, you have
+   * repeated a move it has already seen. A Rookie sees an opening and does not
+   * take it. Hall of Fame and above take it every time, which is what "punishes
+   * mistakes" has to mean if it is going to mean anything.
+   */
+  punish: number;
+  /**
+   * 0..1 how dangerous its handle is.
+   *
+   * Zero below Hall of Fame: nothing under that tier goes looking to put you on
+   * the floor. Above it, the bot saves its highest-misdirection move for the
+   * moment your momentum is already going the wrong way, and its chance of
+   * landing it is scaled by this. It is never a coin flip and it is never
+   * unstoppable — stay square and it collapses to nearly nothing.
+   */
+  ankleThreat: number;
 }
 
 /**
@@ -43,23 +64,67 @@ export interface AiProfile {
  */
 export const DIFFICULTY_PRESETS: Record<Difficulty, AiProfile> = {
   // Misses open shots often, slow to react, poor decisions. Easy to beat.
-  rookie: { reactionTime: 0.42, standoff: 5.2, stealAggression: 0.05, contestIq: 0.18, shotSelection: 0.3, releaseError: 0.34, moveRate: 0.25, helpIq: 0.2, moveTier: 0, comboLength: 1, tendencyRead: 0, bitesOnFakes: 0.75 },
+  rookie: { reactionTime: 0.42, standoff: 5.2, stealAggression: 0.05, contestIq: 0.18, shotSelection: 0.3, releaseError: 0.34, moveRate: 0.25, helpIq: 0.2, moveTier: 0, comboLength: 1, tendencyRead: 0, bitesOnFakes: 0.75, punish: 0, ankleThreat: 0 },
   // Slightly smarter defense and shot selection, the occasional dribble move.
-  semiPro: { reactionTime: 0.32, standoff: 4.4, stealAggression: 0.1, contestIq: 0.36, shotSelection: 0.45, releaseError: 0.24, moveRate: 0.45, helpIq: 0.36, moveTier: 0, comboLength: 2, tendencyRead: 0, bitesOnFakes: 0.6 },
+  semiPro: { reactionTime: 0.32, standoff: 4.4, stealAggression: 0.1, contestIq: 0.36, shotSelection: 0.45, releaseError: 0.24, moveRate: 0.45, helpIq: 0.36, moveTier: 0, comboLength: 2, tendencyRead: 0, bitesOnFakes: 0.6, punish: 0.08, ankleThreat: 0 },
   // Balanced. Good defense, simple combos, punishes bad mistakes.
-  pro: { reactionTime: 0.25, standoff: 3.8, stealAggression: 0.16, contestIq: 0.52, shotSelection: 0.6, releaseError: 0.17, moveRate: 0.65, helpIq: 0.52, moveTier: 1, comboLength: 2, tendencyRead: 0.2, bitesOnFakes: 0.45 },
+  pro: { reactionTime: 0.25, standoff: 3.8, stealAggression: 0.16, contestIq: 0.52, shotSelection: 0.6, releaseError: 0.17, moveRate: 0.65, helpIq: 0.52, moveTier: 1, comboLength: 2, tendencyRead: 0.2, bitesOnFakes: 0.45, punish: 0.2, ankleThreat: 0 },
   // Strong pressure, better timing, advanced moves, reads your tendencies.
-  allStar: { reactionTime: 0.19, standoff: 3.2, stealAggression: 0.22, contestIq: 0.68, shotSelection: 0.72, releaseError: 0.115, moveRate: 0.85, helpIq: 0.68, moveTier: 1, comboLength: 3, tendencyRead: 0.55, bitesOnFakes: 0.32 },
+  allStar: { reactionTime: 0.19, standoff: 3.2, stealAggression: 0.22, contestIq: 0.68, shotSelection: 0.72, releaseError: 0.115, moveRate: 0.85, helpIq: 0.68, moveTier: 1, comboLength: 3, tendencyRead: 0.55, bitesOnFakes: 0.32, punish: 0.34, ankleThreat: 0 },
   // High IQ, excellent selection, aggressive, uses signature moves.
-  superstar: { reactionTime: 0.14, standoff: 2.7, stealAggression: 0.28, contestIq: 0.82, shotSelection: 0.84, releaseError: 0.075, moveRate: 1.05, helpIq: 0.82, moveTier: 2, comboLength: 3, tendencyRead: 0.8, bitesOnFakes: 0.2 },
-  // Elite reactions, rarely a bad decision. Plays like a real competitor.
-  hallOfFame: { reactionTime: 0.095, standoff: 2.3, stealAggression: 0.34, contestIq: 0.93, shotSelection: 0.93, releaseError: 0.045, moveRate: 1.3, helpIq: 0.94, moveTier: 2, comboLength: 4, tendencyRead: 1, bitesOnFakes: 0.09 },
-  // Above Hall of Fame, and only ever met at the top of the ranked ladder.
+  superstar: { reactionTime: 0.14, standoff: 2.7, stealAggression: 0.28, contestIq: 0.82, shotSelection: 0.84, releaseError: 0.075, moveRate: 1.05, helpIq: 0.82, moveTier: 2, comboLength: 3, tendencyRead: 0.8, bitesOnFakes: 0.2, punish: 0.5, ankleThreat: 0 },
+
+  // ---------------------------------------------- Emerald and above
+  //
+  // Hall of Fame is where the ranked ladder stops being a difficulty setting
+  // and starts being a wall. From here up, three things climb together and one
+  // deliberately does not: reactions, punishment and handle all sharpen, and
+  // `bitesOnFakes` never reaches zero. A bot that cannot be faked is a bot you
+  // beat by memorising it rather than by playing well, so every tier — the top
+  // one included — can still be moved by a good fake.
+
+  // Elite reactions, rarely a bad decision. Plays like a real competitor, and
+  // the first tier that will put you on the floor if you lunge at it.
+  hallOfFame: { reactionTime: 0.095, standoff: 2.3, stealAggression: 0.34, contestIq: 0.93, shotSelection: 0.93, releaseError: 0.045, moveRate: 1.3, helpIq: 0.94, moveTier: 2, comboLength: 4, tendencyRead: 1, bitesOnFakes: 0.09, punish: 0.68, ankleThreat: 0.35 },
+  // Sapphire. Reads the tendency behind the tendency: closes out on a shooter
+  // before the feet are set and walls the lane against a driver on the same
+  // possession.
+  legend: { reactionTime: 0.086, standoff: 2.22, stealAggression: 0.355, contestIq: 0.95, shotSelection: 0.945, releaseError: 0.038, moveRate: 1.36, helpIq: 0.955, moveTier: 2, comboLength: 4, tendencyRead: 1, bitesOnFakes: 0.078, punish: 0.76, ankleThreat: 0.48 },
+  // Diamond. Every mistake is a bucket. Space has to be earned twice.
+  immortal: { reactionTime: 0.078, standoff: 2.14, stealAggression: 0.372, contestIq: 0.965, shotSelection: 0.955, releaseError: 0.032, moveRate: 1.43, helpIq: 0.97, moveTier: 2, comboLength: 5, tendencyRead: 1, bitesOnFakes: 0.066, punish: 0.84, ankleThreat: 0.6 },
+  // Champion. Nothing is open for longer than a beat, and it is never the same
+  // beat twice.
+  untouchable: { reactionTime: 0.069, standoff: 2.07, stealAggression: 0.386, contestIq: 0.98, shotSelection: 0.963, releaseError: 0.027, moveRate: 1.49, helpIq: 0.98, moveTier: 2, comboLength: 5, tendencyRead: 1, bitesOnFakes: 0.052, punish: 0.92, ankleThreat: 0.72 },
+  // Grand Champ. The hardest thing in the game, and the end of the ladder.
   // Reacts inside a human's own reaction time, almost never misses an open
-  // look, and barely ever bites on a fake. Grand Champ should feel like the
-  // ladder stopped being fair, because there is nothing above it to climb to.
-  grandChamp: { reactionTime: 0.06, standoff: 2.0, stealAggression: 0.4, contestIq: 0.99, shotSelection: 0.97, releaseError: 0.022, moveRate: 1.55, helpIq: 0.99, moveTier: 2, comboLength: 5, tendencyRead: 1, bitesOnFakes: 0.04 },
+  // look, and barely ever bites on a fake — barely, not never.
+  grandChamp: { reactionTime: 0.06, standoff: 2.0, stealAggression: 0.4, contestIq: 0.99, shotSelection: 0.97, releaseError: 0.022, moveRate: 1.55, helpIq: 0.99, moveTier: 2, comboLength: 5, tendencyRead: 1, bitesOnFakes: 0.04, punish: 1, ankleThreat: 0.85 },
 };
+
+/**
+ * The floor under every difficulty, asserted in the tests.
+ *
+ * "Extremely challenging but still beatable" is a promise, and a promise with
+ * no number behind it is a wish. These are the numbers: nothing reacts faster
+ * than 55ms, nothing gambles for a strip more than two opportunities in five,
+ * and nothing is immune to a fake.
+ */
+/**
+ * The handle threat a difficulty carries onto the floor.
+ *
+ * Read off the preset so there is one source of truth, and sharpened the same
+ * way everything else is — a Hall of Fame bot at the top of Emerald is a little
+ * more dangerous than one at the bottom of it, without being a Legend.
+ */
+export function ankleThreatFor(difficulty: Difficulty, edge = 0): number {
+  return sharpen(DIFFICULTY_PRESETS[difficulty], edge, difficulty).ankleThreat;
+}
+
+export const AI_FAIRNESS_FLOOR = {
+  minReactionTime: 0.055,
+  maxStealAggression: 0.45,
+  minBitesOnFakes: 0.03,
+} as const;
 
 interface Sample {
   t: number;
@@ -70,6 +135,12 @@ interface Sample {
 }
 
 const MOVE_POOL: DribbleMoveId[] = DRIBBLE_MOVES.filter((m) => m.id !== 'euro').map((m) => m.id);
+
+/** How likely a move is to actually put somebody on the floor. */
+function weightOf(id: DribbleMoveId): number {
+  const def = DRIBBLE_MOVES.find((m) => m.id === id)!;
+  return def.ankleBase * def.misdirection;
+}
 
 /**
  * Defensive and offensive AI for a bot side. Perception is deliberately lagged
@@ -99,6 +170,9 @@ export class AiController {
   /** rolling share of the human's possessions that attacked the rim */
   private opponentDriveRate = 0.3;
   private ftPlannedRelease: number | null = null;
+  /** the last two dribble moves the human committed to, newest first */
+  private oppRecentMoves: DribbleMoveId[] = [];
+  private lastSeenMove: DribbleMoveId | null = null;
 
   private side: Side;
   adaptive: boolean;
@@ -218,12 +292,49 @@ export class AiController {
     if (!input.shoot) this.ftPlannedRelease = null;
   }
 
-  private perceived(): Sample {
-    const target = this.history[this.history.length - 1].t - this.profile.reactionTime;
+  private perceived(lag = this.profile.reactionTime): Sample {
+    const target = this.history[this.history.length - 1].t - Math.max(0, lag);
     for (let i = this.history.length - 1; i >= 0; i--) {
       if (this.history[i].t <= target) return this.history[i];
     }
     return this.history[0];
+  }
+
+  /**
+   * How much of a mistake the human is currently making, 0 to 1.
+   *
+   * Only things the player *did*: lost their feet, been broken down, thrown a
+   * move the bot has already seen this possession, or committed hard in one
+   * direction while the bot is beside them. It is deliberately not "the bot is
+   * winning" — punishment has to be attached to a cause the player can point at
+   * and avoid next time, or it is just the difficulty being unfair with extra
+   * steps.
+   */
+  private exposure(opp: SimPlayer): number {
+    let e = 0;
+    if (opp.state === 'fallen') e = 1;
+    else if (opp.state === 'staggered') e = Math.max(e, 0.85);
+    else if (opp.stagger > 0.2) e = Math.max(e, opp.stagger * 0.7);
+    // A repeated move is a read. Two of the same in a row and the bot knows.
+    if (this.oppRecentMoves.length >= 2 && this.oppRecentMoves[0] === this.oppRecentMoves[1]) {
+      e = Math.max(e, 0.55);
+    }
+    // Mid-animation with nothing left to cancel into.
+    if (opp.state === 'moveLock' && opp.moveDuration > 0) {
+      const through = opp.moveTimer / opp.moveDuration;
+      if (through > 0.55) e = Math.max(e, 0.5);
+    }
+    return Math.min(1, e);
+  }
+
+  /** Notes what the human just threw, so a repeat can be recognised. */
+  private noteOpponentMove(opp: SimPlayer): void {
+    const id = opp.state === 'moveLock' ? opp.moveId : null;
+    if (id && id !== this.lastSeenMove) {
+      this.oppRecentMoves.unshift(id as DribbleMoveId);
+      if (this.oppRecentMoves.length > 3) this.oppRecentMoves.pop();
+    }
+    this.lastSeenMove = id as DribbleMoveId | null;
   }
 
   // ------------------------------------------------------------------ offense
@@ -287,20 +398,36 @@ export class AiController {
       return;
     }
 
-    // Attack a beaten defender.
-    if (opp.stagger > 0.35 && rimDist < 20) {
+    // Attack a beaten defender. A high-punish bot goes at a smaller opening and
+    // from further out, which is what "it takes every mistake" looks like from
+    // the other side of the ball.
+    const exposedDef = this.exposure(opp);
+    const openingNeeded = 0.35 - this.profile.punish * 0.2;
+    if ((opp.stagger > openingNeeded || exposedDef > 0.7) && rimDist < 20 + this.profile.punish * 6) {
       this.driveTimer = 1.1;
       return;
     }
 
-    if (state.time >= this.nextMoveAt && defDist < 6.5 && me.stamina > 0.3) {
+    // Is the defender leaning? A move thrown against a defender who is already
+    // travelling one way is the one that actually breaks somebody down — the
+    // sim's own ankle maths keys off exactly this. So a bot with a handle waits
+    // for it instead of firing on a timer.
+    const lean = this.defenderLean(me, opp);
+    const hunting = this.profile.ankleThreat > 0 && lean > 0.45 && defDist < 5 && me.stamina > 0.45;
+
+    if ((state.time >= this.nextMoveAt || hunting) && defDist < 6.5 && me.stamina > 0.3) {
       // comboLength shortens the gap between moves, so higher difficulties
       // string together real combinations rather than isolated moves.
       const chain = 1 + (this.profile.comboLength - 1) * 0.28;
       this.nextMoveAt = state.time + this.rng.range(0.4, 1.5) / Math.max(0.2, this.profile.moveRate * chain);
+      // Hunting costs it something: after going for the kill it has to reset
+      // before it can do it again, so this is a moment rather than a loop.
+      if (hunting) this.nextMoveAt = Math.max(this.nextMoveAt, state.time + 1.1);
       const preferRight = opp.x > me.x ? -1 : 1;
-      this.moveTarget = this.pickMove(state);
-      this.commitDirX = preferRight * this.rng.range(0.6, 1);
+      this.moveTarget = this.pickMove(state, hunting);
+      // Against a leaning defender it goes the way the lean cannot follow.
+      const away = hunting ? -Math.sign(opp.vx || preferRight) || preferRight : preferRight;
+      this.commitDirX = away * this.rng.range(0.6, 1);
       this.commitDirZ = -this.rng.range(0.2, 0.9);
       this.commitTimer = 0.35;
       input.move = this.moveTarget;
@@ -323,7 +450,7 @@ export class AiController {
    * has basic handles, Pro adds intermediate moves, and Superstar and above
    * unlock the signature combos.
    */
-  private pickMove(state: MatchState): DribbleMoveId {
+  private pickMove(state: MatchState, hunting = false): DribbleMoveId {
     const me = state.players[this.side];
     const legal = MOVE_POOL.filter((id) => {
       const def = DRIBBLE_MOVES.find((m) => m.id === id)!;
@@ -334,6 +461,16 @@ export class AiController {
     });
     if (!legal.length) return 'crossover';
 
+    // Going for the kill: the highest-misdirection move it owns, not a random
+    // strong one. This is the only path to the biggest handles in the game, and
+    // it is only ever reached when the defender is already leaning.
+    if (hunting) {
+      const best = [...legal].sort(
+        (a, b) => weightOf(b) - weightOf(a),
+      )[0];
+      if (best) return best;
+    }
+
     // Higher tiers prefer moves that actually break a defender down.
     if (this.profile.moveTier >= 1 && this.rng.chance(0.35 + this.profile.moveTier * 0.2)) {
       const strong = legal.filter((id) => DRIBBLE_MOVES.find((m) => m.id === id)!.ankleBase >= 0.04);
@@ -342,11 +479,37 @@ export class AiController {
     return this.rng.pick(legal);
   }
 
+  /**
+   * How badly the defender is committed the wrong way, 0 to 1.
+   *
+   * The mirror of the sim's own `wrongWay` term: a defender standing square
+   * scores nothing here, and a defender lunging scores high. It is the whole
+   * reason good defence is a defence — stay in front and the bot never finds
+   * the moment it is waiting for.
+   */
+  private defenderLean(me: SimPlayer, opp: SimPlayer): number {
+    const speed = Math.hypot(opp.vx, opp.vz);
+    if (speed < 1.2) return 0;
+    const dx = me.x - opp.x;
+    const dz = me.z - opp.z;
+    const len = Math.hypot(dx, dz) || 1;
+    // Positive when the defender's momentum carries them across the handler.
+    const closing = (opp.vx * dx + opp.vz * dz) / (speed * len);
+    return Math.max(0, Math.min(1, closing * (speed / 9)));
+  }
+
   // ------------------------------------------------------------------ defense
   private defense(state: MatchState, input: PlayerInput, dt: number): void {
     const me = state.players[this.side];
     const opp = state.players[this.side === 0 ? 1 : 0];
-    const read = this.perceived();
+    this.noteOpponentMove(opp);
+    // Punishment. A mistake the human has actually made buys the bot up to half
+    // its perception lag back — it does not see *more*, it sees *sooner*, and
+    // only for as long as the mistake is on the floor. Below Hall of Fame
+    // `punish` is small or zero and this is barely a thing.
+    const exposed = this.exposure(opp);
+    const lag = this.profile.reactionTime * (1 - this.profile.punish * exposed * 0.5);
+    const read = this.perceived(lag);
 
     // Predict where the handler is going, scaled by how well this bot reads.
     const lead = this.profile.helpIq * 0.28;
@@ -414,7 +577,12 @@ export class AiController {
     // harder — otherwise close defence turns every possession into a turnover.
     const vulnerable = opp.state === 'moveLock';
     if (realDist < 3.4 && me.stealCooldown <= 0) {
-      const p = this.profile.stealAggression * (vulnerable ? 2.4 : 0.3) * dt * 8;
+      // The gamble is still a gamble — a reach that misses still costs the bot
+      // its cooldown. Exposure only raises how often it takes the shot, and
+      // never past the fairness ceiling on `stealAggression`.
+      const openings = vulnerable ? 2.4 : 0.3;
+      const punished = 1 + this.profile.punish * exposed * 1.1;
+      const p = Math.min(AI_FAIRNESS_FLOOR.maxStealAggression, this.profile.stealAggression * punished) * openings * dt * 8;
       if (this.rng.chance(p)) input.steal = true;
     }
   }
@@ -469,6 +637,9 @@ const DIFFICULTY_ORDER: Difficulty[] = [
   'allStar',
   'superstar',
   'hallOfFame',
+  'legend',
+  'immortal',
+  'untouchable',
   'grandChamp',
 ];
 
@@ -512,5 +683,7 @@ export function sharpen(preset: AiProfile, edge: number, difficulty?: Difficulty
     tendencyRead: lerp(preset.tendencyRead, next.tendencyRead),
     stealAggression: lerp(preset.stealAggression, next.stealAggression),
     moveRate: lerp(preset.moveRate, next.moveRate),
+    punish: lerp(preset.punish, next.punish),
+    ankleThreat: lerp(preset.ankleThreat, next.ankleThreat),
   };
 }
