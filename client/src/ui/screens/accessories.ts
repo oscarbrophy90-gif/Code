@@ -8,8 +8,6 @@ import {
   POINTS_PER_DIVISION,
   streakBadge,
   CRATES,
-  CRATE_ODDS,
-  oddsLabel,
   type CrateDef,
   type StoreCategory,
   type StoreItem,
@@ -23,6 +21,7 @@ import { AvatarRenderer, livePreview } from '../avatar.ts';
 import { rankPanel, ladderStrip } from '../rankbadge.ts';
 import { drawDunkFrame } from '../dunkscene.ts';
 import { playCrateRoll } from '../crateroll.ts';
+import { crateCard } from '../cratecard.ts';
 import { drawItemCard } from '../itemcard.ts';
 
 /** Grouped so the locker room reads like a wardrobe, not a spreadsheet. */
@@ -142,16 +141,18 @@ export function renderAccessories(): HTMLElement {
 }
 
 /**
- * The crates you have bought and not yet opened.
+ * The loot boxes you own.
  *
- * This is where opening happens rather than the shop, so buying and pulling are
- * two separate decisions — you can stack ten and open them in one sitting, or
- * sit on them. The panel is always shown, empty or not: a section that vanishes
- * when you have none is a section nobody discovers.
+ * The same card the Store sells, with the button swapped. A box you bought is
+ * the same object it was on the shelf, and showing it as a different, smaller
+ * thing in the Locker made it feel like an inventory row rather than the thing
+ * you were excited to open. The panel is always shown, empty or not: a section
+ * that vanishes when you have none is a section nobody discovers.
  */
 function cratePanel(): HTMLElement {
   const held = CRATES.map((crate) => ({ crate, count: store.crateCount(crate.id) }));
   const total = held.reduce((sum, h) => sum + h.count, 0);
+  const owned = held.filter((h) => h.count > 0);
 
   return panel(
     'Loot boxes',
@@ -159,28 +160,20 @@ function cratePanel(): HTMLElement {
       'p',
       { class: 'hint', style: 'margin:0 0 12px' },
       total > 0
-        ? `${total} unopened. Each one rolls a tier first and then picks evenly inside it — a pull you already own is traded for Coins instead.`
+        ? `${total} unopened. Each one rolls a tier first and then picks evenly inside it — a pull you already own is traded for Coins instead. Preview Odds on any box for the full table.`
         : 'None right now. They are sold in the Store, four hundred items across the four of them and not one of those items on a shelf.',
     ),
-    el(
-      'div',
-      { class: 'crate-rack' },
-      ...held.map(({ crate, count }) => crateSlot(crate, count)),
-    ),
-    total === 0
-      ? el(
+    owned.length > 0
+      ? el('div', { class: 'crate-grid' }, ...owned.map(({ crate, count }) => lockerCrate(crate, count)))
+      : el(
           'div',
-          { class: 'row', style: 'margin-top:12px' },
+          { class: 'row' },
           el('button', { class: 'btn sm', onclick: () => navigate('store', { category: 'crates' }) }, 'Go to the Store'),
-        )
-      : null,
+        ),
   );
 }
 
-function crateSlot(crate: CrateDef, count: number): HTMLElement {
-  const player = store.player;
-  const collected = crate.pool.filter((i) => player.unlocked.includes(i.id)).length;
-
+function lockerCrate(crate: CrateDef, count: number): HTMLElement {
   const open = async () => {
     // The pull is banked here, before a single frame is drawn. Whatever happens
     // to the animation after this point, the item is already yours.
@@ -199,36 +192,12 @@ function crateSlot(crate: CrateDef, count: number): HTMLElement {
     refresh();
   };
 
-  return el(
-    'div',
-    { class: `crate-slot ${count > 0 ? 'has' : ''}`, style: `--c1:${crate.colors[0]};--c2:${crate.colors[1]}` },
-    el('div', { class: 'crate-slot-count' }, `${count}`),
-    el(
-      'div',
-      { style: 'min-width:0' },
-      el('div', { class: 'crate-slot-name' }, crate.name),
-      el('div', { class: 'faint', style: 'font-size:11px' }, `${collected} of ${crate.pool.length} collected`),
-      el(
-        'div',
-        { class: 'crate-odds tight' },
-        ...CRATE_ODDS.map((band) =>
-          el(
-            'span',
-            { class: 'crate-odd', style: `--tint:${RARITY_COLOR[band.rarity]}` },
-            el('b', {}, oddsLabel(band.chance)),
-            el('span', {}, band.rarity),
-          ),
-        ),
-      ),
-    ),
-    count > 0
-      ? el('button', { class: 'btn sm primary', onclick: open }, 'Open')
-      : el(
-          'button',
-          { class: 'btn sm', onclick: () => navigate('store', { category: 'crates' }) },
-          'Buy',
-        ),
-  );
+  return crateCard(crate, {
+    count,
+    footer: `${count} unopened`,
+    footerHot: true,
+    action: { label: 'Open Loot Box', tone: 'primary', onClick: open },
+  });
 }
 
 function renderCategory(category: StoreCategory): HTMLElement {
