@@ -3283,6 +3283,183 @@ input[type='text']:focus {
   color: var(--text-faint);
 }
 
+/* ------------------------------------------------------------- loot boxes */
+
+/* The crate card in the shop. Taller art than a normal item swatch, because a
+   crate is the thing being sold rather than a colour hint for something else. */
+.item.crate .crate-art {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-bottom: 1px solid var(--line);
+}
+
+/* The published odds, printed on the card rather than hidden behind a link. */
+.crate-odds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.crate-odd {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px 6px;
+  min-width: 54px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid color-mix(in srgb, var(--tint) 35%, transparent);
+}
+
+.crate-odd b {
+  font-size: 11px;
+  font-weight: 900;
+  color: var(--tint);
+}
+
+.crate-odd span {
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.crate-odds.tight .crate-odd {
+  min-width: 46px;
+  padding: 3px 5px;
+}
+
+/* The full breakdown, tier chance next to the chance of any one item in it. */
+.odds-table {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.odds-head,
+.odds-row {
+  display: grid;
+  grid-template-columns: 1fr 80px 56px 90px;
+  gap: 8px;
+  padding: 8px 10px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.odds-head {
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.odds-row + .odds-row,
+.odds-head + .odds-row {
+  border-top: 1px solid var(--line);
+}
+
+.odds-tier {
+  font-weight: 900;
+  text-transform: capitalize;
+  color: var(--tint);
+}
+
+/* The rack of unopened crates in the Locker. */
+.crate-rack {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 8px;
+}
+
+.crate-slot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--panel-2);
+}
+
+/* A crate you actually have reads lit; an empty slot stays quiet. */
+.crate-slot.has {
+  border-color: color-mix(in srgb, var(--c2) 55%, transparent);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--c1) 16%, var(--panel-2)), var(--panel-2));
+}
+
+.crate-slot-count {
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 900;
+  background: linear-gradient(135deg, var(--c1), var(--c2));
+  color: #0b0e15;
+}
+
+.crate-slot.has .crate-slot-count {
+  box-shadow: 0 0 18px color-mix(in srgb, var(--c2) 45%, transparent);
+}
+
+.crate-slot > div:nth-child(2) {
+  flex: 1;
+}
+
+.crate-slot-name {
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.crate-slot button {
+  flex-shrink: 0;
+}
+
+/* The line under the reel result: what tier it was, and whether it was new. */
+.roll-detail {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  align-items: center;
+  min-height: 22px;
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+.roll-rarity {
+  font-weight: 900;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--tint);
+}
+
+.roll-new {
+  color: var(--green);
+  font-weight: 700;
+}
+
+.roll-dupe {
+  color: var(--text-faint);
+  font-weight: 700;
+}
+
+/* The drawn thumbnail on a Locker chip, in place of the colour swatch. */
+.locker-thumb {
+  width: 46px;
+  height: 31px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  object-fit: cover;
+}
+
 /* The offline ladder carries more columns than the old board did. */
 .lb-head.wide,
 .lb-row.wide {

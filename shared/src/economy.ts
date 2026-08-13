@@ -131,12 +131,18 @@ export interface StoreItem {
   name: string;
   category: StoreCategory;
   price: number;
-  rarity: 'common' | 'rare' | 'epic' | 'legendary' | 'mythic';
+  rarity: 'common' | 'rare' | 'epic' | 'legendary' | 'mythic' | 'exotic';
   /**
    * Mythic stock never sits in the permanent catalogue. It only ever shows up
    * in the rotating window, and rarely — that is the whole point of it.
    */
   rotationOnly?: boolean;
+  /**
+   * Crate stock. Never on a shelf, never in the free starter unlocks, and it
+   * has no price because there is no counter you can pay it at — the only way
+   * to hold one is to open the crate it lives in.
+   */
+  crateOnly?: boolean;
   /** hex colours used to draw the item procedurally — no external art */
   colors: [string, string];
   /** requirement text, e.g. "Reach Gold III" */
@@ -151,4 +157,6 @@ export const RARITY_COLOR: Record<StoreItem['rarity'], string> = {
   epic: '#a86bff',
   legendary: '#ffb347',
   mythic: '#ff4d8d',
+  // Above mythic. One item in the whole game wears it.
+  exotic: '#ffe75e',
 };

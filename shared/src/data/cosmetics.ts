@@ -14,6 +14,7 @@ import { PACK_TATTOOS } from './tattoopack.ts';
 import { JUMPSHOTS } from '../shooting.ts';
 import type { StoreItem } from '../economy.ts';
 import { RANK_ITEMS } from './rankpack.ts';
+import { LOOT_ITEMS } from './lootpack.ts';
 
 const jerseys: StoreItem[] = [
   { id: 'jersey-starter', name: 'Blank Practice Tank', category: 'jersey', price: 0, rarity: 'common', colors: ['#e8eef5', '#8a93a6'], description: 'The one everybody starts in.' },
@@ -239,11 +240,16 @@ export const STORE_ITEMS: StoreItem[] = [
   ...dunkItems,
   ...animations,
   ...RANK_ITEMS,
+  // Crate stock. In the catalogue so the Locker, the previews and every
+  // id lookup can see it; kept off the shelves and out of DEFAULT_UNLOCKS by
+  // its crateOnly flag rather than by living in a second catalogue nothing
+  // else knows about.
+  ...LOOT_ITEMS,
 ];
 
 export const STORE_BY_ID: Record<string, StoreItem> = Object.fromEntries(STORE_ITEMS.map((i) => [i.id, i]));
 
-export const DEFAULT_UNLOCKS = STORE_ITEMS.filter((i) => i.price === 0 && !i.requirement).map((i) => i.id);
+export const DEFAULT_UNLOCKS = STORE_ITEMS.filter((i) => i.price === 0 && !i.requirement && !i.crateOnly).map((i) => i.id);
 
 export function itemsInCategory(category: StoreItem['category']): StoreItem[] {
   return STORE_ITEMS.filter((i) => i.category === category);

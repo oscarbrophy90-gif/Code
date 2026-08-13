@@ -28,6 +28,9 @@ import {
   SEASON_EPOCH,
   SEASON_LENGTH_MS,
   type OnlineRecord,
+  CRATE_BY_ID,
+  openCrate as rollCrate,
+  type CratePull,
 } from '@hoops/shared';
 
 import {
@@ -140,6 +143,7 @@ export function createPlayer(slot: number, name: string, build: BuildSpec): MyPl
     rank: freshRank(),
     unlocked: [...new Set([...DEFAULT_UNLOCKS, ...DEFAULT_TITLES])],
     drillBests: {},
+    crates: {},
   };
 }
 
@@ -362,6 +366,7 @@ class Store {
       if (!p.loadout.threeCelebrationId) p.loadout.threeCelebrationId = 'three-hold';
       for (const t of DEFAULT_TITLES) if (!p.unlocked.includes(t)) p.unlocked.push(t);
       if (!p.drillBests) p.drillBests = {};
+      if (!p.crates) p.crates = {};
       // Six emote slots replaced the single equipped emote. An older save keeps
       // whatever it had in slot one and fills the rest from the free emotes it
       // already owns, so the 1-6 keys do something the first time you press them.
@@ -531,6 +536,65 @@ class Store {
   owns(itemId: string): boolean {
     return this.player.unlocked.includes(itemId);
   }
+
+  /** How many of a crate are sitting unopened in the Locker. */
+  crateCount(crateId: string): number {
+    return this.player.crates?.[crateId] ?? 0;
+  }
+
+  /**
+   * Buys a crate. It goes to the Locker unopened rather than opening on the
+   * spot — the shop sells you the box, the Locker is where you find out what is
+   * in it, and keeping those apart means a mis-click at the counter never costs
+   * you the moment.
+   */
+  buyCrate(crateId: string, quantity = 1): boolean {
+    const crate = CRATE_BY_ID[crateId];
+    if (!crate) return false;
+    const cost = crate.price * quantity;
+    if (this.player.currency < cost) return false;
+
+    this.update((p) => {
+      const target = p.players[p.activeSlot];
+      target.currency -= cost;
+      if (!target.crates) target.crates = {};
+      target.crates[crateId] = (target.crates[crateId] ?? 0) + quantity;
+    });
+    this.saveNow();
+    return true;
+  }
+
+  /**
+   * Opens one crate and banks the pull.
+   *
+   * The crate is spent and the item is recorded here, before the reel is ever
+   * drawn, so closing the tab mid-spin cannot lose you the pull or leave the
+   * crate half-spent. The animation is shown the result; it does not produce it.
+   *
+   * The seed is drawn from the wall clock and the number of crates opened so
+   * far, which means two opens in the same millisecond still differ — and it
+   * means the result is not reproducible by reloading, which for a crate is the
+   * point.
+   */
+  openCrate(crateId: string): CratePull | null {
+    if (this.crateCount(crateId) <= 0) return null;
+
+    const seed = (Date.now() ^ (this.cratesOpened * 0x9e3779b1)) >>> 0;
+    this.cratesOpened++;
+    const pull = rollCrate(crateId, seed, this.player.unlocked);
+
+    this.update((p) => {
+      const target = p.players[p.activeSlot];
+      target.crates[crateId] = Math.max(0, (target.crates[crateId] ?? 0) - 1);
+      if (pull.duplicate) target.currency += pull.refund;
+      else target.unlocked.push(pull.item.id);
+    });
+    this.saveNow();
+    return pull;
+  }
+
+  /** Opens counted this session, purely to keep consecutive seeds apart. */
+  private cratesOpened = 0;
 
   /** Builds the config the simulation needs from the active MyPlayer. */
   simConfig(player = this.player): SimPlayerConfig {

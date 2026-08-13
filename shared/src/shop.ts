@@ -48,7 +48,7 @@ export const MYTHIC_SLOT_CHANCE = 0.025;
 
 /** Prestige items are earned, never stocked, so they stay out of the draw. */
 function isStockable(item: StoreItem): boolean {
-  return item.price > 0 && !item.requirement && item.rarity !== 'mythic';
+  return item.price > 0 && !item.requirement && !item.crateOnly && item.rarity !== 'mythic';
 }
 
 /**
@@ -77,7 +77,9 @@ const SHELF_MIX: Record<StoreItem['rarity'], number> = {
   rare: 5,
   epic: 3,
   legendary: 1,
+  // Neither of the top two tiers is ever stocked: they come out of crates.
   mythic: 0,
+  exotic: 0,
 };
 
 /** The mix scaled to a section's slot count, keeping the same proportions. */

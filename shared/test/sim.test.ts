@@ -1593,9 +1593,10 @@ test('mythic stock is rare, rotation-only, and unbuyable off the shelf', () => {
   const mythics = STORE_ITEMS.filter((i) => i.rarity === 'mythic');
   assert.ok(mythics.length >= 80, `expected a deep mythic tier, found ${mythics.length}`);
   for (const m of mythics) {
-    // Either rotation-only stock, or a ranked reward that has no price at all.
-    // Both mean the same thing: you cannot walk into the shop and buy one.
-    const buyable = !m.rotationOnly && !(m.price === 0 && m.requirement);
+    // Either rotation-only stock, a ranked reward that has no price at all, or
+    // crate stock that has no counter to be sold at. All three mean the same
+    // thing: you cannot walk into the shop and buy one.
+    const buyable = !m.rotationOnly && !m.crateOnly && !(m.price === 0 && m.requirement);
     assert.equal(buyable, false, `${m.id} is a mythic you could buy off the shelf`);
   }
 
@@ -1641,14 +1642,18 @@ test('mythic stock is rare, rotation-only, and unbuyable off the shelf', () => {
 });
 
 test('the catalogue is as deep as the shop claims', () => {
-  const count = (c: string) => STORE_ITEMS.filter((i) => i.category === c).length;
-  const mythic = (c: string) => STORE_ITEMS.filter((i) => i.category === c && i.rarity === 'mythic').length;
+  // Crate stock is excluded throughout: this test is about the depth of the
+  // *shop*, and the four hundred crate items are never on a shelf. Counting
+  // them here would let the shop quietly shrink behind a growing crate pool.
+  const shelfItems = STORE_ITEMS.filter((i) => !i.crateOnly);
+  const count = (c: string) => shelfItems.filter((i) => i.category === c).length;
+  const mythic = (c: string) => shelfItems.filter((i) => i.category === c && i.rarity === 'mythic').length;
 
   // Shop depth, plus whatever the ranked path adds on top of each category —
   // the reward items are counted separately so a change to one cannot quietly
   // paper over a loss in the other.
   const ranked = (c: string) =>
-    STORE_ITEMS.filter((i) => i.category === c && i.price === 0 && i.requirement?.includes('finish the season')).length;
+    shelfItems.filter((i) => i.category === c && i.price === 0 && i.requirement?.includes('finish the season')).length;
 
   assert.equal(count('jersey') - ranked('jersey'), 150, 'jersey should have 150 on the shelf');
   assert.equal(count('shoes') - ranked('shoes'), 150, 'shoes should have 150 on the shelf');

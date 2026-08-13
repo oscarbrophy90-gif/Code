@@ -204,6 +204,12 @@ export interface MyPlayer {
   unlocked: string[];
   /** best rep count per training drill, keyed by drill id */
   drillBests: Record<string, number>;
+  /**
+   * Unopened crates, keyed by crate id. Bought in the Store and opened in the
+   * Locker, so a purchase is never the same moment as a pull — you can sit on
+   * ten of them and open them when you feel like it.
+   */
+  crates: Record<string, number>;
 }
 
 export interface Profile {

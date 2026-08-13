@@ -10,6 +10,7 @@ export * from './ranked.ts';
 export * from './rankrewards.ts';
 export * from './economy.ts';
 export * from './shop.ts';
+export * from './lootbox.ts';
 export * from './seasons.ts';
 
 export * from './sim/court.ts';
@@ -22,6 +23,8 @@ export * from './data/teams.ts';
 export * from './data/parks.ts';
 export * from './data/courts.ts';
 export * from './data/ladder.ts';
+export * from './data/lootpack.ts';
+export * from './data/lootboxes.ts';
 export * from './data/cosmetics.ts';
 export * from './data/titles.ts';
 export * from './data/titlepack.ts';
