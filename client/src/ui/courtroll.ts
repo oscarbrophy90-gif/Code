@@ -18,19 +18,46 @@ import { captureSceneKeys, el } from './dom.ts';
  * match could land on different floors.
  */
 
+/**
+ * How the reel moves: cruise, then brake.
+ *
+ * The first half runs at a constant fast speed — about twenty cards a second,
+ * fast enough that they are a blur you cannot read — and covers three quarters
+ * of the distance. The second half is a cubic ease-out through the remaining
+ * quarter, decelerating from that speed to nothing, so the last stretch is
+ * card-by-card and the winner creeps under the marker.
+ *
+ * The two halves are chosen so the speeds match where they join: linear at
+ * `D/T` and a cubic ease-out leaving at `3(1-D)/(1-T)`, which are equal at
+ * T = 0.5, D = 0.75. Without that the reel visibly stalls at the changeover.
+ *
+ * Two curves were tried and thrown away first. A quintic ease-out slows down
+ * evenly, so there is never a moment of "it is going to land on that one". An
+ * exponential is the opposite problem — measured, it spent 97% of the distance
+ * in the first second and then crawled almost imperceptibly for four more.
+ */
+const CRUISE_T = 0.5;
+const CRUISE_D = 0.75;
+
+export function reelEase(t: number): number {
+  const k = Math.max(0, Math.min(1, t));
+  if (k <= CRUISE_T) return (CRUISE_D * k) / CRUISE_T;
+  const b = (k - CRUISE_T) / (1 - CRUISE_T);
+  return CRUISE_D + (1 - CRUISE_D) * (1 - Math.pow(1 - b, 3));
+}
+
 /** Card geometry, in CSS pixels. */
 const CARD_W = 150;
 const CARD_GAP = 10;
 const PITCH = CARD_W + CARD_GAP;
 /** How long the reel spins before it settles. */
-const SPIN_MS = 4200;
+const SPIN_MS = 5200;
 /** How long the winner is held on screen once it lands. */
 const HOLD_MS = 1400;
 
 export function playCourtRoll(host: HTMLElement, seed: number): Promise<CourtSurface> {
   const winner = pickCourtSurface(seed);
-  const strip = buildReel(seed, winner);
-  const winnerAt = strip.indexOf(winner);
+  const { strip, winnerAt } = buildReel(seed, winner);
 
   return new Promise((resolve) => {
     const track = el('div', { class: 'roll-track' });
@@ -77,23 +104,29 @@ export function playCourtRoll(host: HTMLElement, seed: number): Promise<CourtSur
 
     const started = performance.now();
     let lastTick = -1;
+    let lastTickAt = 0;
     const draw = (now: number) => {
       if (done) return;
       const t = Math.min(1, (now - started) / SPIN_MS);
-      // Quintic ease-out: fast enough at the start that the cards blur, slow
-      // enough at the end that you can read the last three as they go by.
-      const eased = 1 - Math.pow(1 - t, 5);
+      const eased = reelEase(t);
       const target = settle();
       const from = viewportStart();
       const x = from + (target - from) * eased;
       track.style.transform = `translateX(${x}px)`;
 
       // A tick each time a card crosses the marker, which is what makes the
-      // deceleration audible rather than only visible.
+      // deceleration audible rather than only visible. Rate-limited, because at
+      // the speed this now leaves at the first second would otherwise be forty
+      // clicks on top of each other rather than a sound.
       const crossed = Math.floor((-x + (window_.clientWidth || 640) / 2) / PITCH);
       if (crossed !== lastTick && t < 1) {
         lastTick = crossed;
-        audio.play('ui', 0.35);
+        if (now - lastTickAt > 45) {
+          lastTickAt = now;
+          // Quieter while it is flying, louder as it settles, so the slowdown
+          // is something you hear before you see it.
+          audio.play('ui', 0.22 + eased * 0.4);
+        }
       }
 
       if (t >= 1) {

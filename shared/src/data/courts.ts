@@ -131,8 +131,18 @@ export function pickCourtSurface(seed: number): CourtSurface {
  * the animation is a straight scroll to a fixed offset rather than anything
  * that has to be corrected as it lands. The filler is drawn from the same seed
  * so the reel is the same on both clients too.
+ *
+ * It is long on purpose. The distance is what gives the deceleration somewhere
+ * to happen: seventy cards of travel means the reel leaves fast enough to blur
+ * and still has a dozen left to crawl through once it has slowed down.
  */
-export function buildReel(seed: number, winner: CourtSurface, length = 44, winnerAt = 38): CourtSurface[] {
+export interface Reel {
+  strip: CourtSurface[];
+  /** where the winning card sits, which is where the animation stops */
+  winnerAt: number;
+}
+
+export function buildReel(seed: number, winner: CourtSurface, length = 78, winnerAt = 72): Reel {
   const rng = new Rng(seed ^ 0x5ee1);
   const strip: CourtSurface[] = [];
   for (let i = 0; i < length; i++) {
@@ -150,5 +160,11 @@ export function buildReel(seed: number, winner: CourtSurface, length = 44, winne
     }
     strip.push(COURT_SURFACES[index]);
   }
-  return strip;
+  // The index is returned rather than looked up. Filler is drawn from the same
+  // six courts, so the winning court appears all over the strip — searching for
+  // it finds the first *filler* card of that court, which had the reel stopping
+  // a few cards in and travelling a few hundred pixels instead of eleven
+  // thousand. It still landed on the right court, which is exactly why it was
+  // hard to see: only the length of the spin was wrong.
+  return { strip, winnerAt };
 }

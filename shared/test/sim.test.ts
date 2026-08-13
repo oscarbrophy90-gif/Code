@@ -2544,13 +2544,18 @@ test('the court draw is seeded, weighted, and lands where the reel says', () => 
   // the index the animation stops on, every time.
   for (const seed of [7, 4242, 987654]) {
     const winner = pickCourtSurface(seed);
-    const strip = buildReel(seed, winner);
-    assert.equal(strip.length, 44);
-    assert.equal(strip[38].id, winner.id, 'the card under the marker is the winner');
+    const { strip, winnerAt } = buildReel(seed, winner);
+    assert.equal(strip.length, 78);
+    assert.equal(winnerAt, 72);
+    assert.equal(strip[winnerAt].id, winner.id, 'the card under the marker is the winner');
+    // The reel must report where it put the winner rather than leaving the
+    // caller to search: filler is drawn from the same six courts, so a search
+    // finds an earlier card of the same court and the spin comes up short.
+    assert.ok(strip.indexOf(winner) < winnerAt, 'the winning court also appears as filler');
     // And no court repeats inside a three-card window, or the reel reads as a
     // rendering fault rather than a shuffle.
     for (let i = 2; i < strip.length; i++) {
-      if (i === 38 || i === 37 || i === 36) continue; // the winner is placed, not shuffled
+      if (i >= 70 && i <= 74) continue; // the winner is placed, not shuffled
       assert.notEqual(strip[i].id, strip[i - 1].id);
       assert.notEqual(strip[i].id, strip[i - 2].id);
     }
