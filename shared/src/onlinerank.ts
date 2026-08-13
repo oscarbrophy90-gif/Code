@@ -1,10 +1,9 @@
 /**
  * The online ladder.
  *
- * One number decides everything: how many games you have won against a real
- * person in a park. Not the CPU, not practice, not drills — those have their own
- * rewards and none of them move this. A rank you can farm off a bot is not a
- * rank.
+ * One number decides everything: your ranked points. Ranked matches move it and
+ * nothing else does — practice, drills and the difficulty ladder have their own
+ * rewards. A rank you can farm off the Play menu is not a rank.
  *
  * Eight tiers of three divisions, five wins each, and then Grand Champ. Grand
  * Champ is deliberately not another division: once you are there the ladder
@@ -19,8 +18,16 @@
  * is a record of how you are playing now.
  */
 
-/** Wins to clear one division. */
-export const WINS_PER_DIVISION = 5;
+/**
+ * Ranked points to clear one division.
+ *
+ * The ladder is points, not wins. A win used to be worth exactly one rung, so
+ * five wins was a division however good the opposition was — which made
+ * climbing a matter of how many games you played rather than how well. Points
+ * let a win at Bronze be worth more than a win at Champion, and let a loss cost
+ * more the higher you are.
+ */
+export const POINTS_PER_DIVISION = 100;
 
 /** Divisions per tier, counting down: 3 is the entry division, 1 is the best. */
 export const DIVISIONS_PER_TIER = 3;
@@ -52,8 +59,8 @@ export const ONLINE_TIERS: OnlineTierDef[] = [
 /** The last tier with divisions; everything above it is Grand Champ. */
 const RANKED_TIERS = ONLINE_TIERS.length - 1;
 
-/** Wins needed to reach Grand Champ at all. */
-export const WINS_TO_GRAND_CHAMP = RANKED_TIERS * DIVISIONS_PER_TIER * WINS_PER_DIVISION;
+/** Points needed to reach Grand Champ at all. */
+export const POINTS_TO_GRAND_CHAMP = RANKED_TIERS * DIVISIONS_PER_TIER * POINTS_PER_DIVISION;
 
 export interface OnlineRank {
   tier: OnlineTierDef;
@@ -61,12 +68,12 @@ export interface OnlineRank {
   division: number;
   /** true once the divisions are behind you */
   grandChamp: boolean;
-  /** wins into the current division */
+  /** points into the current division */
   progress: number;
-  /** wins needed to clear it — 0 in Grand Champ, which never fills */
+  /** points needed to clear it — 0 in Grand Champ, which never fills */
   needed: number;
-  /** total online wins this was derived from */
-  wins: number;
+  /** the ranked points this was derived from */
+  points: number;
   /** "Gold 2", or "Grand Champ" */
   label: string;
 }
@@ -78,23 +85,23 @@ export interface OnlineRank {
  * and on the server, with no stored state to drift. A rank that is computed
  * cannot disagree with the record it is supposed to describe.
  */
-export function onlineRank(wins: number): OnlineRank {
-  const safe = Math.max(0, Math.floor(wins));
+export function onlineRank(points: number): OnlineRank {
+  const safe = Math.max(0, Math.floor(points));
 
-  if (safe >= WINS_TO_GRAND_CHAMP) {
+  if (safe >= POINTS_TO_GRAND_CHAMP) {
     const tier = ONLINE_TIERS[ONLINE_TIERS.length - 1];
     return {
       tier,
       division: 0,
       grandChamp: true,
-      progress: safe - WINS_TO_GRAND_CHAMP,
+      progress: safe - POINTS_TO_GRAND_CHAMP,
       needed: 0,
-      wins: safe,
+      points: safe,
       label: tier.name,
     };
   }
 
-  const cleared = Math.floor(safe / WINS_PER_DIVISION);
+  const cleared = Math.floor(safe / POINTS_PER_DIVISION);
   const tierIndex = Math.floor(cleared / DIVISIONS_PER_TIER);
   const withinTier = cleared % DIVISIONS_PER_TIER;
   const tier = ONLINE_TIERS[tierIndex];
@@ -106,25 +113,25 @@ export function onlineRank(wins: number): OnlineRank {
     tier,
     division,
     grandChamp: false,
-    progress: safe % WINS_PER_DIVISION,
-    needed: WINS_PER_DIVISION,
-    wins: safe,
+    progress: safe % POINTS_PER_DIVISION,
+    needed: POINTS_PER_DIVISION,
+    points: safe,
     label: `${tier.name} ${division}`,
   };
 }
 
-/** Total wins needed to reach a given tier and division, for "next rank" copy. */
-export function winsForRank(tierIndex: number, division: number): number {
-  if (tierIndex >= RANKED_TIERS) return WINS_TO_GRAND_CHAMP;
+/** Total points needed to reach a given tier and division, for "next rank" copy. */
+export function pointsForRank(tierIndex: number, division: number): number {
+  if (tierIndex >= RANKED_TIERS) return POINTS_TO_GRAND_CHAMP;
   const withinTier = DIVISIONS_PER_TIER - division;
-  return (tierIndex * DIVISIONS_PER_TIER + withinTier) * WINS_PER_DIVISION;
+  return (tierIndex * DIVISIONS_PER_TIER + withinTier) * POINTS_PER_DIVISION;
 }
 
 /** The rank one division above this one, or null at the top. */
-export function nextRank(wins: number): OnlineRank | null {
-  const here = onlineRank(wins);
+export function nextRank(points: number): OnlineRank | null {
+  const here = onlineRank(points);
   if (here.grandChamp) return null;
-  return onlineRank((Math.floor(wins / WINS_PER_DIVISION) + 1) * WINS_PER_DIVISION);
+  return onlineRank((Math.floor(points / POINTS_PER_DIVISION) + 1) * POINTS_PER_DIVISION);
 }
 
 /**
@@ -139,7 +146,7 @@ export function grandChampLabel(placement: number | null): string {
 }
 
 /** The full display name, including world placement when it applies. */
-export function onlineRankLabel(wins: number, placement: number | null = null): string {
-  const rank = onlineRank(wins);
+export function onlineRankLabel(points: number, placement: number | null = null): string {
+  const rank = onlineRank(points);
   return rank.grandChamp ? grandChampLabel(placement) : rank.label;
 }

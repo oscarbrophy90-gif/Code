@@ -168,9 +168,9 @@ export const RANK_REWARD_BY_TIER: Record<string, RankRewardTier> = Object.fromEn
 /** Sanity: every tier on the ladder pays something, and nothing pays twice. */
 export const RANK_REWARD_TIER_IDS = ONLINE_TIERS.map((t) => t.id);
 
-/** What a win count is worth: every tier at or below the rank it reaches. */
-export function rewardsUpTo(wins: number): RankRewardTier[] {
-  const reached = ONLINE_TIERS.findIndex((t) => t.id === onlineRank(wins).tier.id);
+/** What a points total is worth: every tier at or below the rank it reaches. */
+export function rewardsUpTo(points: number): RankRewardTier[] {
+  const reached = ONLINE_TIERS.findIndex((t) => t.id === onlineRank(points).tier.id);
   if (reached < 0) return [];
   return RANK_REWARDS.filter((r) => ONLINE_TIERS.findIndex((t) => t.id === r.tierId) <= reached);
 }
@@ -186,14 +186,14 @@ export interface SeasonPayout {
 }
 
 /**
- * What a season ending pays a player who peaked at `peakWins`.
+ * What a season ending pays a player who peaked at `peakPoints`.
  *
  * `owned` is passed in so a second season at the same rank pays the coins again
  * but does not re-list cosmetics you already have — the coins are the recurring
  * part, the gear is the once.
  */
-export function seasonPayout(peakWins: number, owned: readonly string[] = []): SeasonPayout | null {
-  const tiers = rewardsUpTo(peakWins);
+export function seasonPayout(peakPoints: number, owned: readonly string[] = []): SeasonPayout | null {
+  const tiers = rewardsUpTo(peakPoints);
   if (tiers.length === 0) return null;
   const have = new Set(owned);
   const top = tiers[tiers.length - 1];

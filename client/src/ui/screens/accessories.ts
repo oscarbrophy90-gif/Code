@@ -5,7 +5,7 @@ import {
   STORE_BY_ID,
   STORE_ITEMS,
   TITLE_BY_ID,
-  WINS_PER_DIVISION,
+  POINTS_PER_DIVISION,
   streakBadge,
   type StoreCategory,
   type StoreItem,
@@ -106,9 +106,9 @@ export function renderAccessories(): HTMLElement {
       el(
         'p',
         { class: 'hint', style: 'margin:0 0 12px' },
-        `Ranked matches only — practice, drills and the difficulty ladder do not move it. ${WINS_PER_DIVISION} wins clears a division, three divisions clears a tier. Past Champion 1 you are Grand Champ, and from there you are placed against everyone else on the ladder.`,
+        `Ranked matches only — practice, drills and the difficulty ladder do not move it. ${POINTS_PER_DIVISION} wins clears a division, three divisions clears a tier. Past Champion 1 you are Grand Champ, and from there you are placed against everyone else on the ladder.`,
       ),
-      ladderStrip(store.profile.online.wins),
+      ladderStrip(store.profile.online.rp),
       el(
         'div',
         { class: 'row', style: 'gap:8px;margin-top:12px' },

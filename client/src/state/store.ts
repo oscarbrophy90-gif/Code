@@ -23,6 +23,7 @@ import {
   EMOTE_SLOTS,
   type Appearance,
   applyRankedResult,
+  type RankedMove,
   seasonPayout,
   SEASON_EPOCH,
   SEASON_LENGTH_MS,
@@ -179,7 +180,7 @@ function seasonNameFor(id: string): string {
 
 /** A standing with nothing on it — a new account, or a new season. */
 function freshOnlineRecord(): OnlineRecord {
-  return { wins: 0, losses: 0, lifetimeWins: 0, streak: 0, bestStreak: 0, updatedAt: 0, peakWins: 0 };
+  return { rp: 0, wins: 0, losses: 0, lifetimeWins: 0, streak: 0, bestStreak: 0, updatedAt: 0, peakRp: 0 };
 }
 
 /**
@@ -277,7 +278,7 @@ class Store {
   private rollSeason(season: ReturnType<typeof seasonForTime>): void {
     const previous = this.profile.seasonId;
     const online = this.profile.online;
-    const peak = Math.max(online.peakWins ?? 0, online.wins);
+    const peak = Math.max(online.peakRp ?? 0, online.rp);
     const player = this.profile.players[this.profile.activeSlot];
 
     const payout = player ? seasonPayout(peak, player.unlocked) : null;
@@ -288,11 +289,11 @@ class Store {
       this.profile.seasonReport = {
         seasonId: previous,
         seasonName: seasonNameFor(previous),
-        peakWins: peak,
+        peakPoints: peak,
         tierName: payout.tierName,
         coins: payout.coins,
         items: granted,
-        resetFrom: online.wins,
+        resetFrom: online.rp,
       };
     }
 
@@ -338,7 +339,11 @@ class Store {
     if (typeof rec.lifetimeWins !== 'number') rec.lifetimeWins = rec.wins ?? 0;
     if (typeof this.profile.username !== 'string') this.profile.username = '';
     if (typeof this.profile.usernameChangedAt !== 'number') this.profile.usernameChangedAt = 0;
-    if (typeof rec.peakWins !== 'number') rec.peakWins = rec.wins ?? 0;
+    // Saves from before the ladder was points carried it in `wins`, where one
+    // win was one rung of five per division. Twenty points a rung converts it
+    // without anybody losing their rank.
+    if (typeof rec.rp !== 'number') rec.rp = (rec.wins ?? 0) * 20;
+    if (typeof rec.peakRp !== 'number') rec.peakRp = Math.max(rec.rp, (rec.peakWins ?? 0) * 20);
     if (this.profile.seasonReport === undefined) this.profile.seasonReport = null;
 
     const season = seasonForTime(now);
@@ -417,64 +422,42 @@ class Store {
    * and none of them reach here — a rank you can get without playing a ranked
    * game would not mean anything.
    */
-  recordRanked(won: boolean): { before: number; after: number } {
-    const before = this.profile.online.wins;
-    const after = applyRankedResult(before, won);
-    this.update((p) => {
-      const online = p.online;
-      online.wins = after;
-      if (won) {
-        online.streak++;
-        online.bestStreak = Math.max(online.bestStreak, online.streak);
-        online.lifetimeWins++;
-      } else {
-        online.losses++;
-        online.streak = 0;
-      }
-      online.updatedAt = Date.now();
-      // The high-water mark for the season, which is what the payout reads.
-      online.peakWins = Math.max(online.peakWins ?? 0, after);
-    });
-    // Written through rather than left to the debounce. The board reads saved
-    // accounts, and the rank-change animation asks for the new placement in the
-    // same tick the match ended — a 220ms wait would show the position from
-    // before the win. It also means a ranked result survives closing the tab
-    // the moment it lands.
-    this.saveNow();
-    invalidateBoard();
-    return { before, after };
-  }
-
   /**
-   * Takes the server's word for your ranked record.
+   * Applies a ranked result.
    *
-   * Online is the only thing that moves the rank now, and the server is the one
-   * place that saw both halves of the match — so it is the record, and this
-   * overwrites the local one rather than adding to it. A client that counted its
-   * own wins would drift the first time a result did not arrive, and drift in
-   * your favour is indistinguishable from cheating.
+   * Points, not wins: how much a result is worth depends on where you are on
+   * the ladder and how you are playing, so the maths lives in `applyRankedResult`
+   * and this only records what came back. `wins` and `losses` stay honest match
+   * counts — they are a record of what you did, not the ladder itself.
    */
-  applyServerRecord(rec: {
-    wins: number;
-    losses: number;
-    streak: number;
-    bestStreak: number;
-    lifetimeWins: number;
-  }): { before: number; after: number } {
-    const before = this.profile.online.wins;
-    this.update((p) => {
-      const online = p.online;
-      online.wins = Math.max(0, Math.floor(rec.wins));
-      online.losses = Math.max(0, Math.floor(rec.losses));
-      online.streak = rec.streak;
-      online.bestStreak = Math.max(online.bestStreak, rec.bestStreak);
-      online.lifetimeWins = Math.max(online.lifetimeWins, rec.lifetimeWins);
-      online.peakWins = Math.max(online.peakWins ?? 0, online.wins);
-      online.updatedAt = Date.now();
+  recordRanked(won: boolean, margin = 0): RankedMove {
+    const online = this.profile.online;
+    const move = applyRankedResult({
+      points: online.rp,
+      won,
+      margin,
+      streak: online.streak,
     });
+
+    this.update((p) => {
+      const rec = p.online;
+      rec.rp = move.after;
+      if (won) {
+        rec.wins++;
+        rec.lifetimeWins++;
+        rec.streak++;
+        rec.bestStreak = Math.max(rec.bestStreak, rec.streak);
+      } else {
+        rec.losses++;
+        rec.streak = 0;
+      }
+      rec.peakRp = Math.max(rec.peakRp ?? 0, rec.rp);
+      rec.updatedAt = Date.now();
+    });
+    // Written through rather than left to the debounce: the rank-change
+    // animation asks for the new standing in the same tick the match ended.
     this.saveNow();
-    invalidateBoard();
-    return { before, after: this.profile.online.wins };
+    return move;
   }
 
   update(fn: (p: Profile) => void): void {

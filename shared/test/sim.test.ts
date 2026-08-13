@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { AiController, DIFFICULTY_PRESETS } from '../src/sim/ai.ts';
+import { AiController, DIFFICULTY_PRESETS, sharpen } from '../src/sim/ai.ts';
 import { createMatch, currentContest, defaultMatchConfig, EMOTE_COOLDOWN, EMOTE_DURATION, SIM_DT, ballThroughRim, dribbleBounceIndex, dribbleTempo, stepMatch, drainEvents } from '../src/sim/match.ts';
 import { generateOpponent } from '../src/data/opponents.ts';
 import {
@@ -18,6 +18,8 @@ import { scoutReport } from '../src/scouting.ts';
 import { RANK_REWARDS, rewardsUpTo, seasonPayout } from '../src/rankrewards.ts';
 import { RANK_ITEMS, RANK_TITLES } from '../src/data/rankpack.ts';
 import { COURT_SURFACES, buildReel, pickCourtSurface } from '../src/data/courts.ts';
+import { LADDER_SIZE, generatePlayerName, ladderBoard, ladderRivals } from '../src/data/ladder.ts';
+import type { RankedContext } from '../src/ranked.ts';
 import { TITLE_BY_ID } from '../src/data/titles.ts';
 import { SEASON_COVERS, SEASON_EPOCH, SEASON_LENGTH_DAYS, SEASON_LENGTH_MS } from '../src/seasons.ts';
 import { DEFAULT_TITLES, newlyEarnedTitles, streakBadge } from '../src/data/titles.ts';
@@ -25,7 +27,7 @@ import { DRILLS, SHOOT_AROUND, drillMedal, drillReward } from '../src/data/drill
 import { DEFAULT_UNLOCKS, STORE_BY_ID, STORE_ITEMS } from '../src/data/cosmetics.ts';
 import { PARKS } from '../src/data/parks.ts';
 import { applyRankedResult, rankChange, rankedOpponent, USERNAME_COOLDOWN_MS, usernameCooldownLeft, validateUsername } from '../src/ranked.ts';
-import { DIVISIONS_PER_TIER, ONLINE_TIERS, WINS_PER_DIVISION, WINS_TO_GRAND_CHAMP, grandChampLabel, nextRank, onlineRank, onlineRankLabel } from '../src/onlinerank.ts';
+import { DIVISIONS_PER_TIER, ONLINE_TIERS, POINTS_PER_DIVISION, POINTS_TO_GRAND_CHAMP, grandChampLabel, nextRank, onlineRank, onlineRankLabel } from '../src/onlinerank.ts';
 import { PACK_TITLES } from '../src/data/titlepack.ts';
 import { PACK_TATTOOS, TATTOO_DESIGNS } from '../src/data/tattoopack.ts';
 import { PACK_DUNKS } from '../src/data/dunkpack.ts';
@@ -2214,137 +2216,110 @@ test('the online ladder climbs five wins at a time, three divisions a tier', () 
   // The exact shape asked for: Bronze 3 is where you start, 1 is the best
   // division in a tier, and five wins clears one.
   assert.equal(onlineRank(0).label, 'Bronze 3');
-  assert.equal(onlineRank(4).label, 'Bronze 3', 'four wins is not enough');
-  assert.equal(onlineRank(5).label, 'Bronze 2');
-  assert.equal(onlineRank(10).label, 'Bronze 1');
-  assert.equal(onlineRank(15).label, 'Silver 3', 'clearing Bronze 1 moves you up a tier');
-  assert.equal(onlineRank(30).label, 'Gold 3');
-  assert.equal(onlineRank(45).label, 'Platinum 3');
-  assert.equal(onlineRank(60).label, 'Emerald 3');
-  assert.equal(onlineRank(75).label, 'Sapphire 3');
-  assert.equal(onlineRank(90).label, 'Diamond 3');
-  assert.equal(onlineRank(105).label, 'Champion 3');
-  assert.equal(onlineRank(115).label, 'Champion 1', 'the last division before the top');
+  assert.equal(onlineRank(99).label, 'Bronze 3', 'ninety-nine points is not enough');
+  assert.equal(onlineRank(100).label, 'Bronze 2');
+  assert.equal(onlineRank(200).label, 'Bronze 1');
+  assert.equal(onlineRank(300).label, 'Silver 3', 'clearing Bronze 1 moves you up a tier');
+  assert.equal(onlineRank(600).label, 'Gold 3');
+  assert.equal(onlineRank(900).label, 'Platinum 3');
+  assert.equal(onlineRank(1200).label, 'Emerald 3');
+  assert.equal(onlineRank(1500).label, 'Sapphire 3');
+  assert.equal(onlineRank(1800).label, 'Diamond 3');
+  assert.equal(onlineRank(2100).label, 'Champion 3');
+  assert.equal(onlineRank(2300).label, 'Champion 1', 'the last division before the top');
 
   // Every division is exactly five wins wide, all the way up.
-  for (let wins = 0; wins < WINS_TO_GRAND_CHAMP; wins++) {
-    const rank = onlineRank(wins);
-    assert.equal(rank.needed, WINS_PER_DIVISION);
-    assert.equal(rank.progress, wins % WINS_PER_DIVISION);
+  for (let points = 0; points < POINTS_TO_GRAND_CHAMP; points += 7) {
+    const rank = onlineRank(points);
+    assert.equal(rank.needed, POINTS_PER_DIVISION);
+    assert.equal(rank.progress, points % POINTS_PER_DIVISION);
     assert.ok(rank.division >= 1 && rank.division <= DIVISIONS_PER_TIER);
     assert.equal(rank.grandChamp, false);
   }
 
-  // Eight tiers of three divisions at five wins each, then Grand Champ.
+  // Eight tiers of three divisions at a hundred points each, then Grand Champ.
   assert.equal(ONLINE_TIERS.length, 9, 'Bronze through Grand Champ, Diamond included');
   assert.deepEqual(
     ONLINE_TIERS.map((t) => t.name),
     ['Bronze', 'Silver', 'Gold', 'Platinum', 'Emerald', 'Sapphire', 'Diamond', 'Champion', 'Grand Champ'],
   );
-  assert.equal(WINS_TO_GRAND_CHAMP, (ONLINE_TIERS.length - 1) * DIVISIONS_PER_TIER * WINS_PER_DIVISION);
-  assert.equal(WINS_TO_GRAND_CHAMP, 120);
+  assert.equal(POINTS_TO_GRAND_CHAMP, (ONLINE_TIERS.length - 1) * DIVISIONS_PER_TIER * POINTS_PER_DIVISION);
+  assert.equal(POINTS_TO_GRAND_CHAMP, 2400);
 });
 
 test('grand champ has no divisions and is ranked against the world', () => {
-  const gc = onlineRank(WINS_TO_GRAND_CHAMP);
+  const gc = onlineRank(POINTS_TO_GRAND_CHAMP);
   assert.equal(gc.grandChamp, true);
   assert.equal(gc.label, 'Grand Champ');
   assert.equal(gc.division, 0, 'there are no divisions up here');
-  assert.equal(nextRank(WINS_TO_GRAND_CHAMP), null, 'nothing above it');
+  assert.equal(nextRank(POINTS_TO_GRAND_CHAMP), null, 'nothing above it');
 
   // It never fills a progress bar — more wins move you past people instead.
-  assert.equal(onlineRank(WINS_TO_GRAND_CHAMP + 50).label, 'Grand Champ');
-  assert.equal(onlineRank(WINS_TO_GRAND_CHAMP + 50).progress, 50);
+  assert.equal(onlineRank(POINTS_TO_GRAND_CHAMP + 50).label, 'Grand Champ');
+  assert.equal(onlineRank(POINTS_TO_GRAND_CHAMP + 50).progress, 50);
 
   // Placement is what distinguishes one grand champ from another.
-  assert.equal(onlineRankLabel(WINS_TO_GRAND_CHAMP, 1), 'Grand Champ #1');
-  assert.equal(onlineRankLabel(WINS_TO_GRAND_CHAMP, 500), 'Grand Champ #500');
-  assert.equal(onlineRankLabel(WINS_TO_GRAND_CHAMP, null), 'Grand Champ', 'unknown placement is not faked');
+  assert.equal(onlineRankLabel(POINTS_TO_GRAND_CHAMP, 1), 'Grand Champ #1');
+  assert.equal(onlineRankLabel(POINTS_TO_GRAND_CHAMP, 500), 'Grand Champ #500');
+  assert.equal(onlineRankLabel(POINTS_TO_GRAND_CHAMP, null), 'Grand Champ', 'unknown placement is not faked');
   assert.equal(grandChampLabel(0), 'Grand Champ', 'a nonsense placement is not shown');
 
   // Below grand champ a placement is meaningless and must not appear.
-  assert.equal(onlineRankLabel(10, 3), 'Bronze 1');
+  assert.equal(onlineRankLabel(210, 3), 'Bronze 1');
 });
 
 test('the ladder never goes backwards and always advances', () => {
   // A win must never lower your rank, and five wins must always raise it.
   let last = -1;
-  for (let wins = 0; wins <= WINS_TO_GRAND_CHAMP + 20; wins++) {
-    const tierIndex = ONLINE_TIERS.indexOf(onlineRank(wins).tier);
-    const rank = onlineRank(wins);
+  for (let points = 0; points <= POINTS_TO_GRAND_CHAMP + 200; points += 5) {
+    const tierIndex = ONLINE_TIERS.indexOf(onlineRank(points).tier);
+    const rank = onlineRank(points);
     // Rank as a single ordered number: tier, then division counting down.
     const ordinal = rank.grandChamp
       ? 1000 + rank.progress
       : tierIndex * DIVISIONS_PER_TIER + (DIVISIONS_PER_TIER - rank.division);
-    assert.ok(ordinal >= last, `rank went backwards at ${wins} wins`);
+    assert.ok(ordinal >= last, `rank went backwards at ${points} RP`);
     last = ordinal;
   }
-  for (let wins = 0; wins + WINS_PER_DIVISION <= WINS_TO_GRAND_CHAMP; wins += WINS_PER_DIVISION) {
-    assert.notEqual(onlineRank(wins).label, onlineRank(wins + WINS_PER_DIVISION).label, `stuck at ${wins}`);
+  for (let points = 0; points + POINTS_PER_DIVISION <= POINTS_TO_GRAND_CHAMP; points += POINTS_PER_DIVISION) {
+    assert.notEqual(onlineRank(points).label, onlineRank(points + POINTS_PER_DIVISION).label, `stuck at ${points}`);
   }
 
   // Negative or fractional counts cannot produce a broken rank.
   assert.equal(onlineRank(-5).label, 'Bronze 3');
-  assert.equal(onlineRank(7.9).label, 'Bronze 2');
+  assert.equal(onlineRank(107.9).label, 'Bronze 2');
 });
 
-test('a loss costs a win and can drop you a division', () => {
-  // Bronze 2 with three wins loses one and stays put.
-  const bronze2with3 = 8;
-  assert.equal(onlineRank(bronze2with3).label, 'Bronze 2');
-  assert.equal(onlineRank(bronze2with3).progress, 3);
-  const after = applyRankedResult(bronze2with3, false);
+test('a loss costs points and can drop you a division', () => {
+  // Inside a division, a loss just costs ground.
+  const bronze2 = 160;
+  assert.equal(onlineRank(bronze2).label, 'Bronze 2');
+  const after = applyRankedResult({ points: bronze2, won: false }).after;
   assert.equal(onlineRank(after).label, 'Bronze 2');
-  assert.equal(onlineRank(after).progress, 2);
-  assert.equal(rankChange(bronze2with3, after), 'none', 'losing a win inside a division is not a demotion');
+  assert.ok(after < bronze2);
+  assert.equal(rankChange(bronze2, after), 'none', 'losing ground inside a division is not a demotion');
 
-  // At the bottom of a division, a loss drops you into the top of the one below.
-  const bronze2with0 = 5;
-  const dropped = applyRankedResult(bronze2with0, false);
+  // Near the bottom of a division, a loss drops you into the one below and you
+  // land near the top of it rather than at its floor.
+  const justPromoted = 105;
+  const dropped = applyRankedResult({ points: justPromoted, won: false }).after;
   assert.equal(onlineRank(dropped).label, 'Bronze 3');
-  assert.equal(onlineRank(dropped).progress, 4, 'you land near the top of the division below');
-  assert.equal(rankChange(bronze2with0, dropped), 'demoted');
+  assert.ok(onlineRank(dropped).progress > 80, 'you land near the top of the division below');
+  assert.equal(rankChange(justPromoted, dropped), 'demoted');
 
   // Bronze 3 with nothing on it is the floor and you cannot fall out of it.
-  assert.equal(applyRankedResult(0, false), 0);
-  assert.equal(onlineRank(applyRankedResult(0, false)).label, 'Bronze 3');
-  assert.equal(rankChange(0, applyRankedResult(0, false)), 'none');
-
-  // A tier boundary demotes across tiers, not just divisions.
-  const silver3with0 = 15;
-  const toBronze = applyRankedResult(silver3with0, false);
-  assert.equal(onlineRank(silver3with0).label, 'Silver 3');
-  assert.equal(onlineRank(toBronze).label, 'Bronze 1');
-  assert.equal(rankChange(silver3with0, toBronze), 'demoted');
-
-  // And a win at the top of a division promotes.
-  assert.equal(rankChange(4, applyRankedResult(4, true)), 'promoted');
-  assert.equal(rankChange(3, applyRankedResult(3, true)), 'none');
-
-  // Wins and losses cancel out exactly, so a 50% record goes nowhere.
-  let wins = 40;
-  for (let i = 0; i < 20; i++) wins = applyRankedResult(applyRankedResult(wins, true), false);
-  assert.equal(wins, 40, 'win one lose one leaves you where you started');
+  assert.equal(applyRankedResult({ points: 0, won: false }).after, 0);
+  assert.equal(onlineRank(applyRankedResult({ points: 0, won: false }).after).label, 'Bronze 3');
 });
+/** The nine knobs sharpening moves, for comparing two presets on those alone. */
+function pick(p: (typeof DIFFICULTY_PRESETS)['pro']) {
+  const { reactionTime, releaseError, bitesOnFakes, contestIq, shotSelection, helpIq, tendencyRead, stealAggression, moveRate } = p;
+  return { reactionTime, releaseError, bitesOnFakes, contestIq, shotSelection, helpIq, tendencyRead, stealAggression, moveRate };
+}
 
-test('the ranked ladder puts a harder opponent in front of you as you climb', () => {
-  // The progression is the opponent. If climbing did not change who turns up,
-  // the rank would be a number with nothing behind it.
-  let lastOverall = 0;
-  for (const wins of [0, 15, 30, 45, 60, 75, 90, 105, 120]) {
-    const opp = rankedOpponent(wins);
-    assert.ok(opp.overall >= lastOverall, `overall went backwards at ${wins} wins`);
-    lastOverall = opp.overall;
-    assert.ok(opp.overall >= 60 && opp.overall <= 99, 'a build the game can actually make');
-  }
-  assert.equal(rankedOpponent(0).difficulty, 'rookie', 'Bronze is a rookie game');
-  // Grand Champ is above Hall of Fame, and that difficulty cannot be picked
-  // from the Play menu — the only way to meet it is to earn it.
-  assert.equal(rankedOpponent(WINS_TO_GRAND_CHAMP).difficulty, 'grandChamp');
-  // Diamond and Champion sit between Superstar and the top, so the last three
-  // rungs are three different difficulties rather than one repeated.
-  assert.equal(rankedOpponent(90).difficulty, 'superstar', 'Diamond');
-  assert.equal(rankedOpponent(105).difficulty, 'hallOfFame', 'Champion');
+test('Grand Champ is a difficulty above Hall of Fame, and the edge sharpens it', () => {
+  // The top of the ladder is the one difficulty you cannot pick from the Play
+  // menu — the only way to meet it is to earn it.
   assert.ok(!(DIFFICULTIES as readonly string[]).includes('grandChamp'), 'it is not selectable');
   assert.ok(ALL_DIFFICULTIES.includes('grandChamp'), 'but the simulation knows it');
   const hof = DIFFICULTY_PRESETS.hallOfFame;
@@ -2353,38 +2328,163 @@ test('the ranked ladder puts a harder opponent in front of you as you climb', ()
   assert.ok(gc.releaseError < hof.releaseError, 'and misses less');
   assert.ok(gc.contestIq > hof.contestIq && gc.shotSelection > hof.shotSelection);
   assert.ok(gc.bitesOnFakes < hof.bitesOnFakes, 'and is harder to fool');
-  // A division inside a tier still nudges it, so Bronze 1 is not Bronze 3.
-  assert.ok(rankedOpponent(10).overall > rankedOpponent(0).overall);
+
+  // The edge is what makes Gold 1 harder than Gold 3 without jumping the CPU a
+  // whole level: it moves every knob part of the way toward the ceiling, and it
+  // is proportional, so 0.3 on Rookie is still nowhere near Pro.
+  const plain = sharpen(DIFFICULTY_PRESETS.pro, 0, 'pro');
+  const sharp = sharpen(DIFFICULTY_PRESETS.pro, 0.8, 'pro');
+  assert.ok(sharp.reactionTime < plain.reactionTime, 'reacts quicker');
+  assert.ok(sharp.releaseError < plain.releaseError, 'shoots straighter');
+  assert.ok(sharp.contestIq > plain.contestIq, 'contests better');
+  assert.ok(sharp.bitesOnFakes < plain.bitesOnFakes, 'is harder to fool');
+  // Sharpened Rookie must still be well short of plain Pro, or the bottom of
+  // the ladder stops being a place a beginner can stand.
+  const hotRookie = sharpen(DIFFICULTY_PRESETS.rookie, 1, 'rookie');
+  assert.deepEqual(hotRookie, { ...DIFFICULTY_PRESETS.rookie, ...pick(DIFFICULTY_PRESETS.semiPro) },
+    'a fully sharpened Rookie is exactly a Semi-Pro, never more');
+  assert.ok(hotRookie.reactionTime > DIFFICULTY_PRESETS.pro.reactionTime,
+    'which is still slower than a plain Pro');
+  // Nothing above Grand Champ to move toward, so it is left alone.
+  assert.deepEqual(sharpen(DIFFICULTY_PRESETS.grandChamp, 1, 'grandChamp'), { ...DIFFICULTY_PRESETS.grandChamp });
+});
+test('ranked points get harder to earn and easier to lose as you climb', () => {
+  // A win is worth more at the bottom than the top, and a loss costs more at
+  // the top than the bottom. That asymmetry is what makes the climb mean
+  // something: at Bronze a coin-flip record still goes up, at Champion it does
+  // not.
+  const bronzeWin = applyRankedResult({ points: 0, won: true });
+  const champWin = applyRankedResult({ points: 2100, won: true });
+  assert.ok(bronzeWin.delta > champWin.delta, 'a win at Bronze is worth more than one at Champion');
+
+  const bronzeLoss = applyRankedResult({ points: 150, won: false });
+  const champLoss = applyRankedResult({ points: 2100, won: false });
+  assert.ok(Math.abs(champLoss.delta) > Math.abs(bronzeLoss.delta), 'a loss at Champion costs more');
+
+  // Bronze: an even record still climbs. Champion: it does not.
+  assert.ok(bronzeWin.delta + bronzeLoss.delta > 0, 'a beginner winning half their games goes up');
+  assert.ok(champWin.delta + champLoss.delta < 0, 'a coin flip at Champion goes down');
+
+  // Zero is the floor — you cannot fall out of the ladder.
+  assert.equal(applyRankedResult({ points: 0, won: false }).after, 0);
+  assert.equal(applyRankedResult({ points: 10, won: false }).after, 0);
+
+  // Streaks and margins add a little, and are capped so neither becomes the
+  // fastest way up.
+  const plain = applyRankedResult({ points: 500, won: true });
+  const streaking = applyRankedResult({ points: 500, won: true, streak: 6 });
+  const blowout = applyRankedResult({ points: 500, won: true, margin: 11 });
+  assert.ok(streaking.delta > plain.delta && streaking.delta <= plain.delta + 9);
+  assert.ok(blowout.delta > plain.delta && blowout.delta <= plain.delta + 6);
+
+  // How many wins a division actually takes, at an even record.
+  const winsPerDivision = (points: number) => {
+    const w = applyRankedResult({ points, won: true }).delta;
+    return Math.ceil(POINTS_PER_DIVISION / w);
+  };
+  assert.equal(winsPerDivision(0), 3, 'three straight wins clears a Bronze division');
+  assert.ok(winsPerDivision(2100) >= 6, 'a Champion division takes at least six');
+
+  // Crossing a division boundary is a promotion; moving inside one is not.
+  assert.equal(rankChange(90, 124), 'promoted');
+  assert.equal(rankChange(120, 150), 'none');
+  assert.equal(rankChange(110, 90), 'demoted');
 });
 
+test('the ranked CPU scales with rank, build, streak and level — gently at the bottom', () => {
+  const at = (points: number, extra: Partial<RankedContext> = {}) =>
+    rankedOpponent({ points, playerOverall: 75, level: 10, streak: 0, ...extra });
 
-
-test('a ranked win moves the rank up and a loss moves it down', () => {
-  // The complaint this covers: a win that does not move anything. A win is
-  // always worth exactly one, in both directions, and the promotion is reported
-  // on the win that crosses a division rather than on every win.
-  assert.equal(applyRankedResult(4, true), 5);
-  assert.equal(rankChange(4, 5), 'promoted', 'the fifth win is Bronze 2');
-  assert.equal(applyRankedResult(5, true), 6);
-  assert.equal(rankChange(5, 6), 'none', 'and the sixth is just a win');
-  assert.equal(applyRankedResult(5, false), 4);
-  assert.equal(rankChange(5, 4), 'demoted');
-  assert.equal(applyRankedResult(0, false), 0, 'Bronze 3 with nothing on it is the floor');
-
-  // Every win from the bottom to the top moves the count by one and never skips
-  // or repeats a rank on the way.
-  let wins = 0;
-  const seen: string[] = [onlineRank(0).label];
-  for (let i = 0; i < WINS_TO_GRAND_CHAMP; i++) {
-    const before = wins;
-    wins = applyRankedResult(wins, true);
-    assert.equal(wins, before + 1, `win ${i + 1} should be worth one`);
-    const label = onlineRank(wins).label;
-    if (label !== seen[seen.length - 1]) seen.push(label);
+  // Rank is the main lever: the opponent gets better all the way up, and the
+  // difficulty preset steps with it.
+  let lastOverall = 0;
+  for (const points of [0, 300, 600, 900, 1200, 1500, 1800, 2100, 2400]) {
+    const opp = at(points);
+    assert.ok(opp.overall >= lastOverall, `overall went backwards at ${points} RP`);
+    lastOverall = opp.overall;
+    assert.ok(opp.overall >= 58 && opp.overall <= 99);
+    assert.ok(opp.edge >= 0 && opp.edge <= 1);
   }
-  assert.equal(wins, WINS_TO_GRAND_CHAMP);
-  assert.equal(seen.length, ONLINE_TIERS.length * DIVISIONS_PER_TIER - 2, 'every division, once each');
-  assert.equal(seen[seen.length - 1], 'Grand Champ');
+  assert.equal(at(0).difficulty, 'rookie', 'Bronze is a rookie game');
+  assert.equal(at(2400).difficulty, 'grandChamp', 'the top is the one you cannot pick from the Play menu');
+  assert.ok(!(DIFFICULTIES as readonly string[]).includes('grandChamp'), 'and it is not selectable');
+
+  // Your own build matters: a stronger player meets a stronger opponent at the
+  // same rank, so a maxed build cannot stroll through Bronze.
+  assert.ok(at(300, { playerOverall: 92 }).overall > at(300, { playerOverall: 62 }).overall);
+
+  // A streak raises the difficulty — but barely at the bottom of the ladder,
+  // which is the whole point. A new player on a two-game run should not hit a
+  // wall.
+  const bronzeCalm = at(0, { streak: 0 });
+  const bronzeHot = at(0, { streak: 8 });
+  const champCalm = at(2100, { streak: 0 });
+  const champHot = at(2100, { streak: 8 });
+  assert.ok(bronzeHot.edge > bronzeCalm.edge, 'a streak does something');
+  assert.ok(bronzeHot.edge - bronzeCalm.edge < champHot.edge - champCalm.edge,
+    'but far less at Bronze than at Champion');
+  assert.ok(bronzeHot.overall - bronzeCalm.overall <= 3, 'and it never spikes a beginner');
+
+  // Level nudges rather than swings.
+  assert.ok(at(600, { level: 50 }).overall - at(600, { level: 1 }).overall <= 3);
+
+  // The opponent is never hopeless where it matters: through the lower and
+  // middle ranks a weak build is never handed somebody far above it.
+  for (const points of [0, 150, 300, 450]) {
+    assert.ok(at(points, { playerOverall: 60 }).overall <= 67, `too far above a weak build at ${points} RP`);
+  }
+  // Above that the rank wins instead, and that is deliberate: a 60-overall at
+  // Gold earned Gold, so it gets a Gold opponent. Capping it all the way up
+  // would mean the highest rank on the ladder was not the hardest.
+  assert.ok(at(600, { playerOverall: 60 }).overall >= 68);
+  assert.ok(at(2400, { playerOverall: 60 }).overall >= 90);
+});
+
+test('the offline ladder is generated, stable, and places the player by points', () => {
+  const rivals = ladderRivals();
+  assert.equal(rivals.length, LADDER_SIZE);
+  // Same board every launch: movement is only readable if the rivals hold still.
+  assert.deepEqual(ladderRivals().map((r) => r.name), rivals.map((r) => r.name));
+  assert.equal(new Set(rivals.map((r) => r.name)).size, rivals.length, 'names are unique');
+
+  // Ordered by points, and better players higher up have better records.
+  for (let i = 1; i < rivals.length; i++) {
+    assert.ok(rivals[i - 1].points >= rivals[i].points, `points went up at ${i}`);
+  }
+  assert.ok(rivals[0].overall > rivals[rivals.length - 1].overall);
+  assert.ok(rivals[0].level > rivals[rivals.length - 1].level);
+
+  // A pyramid: far fewer at the top than the bottom.
+  const top = rivals.filter((r) => onlineRank(r.points).grandChamp).length;
+  assert.ok(top > 0 && top < 6, `expected a handful of Grand Champs, found ${top}`);
+
+  // The player is spliced in by points rather than pinned anywhere, so climbing
+  // moves them past names that stay where they are.
+  const low = ladderBoard({ name: 'Me', points: 0, overall: 60, level: 1, wins: 0, losses: 0, streak: 0 });
+  const high = ladderBoard({ name: 'Me', points: 9000, overall: 96, level: 40, wins: 90, losses: 10, streak: 5 });
+  assert.equal(low.length, LADDER_SIZE + 1);
+  assert.equal(low[low.length - 1].me, true, 'nothing on the clock puts you last');
+  assert.equal(high[0].me, true, 'enough points puts you top of the board');
+  assert.ok(low.find((r) => r.me)!.position > high.find((r) => r.me)!.position, 'climbing moves you up');
+
+  // Every row carries what the board shows.
+  for (const row of high.slice(0, 5)) {
+    assert.ok(row.rankLabel.length > 0 && row.rankColor.startsWith('#'));
+    assert.ok(row.wins >= 0 && row.losses >= 0 && row.streak >= 0 && row.level >= 1);
+  }
+});
+
+test('generated names look like park names and do not repeat easily', () => {
+  const seen = new Set<string>();
+  for (let i = 0; i < 400; i++) seen.add(generatePlayerName(i));
+  assert.ok(seen.size > 300, `expected variety, got ${seen.size} distinct in 400`);
+  // The same seed always gives the same name, which is what lets it be saved
+  // once and stay put.
+  assert.equal(generatePlayerName(42), generatePlayerName(42));
+  for (const name of [...seen].slice(0, 20)) {
+    assert.match(name, /^[A-Za-z][A-Za-z0-9]*$/, `${name} should be one clean word`);
+    assert.ok(name.length >= 6 && name.length <= 20);
+  }
 });
 
 test('usernames are checked, and changing one is locked for thirty days', () => {
@@ -2458,12 +2558,12 @@ test('the rank path pays every rank below the one you reached', () => {
 
   // Reaching a rank banks everything under it.
   assert.equal(rewardsUpTo(0).length, 1, 'Bronze 3 has already earned Bronze');
-  assert.equal(rewardsUpTo(30).length, 3, 'Gold banks Bronze, Silver and Gold');
-  assert.equal(rewardsUpTo(WINS_TO_GRAND_CHAMP).length, ONLINE_TIERS.length, 'the top banks the lot');
+  assert.equal(rewardsUpTo(600).length, 3, 'Gold banks Bronze, Silver and Gold');
+  assert.equal(rewardsUpTo(POINTS_TO_GRAND_CHAMP).length, ONLINE_TIERS.length, 'the top banks the lot');
 });
 
 test('a season payout settles against your peak and never pays the same gear twice', () => {
-  const gold = seasonPayout(32);
+  const gold = seasonPayout(640);
   assert.ok(gold);
   assert.equal(gold.tierName, 'Gold');
   assert.equal(gold.coins, 10_000 + 20_000 + 30_000);
@@ -2473,14 +2573,14 @@ test('a season payout settles against your peak and never pays the same gear twi
   // A second season at the same rank pays the coins again but not the gear —
   // the coins are the recurring part, the cosmetics are the once.
   const owned = [...gold.items, ...gold.titles];
-  const again = seasonPayout(32, owned);
+  const again = seasonPayout(640, owned);
   assert.ok(again);
   assert.equal(again.coins, gold.coins, 'coins every season');
   assert.equal(again.items.length, 0, 'gear only the first time');
   assert.equal(again.titles.length, 0);
 
   // Climbing further next season pays only the difference in gear.
-  const higher = seasonPayout(WINS_TO_GRAND_CHAMP, owned);
+  const higher = seasonPayout(POINTS_TO_GRAND_CHAMP, owned);
   assert.ok(higher);
   assert.equal(higher.tierName, 'Grand Champ');
   assert.ok(higher.items.length > 0, 'the new ranks still pay');

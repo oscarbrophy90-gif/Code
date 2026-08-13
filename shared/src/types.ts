@@ -253,28 +253,32 @@ export interface Profile {
  */
 export interface OnlineRecord {
   /**
-   * Ladder wins: what the rank is made of.
+   * Ranked points: the ladder itself.
    *
-   * This goes down as well as up — a loss costs one — so it is a standing rather
-   * than a career total. `lifetimeWins` is the number that only ever grows.
+   * Goes up and down by an amount that depends on where you are and how you are
+   * playing — see `applyRankedResult`. This is the number the rank is derived
+   * from; `wins` and `losses` below are honest match counts and move nothing.
    */
+  rp: number;
+  /** ranked matches won */
   wins: number;
+  /** ranked matches lost */
   losses: number;
-  /** every ranked game ever won, which a loss never takes away */
+  /** every ranked game ever won, which a season reset never takes away */
   lifetimeWins: number;
-  /** current win streak, for the board */
+  /** current win streak — drives both the board and how hard the CPU gets */
   streak: number;
   /** best streak ever reached */
   bestStreak: number;
   /** when the last ranked game finished, 0 if never */
   updatedAt: number;
   /**
-   * The highest `wins` reached this season.
+   * The highest `rp` reached this season.
    *
    * Season rewards settle against this rather than against where you finish, so
    * one bad night on the last evening cannot take a month of climbing off you.
    */
-  peakWins: number;
+  peakRp: number;
 }
 
 export const REGIONS = ['na-east', 'na-west', 'eu', 'apac', 'sa', 'oce'] as const;
@@ -285,13 +289,13 @@ export interface SeasonReport {
   /** the season that ended */
   seasonId: string;
   seasonName: string;
-  /** highest rank held during it */
-  peakWins: number;
+  /** highest points held during it */
+  peakPoints: number;
   tierName: string;
   coins: number;
   /** item and title ids granted */
   items: string[];
-  /** how many ranked wins the reset took off you */
+  /** how many ranked points the reset took off you */
   resetFrom: number;
 }
 

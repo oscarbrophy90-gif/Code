@@ -107,11 +107,11 @@ export class AiController {
    * `autoCheck` is off when a human is on the other side: checking the ball in
    * is the human's job, and a CPU that does it first takes that away.
    */
-  constructor(side: Side, difficulty: Difficulty, seed = 1337, adaptive = true, autoCheck = true) {
+  constructor(side: Side, difficulty: Difficulty, seed = 1337, adaptive = true, autoCheck = true, edge = 0) {
     this.side = side;
     this.adaptive = adaptive;
     this.autoCheck = autoCheck;
-    this.baseProfile = { ...DIFFICULTY_PRESETS[difficulty] };
+    this.baseProfile = sharpen(DIFFICULTY_PRESETS[difficulty], edge, difficulty);
     this.profile = { ...this.baseProfile };
     this.rng = new Rng(seed);
   }
@@ -456,4 +456,61 @@ export class AiController {
     const g = Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
     return Math.max(-2.5, Math.min(2.5, g));
   }
+}
+
+
+/**
+ * The difficulties in order, so sharpening knows what "harder" means.
+ */
+const DIFFICULTY_ORDER: Difficulty[] = [
+  'rookie',
+  'semiPro',
+  'pro',
+  'allStar',
+  'superstar',
+  'hallOfFame',
+  'grandChamp',
+];
+
+/**
+ * Sharpens a difficulty preset by `edge`, from 0 to 1.
+ *
+ * `edge` 1 is exactly the next difficulty up; 0.5 is halfway between the two.
+ * That is the whole trick, and it is why this is safe: however hard the ladder
+ * pushes, a sharpened Rookie can never be worse than a Semi-Pro, so the bottom
+ * of the ladder stays somewhere a beginner can stand.
+ *
+ * The first version moved every knob half the distance to an absolute ceiling
+ * instead. Measured, that gave a fully sharpened Rookie a 0.235s reaction —
+ * quicker than a plain Pro at 0.25 — which is exactly the unfair spike this is
+ * supposed to prevent.
+ *
+ * The six difficulties are coarse: a whole tier of the ranked ladder sits inside
+ * one of them, so without this Gold 3 and Gold 1 would field the same opponent.
+ */
+export function sharpen(preset: AiProfile, edge: number, difficulty?: Difficulty): AiProfile {
+  const k = Math.max(0, Math.min(1, edge));
+  if (k === 0) return { ...preset };
+
+  const at = difficulty
+    ? DIFFICULTY_ORDER.indexOf(difficulty)
+    : DIFFICULTY_ORDER.findIndex((d) => DIFFICULTY_PRESETS[d] === preset);
+  const next = at >= 0 && at < DIFFICULTY_ORDER.length - 1 ? DIFFICULTY_PRESETS[DIFFICULTY_ORDER[at + 1]] : null;
+  // Already at the top: there is nothing above Grand Champ to move toward, so
+  // it stays as it is rather than being extrapolated into something impossible.
+  if (!next) return { ...preset };
+
+  const lerp = (a: number, b: number) => a + (b - a) * k;
+  return {
+    ...preset,
+    reactionTime: lerp(preset.reactionTime, next.reactionTime),
+    releaseError: lerp(preset.releaseError, next.releaseError),
+    bitesOnFakes: lerp(preset.bitesOnFakes, next.bitesOnFakes),
+    contestIq: lerp(preset.contestIq, next.contestIq),
+    shotSelection: lerp(preset.shotSelection, next.shotSelection),
+    helpIq: lerp(preset.helpIq, next.helpIq),
+    tendencyRead: lerp(preset.tendencyRead, next.tendencyRead),
+    stealAggression: lerp(preset.stealAggression, next.stealAggression),
+    moveRate: lerp(preset.moveRate, next.moveRate),
+  };
 }

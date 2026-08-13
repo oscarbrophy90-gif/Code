@@ -211,14 +211,14 @@ function renderTopbar(): void {
       // when you actually play someone.
       (() => {
         const online = store.profile.online;
-        const rank = onlineRank(online.wins);
+        const rank = onlineRank(online.rp);
         const played = online.wins + online.losses > 0;
         const label = rank.grandChamp ? grandChampLabel(store.position()) : rank.label;
         return el(
           'button',
           {
             class: 'chip rank-chip',
-            title: `${online.wins} ranked wins — click for the leaderboard`,
+            title: `${online.rp} RP — click for the leaderboard`,
             onclick: () => navigate('leaderboard'),
           },
           el('span', { class: 'dot', style: `background:${rank.tier.color}` }),

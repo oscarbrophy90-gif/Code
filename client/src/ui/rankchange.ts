@@ -86,8 +86,8 @@ export function playRankChange(
         sub.textContent = promoted
           ? newTier
             ? `Welcome to ${toRank.tier.name}`
-            : `${toRank.needed - toRank.progress} more to ${nextLabelFor(after)}`
-          : `Win ${toRank.needed - toRank.progress} to climb back`;
+            : `${toRank.needed - toRank.progress} RP to ${nextLabelFor(after)}`
+          : `${toRank.needed - toRank.progress} RP to climb back`;
       }
       if (!struck && t >= 0.5) {
         struck = true;
@@ -106,8 +106,8 @@ export function playRankChange(
   });
 }
 
-function nextLabelFor(wins: number): string {
-  const next = onlineRank(Math.floor(wins / 5) * 5 + 5);
+function nextLabelFor(points: number): string {
+  const next = onlineRank(Math.floor(points / 100) * 100 + 100);
   return next.grandChamp ? 'Grand Champ' : next.label;
 }
 

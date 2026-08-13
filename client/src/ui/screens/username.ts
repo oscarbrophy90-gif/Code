@@ -1,4 +1,4 @@
-import { USERNAME_MAX, USERNAME_MIN, validateUsername } from '@hoops/shared';
+import { USERNAME_MAX, USERNAME_MIN, generatePlayerName, validateUsername } from '@hoops/shared';
 
 import { store } from '../../state/store.ts';
 import { nameTaken } from '../../state/board.ts';
@@ -16,6 +16,10 @@ import { el } from '../dom.ts';
 export function renderUsername(): HTMLElement {
   const input = el('input', {
     type: 'text',
+    // Pre-filled with a generated name, so the fastest path through this screen
+    // is pressing Continue. It is saved like any other name and stays put — the
+    // one thing a generated identity must not do is change every launch.
+    value: generatePlayerName(Date.now()),
     placeholder: 'Pick a username',
     maxlength: String(USERNAME_MAX),
     spellcheck: 'false',
@@ -24,6 +28,18 @@ export function renderUsername(): HTMLElement {
   }) as HTMLInputElement;
 
   const message = el('div', { class: 'username-msg' }, '');
+  const reroll = el(
+    'button',
+    {
+      class: 'btn sm',
+      style: 'margin-top:8px',
+      onclick: () => {
+        input.value = generatePlayerName(Date.now() + Math.floor(Math.random() * 1e6));
+        check();
+      },
+    },
+    'Randomise',
+  ) as HTMLButtonElement;
   const submit = el('button', { class: 'btn primary lg' }, 'Continue') as HTMLButtonElement;
 
 
@@ -53,7 +69,6 @@ export function renderUsername(): HTMLElement {
   input.onkeydown = (e: KeyboardEvent) => {
     if (e.key === 'Enter' && check()) commit();
   };
-  submit.disabled = true;
   submit.onclick = () => {
     if (check()) commit();
   };
@@ -74,6 +89,10 @@ export function renderUsername(): HTMLElement {
     navigate('home');
   };
 
+  // Validate the pre-filled name straight away, or Continue starts disabled
+  // on a name that is perfectly good.
+  check();
+
   return el(
     'div',
     { class: 'wrap username-wrap' },
@@ -88,6 +107,7 @@ export function renderUsername(): HTMLElement {
         'This is the name you go by on the leaderboard, and it sits under your build name every time you walk out. Your builds can change; this stays.',
       ),
       input,
+      reroll,
       message,
       el(
         'p',

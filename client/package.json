@@ -9,8 +9,7 @@
     "preview": "vite preview --port 4173"
   },
   "dependencies": {
-    "@hoops/shared": "*",
-    "socket.io-client": "^4.8.3"
+    "@hoops/shared": "*"
   },
   "devDependencies": {
     "vite": "^8.0.0"

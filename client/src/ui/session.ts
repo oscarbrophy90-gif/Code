@@ -34,8 +34,7 @@ import { dismissFullscreen, navigate, refresh, showFullscreen } from '../main.ts
 import { createMatchScreen, type MatchResult } from './match.ts';
 import { playRankChange } from './rankchange.ts';
 import { playCourtRoll } from './courtroll.ts';
-import { applySettlement } from './matchmaking.ts';
-import type { Settled } from '../net/online.ts';
+import { settleRanked } from './rankedmatch.ts';
 import { bar, el, fmt, overlay, ratio, toast } from './dom.ts';
 import { playWalkout } from './walkout.ts';
 import { AvatarRenderer, livePreview } from './avatar.ts';
@@ -60,15 +59,13 @@ export interface StartMatchOptions {
   net?: 'host' | 'guest' | null;
   /** the court drawn for this game, filled in by the draw */
   surface?: CourtSurface | null;
-  /** the person on the other side, when this is an online match */
-  opponentName?: string;
   /**
-   * The server's verdict on an online match.
+   * Extra sharpening on top of the difficulty preset, 0 to 1.
    *
-   * Started before the game so the result cannot be missed while the walkout is
-   * playing, and awaited when the whistle goes.
+   * Ranked uses it to make Gold 1 harder than Gold 3 without jumping the CPU a
+   * whole difficulty level.
    */
-  onSettled?: Promise<Settled | null>;
+  aiEdge?: number;
 }
 
 /** True while a walkout is on screen, so a second one can never stack on it. */
@@ -120,7 +117,7 @@ function launchMatch(opts: StartMatchOptions): void {
     localSide: opts.localSide,
     seed: opts.seed,
     drill: opts.drill,
-    net: opts.net,
+    aiEdge: opts.aiEdge,
     surface: opts.surface ?? null,
     onFinish: (result) => {
       dismissFullscreen();
@@ -137,12 +134,11 @@ function launchMatch(opts: StartMatchOptions): void {
       // it you come back to the same rank and the same numbers you left.
       refresh();
 
-      // Online: the rank is whatever the server says it is, and it says so
-      // after both clients have reported. Wait for it, apply it, play whatever
-      // rank change it caused, then show the box score.
-      if (opts.onSettled) {
-        void opts.onSettled.then(async (settled) => {
-          await applySettlement(settled);
+      // Ranked settles here: the points move, the rank change plays if the rank
+      // actually changed, and then the box score. A forfeit counts as a loss —
+      // quitting a game you are losing should not be free.
+      if (opts.ranked) {
+        void settleRanked(result.won, result.score[0] - result.score[1]).then(() => {
           showResults(result, summary, opts);
         });
         return;
@@ -205,12 +201,8 @@ function applyResult(result: MatchResult, opts: StartMatchOptions): RewardSummar
   // The rank moves here and nowhere else. A forfeit still counts as a loss —
   // quitting a ranked game you are losing should not be free.
   let rankMove: 'promoted' | 'demoted' | 'none' | undefined;
-  // Offline ranked no longer exists, but the branch is kept honest: a local
-  // tally is only ever used when there is no server to have seen the match.
-  if (opts.ranked && !opts.net) {
-    const moved = store.recordRanked(result.won);
-    rankMove = rankChange(moved.before, moved.after);
-  }
+  // The ranked ladder moves in `settleRanked`, which owns the points maths and
+  // the animation. Recording it here as well would double every result.
 
   store.update((profile) => {
     const p = profile.players[profile.activeSlot];

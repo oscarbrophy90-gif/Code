@@ -2,8 +2,8 @@
 
 A 1v1 basketball game: green-bar shooting, six genuinely different CPU difficulty
 levels, a MyPlayer builder with real attribute ceilings, badges that level up by
-playing, five parks, 20-day seasons, and **online ranked matches against real people**
-on a nine-tier ladder that resets every season and pays out when it does.
+playing, five parks, 20-day seasons, and a **nine-tier ranked ladder against scaling CPU
+opponents** that resets every season and pays out when it does.
 
 Everything in it is original. There are no third-party league, club or player names,
 logos, likenesses or animations anywhere in the project — every team, court, crest,
@@ -15,8 +15,8 @@ runtime.
 Open **`dist-standalone/HoopsElite.html`** in any browser. It is a single self-contained
 file — no install, no terminal, no server. Progress saves to your browser.
 
-Everything except Ranked works that way. Ranked is played against other people, so it
-needs a server to match you up: see [Online play](#online-play).
+Everything runs from that one file, Ranked included — there is no server and no
+online play. See [Ranked](#ranked).
 
 ### Run from source
 
@@ -93,77 +93,60 @@ deterministic function in `shared/`** — `stepMatch(state, [inputA, inputB], dt
 client drives side A with your input and side B with the AI. Nothing about that shape
 assumes a local opponent, which is what makes online an addition rather than a rewrite.
 
-## Online play
+## Ranked
 
-**Ranked is online. Online is ranked.** Nothing else in the game touches a network:
-Play, the Practice Gym and the drills are all local against the CPU, and none of them
-move your rank. The only way to move it is to beat another person.
+Ranked is offline and played against the CPU. There is no matchmaking, no
+server and no other people — the whole game runs from the one HTML file.
 
-### Running the server
+### The ladder is points, not wins
 
-```bash
-npm install
-npm run build      # builds the client, which the server then serves
-npm start          # http://localhost:8787
-```
+A win used to be worth exactly one rung, so five wins was a division however
+good the opposition was — which measured how many games you played rather than
+how well. The ladder is **ranked points** now: 100 RP a division, and how much
+a result is worth depends on where you are.
 
-`server.js` is the whole thing: Express for the page and two JSON endpoints, Socket.io
-for everything live. It needs no build step and no database — records live in
-`server/data/db.json`, written atomically so a crash mid-write cannot corrupt the
-board.
+| | Bronze | Gold | Champion | Grand Champ |
+| --- | --- | --- | --- | --- |
+| Win | +34 | +26 | +16 | +14 |
+| Loss | −16 | −19 | −25 | −26 |
 
-| Endpoint | What it is for |
-| --- | --- |
-| `GET /health` | Is it up, what version, how many are online and queued |
-| `GET /leaderboard` | The board as JSON — the same list the game shows |
-| `/` | The built game, when `client/dist` exists |
+At Bronze a coin-flip record still climbs, so a beginner is never stuck. At
+Champion a coin flip goes *down* — holding the rank needs a winning record and
+climbing needs about 61%, rising to 65% at Grand Champ. A streak adds a little
+(capped at +9) and a comfortable win adds a little (capped at +6), so neither
+becomes the fastest way up.
 
-### Playing against somebody
+### The CPU scales
 
-Both players open the game, press **Find Player** on the Ranked screen, and the server
-pairs whoever is waiting. The queue screen says how long it has been looking and how
-many people are actually connected, because "Searching…" on its own is
-indistinguishable from broken.
+Four inputs, in the order they matter: your **rank**, your build's **overall**,
+your **win streak**, and your **level**. Rank decides what kind of fight it
+should be; the rest decide what it can be, so a starter build at Gold and a
+maxed build at Gold do not get handed the same player.
 
-Two machines need to agree on where the server is:
+Between the six difficulty presets sits an **edge** value. A whole tier of the
+ladder fits inside one preset, so without it Gold 3 and Gold 1 would field an
+identical opponent. Edge interpolates toward the *next difficulty up* — edge 1
+is exactly the next level, 0.5 is halfway. That bound is what keeps the bottom
+of the ladder fair: however hard the ladder pushes, a sharpened Rookie can never
+be worse than a Semi-Pro.
 
-- **Served by the server** (`http://your-host:8787`) — nothing to configure. The game
-  talks to whatever served it.
-- **The standalone HTML**, opened off a desktop, has no origin to infer from. Put the
-  server's address into **Settings → Online server** on both machines. The *Test
-  connection* button tells you which of "wrong address", "server is down" and "wrong
-  version" you are looking at, because from the outside those three look identical.
+Streaks are capped per tier — 0.12 at Bronze against 0.55 at Grand Champ. Two
+wins as a new player nudges the opponent; eight wins at Champion brings a wall.
+A loss drops the streak to zero and the pressure with it.
 
-On one network, that address is the host machine's LAN IP — `http://192.168.1.42:8787`,
-not `localhost`, which means *this* machine on both of them and is why two laptops
-never find each other. To play over the internet, deploy `server.js` anywhere that runs
-Node (Render, Railway, Fly, a VPS) and use that URL.
+### The leaderboard
 
-### How a match actually runs
+Ninety generated rivals with you spliced in by points. The screen says outright
+that they are generated — a board implying these were other people would be
+lying, and the ladder does not need the lie. What it needs is names above and
+below you, so a rank is a position rather than a number.
 
-The server is a post office, not a referee. It matches two people, puts them in a
-Socket.io room and carries their messages; it never simulates the game.
+The rivals never move. You do, and the names you pass stay passed. Each row
+shows rank, RP, overall, level, wins, losses and streak.
 
-One of the two clients is the **host** and runs the simulation. The **guest** sends its
-input and draws what the host sends back, twenty snapshots a second, eased between
-frames so it looks continuous. That is a deliberate choice over the alternatives:
-
-- *Both simulate in lockstep.* Elegant with a deterministic simulation — and it is
-  deterministic, but only for arithmetic. `Math.sin` and friends are not required to be
-  bit-identical across engines or CPUs, so two browsers can drift apart on one jump shot
-  and never agree again. A desync you cannot detect is the worst failure available.
-- *The server simulates.* Correct, and it means shipping the whole game to the server
-  and keeping two implementations honest for ever.
-
-The unfairness host-authority would otherwise create — the host's presses landing
-instantly while the guest's arrive a round trip late — is paid off by holding the host's
-own input back by the measured one-way latency. Both players' presses then land the same
-distance from the moment they were made.
-
-Results are the server's. It writes both records, and the client takes its rank from
-that rather than counting its own wins, because a client that counts its own wins drifts
-the first time a result does not arrive — and drift in your favour is indistinguishable
-from cheating.
+Your own name is generated too (`GreenAssassin23`, `MoneyDemonx`), pre-filled on
+the first screen with a Randomise button, and saved — the one thing a generated
+identity must not do is change every launch.
 
 ## Controls
 

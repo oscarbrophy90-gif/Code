@@ -14,9 +14,9 @@ import { drawRankBadge } from './rankbadge.ts';
  * the same list it stops being a reward and starts being a chore.
  */
 export function showSeasonReport(report: SeasonReport): void {
-  const rank = onlineRank(report.peakWins);
+  const rank = onlineRank(report.peakPoints);
   const badge = el('canvas', { class: 'rank-badge', style: 'width:84px;height:94px' }) as HTMLCanvasElement;
-  requestAnimationFrame(() => drawRankBadge(badge, report.peakWins, 1));
+  requestAnimationFrame(() => drawRankBadge(badge, report.peakPoints, 1));
 
   overlay((close) =>
     el(
@@ -35,7 +35,7 @@ export function showSeasonReport(report: SeasonReport): void {
           el(
             'div',
             { class: 'hint', style: 'margin:4px 0 0' },
-            `Settled against your season high of ${report.peakWins} win${report.peakWins === 1 ? '' : 's'}.`,
+            `Settled against your season high of ${report.peakPoints} RP.`,
           ),
         ),
       ),
@@ -60,7 +60,7 @@ export function showSeasonReport(report: SeasonReport): void {
       el(
         'p',
         { class: 'hint', style: 'margin:14px 0 16px' },
-        `The ladder has been reset — you start the new season at Bronze 3. Your ${report.resetFrom} win${report.resetFrom === 1 ? '' : 's'} are on the record, not on the board.`,
+        `The ladder has been reset — you start the new season at Bronze 3. Your ${report.resetFrom} RP are gone; your record is not.`,
       ),
       el(
         'button',

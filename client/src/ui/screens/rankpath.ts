@@ -4,7 +4,7 @@ import {
   RANK_REWARDS,
   STORE_BY_ID,
   TITLE_BY_ID,
-  WINS_PER_DIVISION,
+  POINTS_PER_DIVISION,
   onlineRank,
   seasonForTime,
   seasonTimeRemaining,
@@ -26,7 +26,7 @@ import { drawRankBadge } from '../rankbadge.ts';
  */
 export function renderRankPath(): HTMLElement {
   const record = store.profile.online;
-  const peak = Math.max(record.peakWins ?? 0, record.wins);
+  const peak = Math.max(record.peakRp ?? 0, record.rp);
   const peakRank = onlineRank(peak);
   const peakIndex = ONLINE_TIERS.findIndex((t) => t.id === peakRank.tier.id);
   const season = seasonForTime(Date.now());
@@ -63,8 +63,8 @@ export function renderRankPath(): HTMLElement {
             'div',
             { class: 'hint', style: 'margin:4px 0 0' },
             peak > record.wins
-              ? `Season high: ${peak} wins. You are on ${record.wins} now — the payout still settles at ${peakRank.tier.name}.`
-              : `${record.wins} ranked win${record.wins === 1 ? '' : 's'} this season.`,
+              ? `Season high: ${peak} RP. You are on ${record.rp} now — the payout still settles at ${peakRank.tier.name}.`
+              : `${record.rp} RP this season.`,
           ),
         ),
         el(
@@ -92,7 +92,7 @@ export function renderRankPath(): HTMLElement {
 
 /** Total wins needed to first set foot in a tier. */
 function winsToReach(index: number): number {
-  return index * DIVISIONS_PER_TIER * WINS_PER_DIVISION;
+  return index * DIVISIONS_PER_TIER * POINTS_PER_DIVISION;
 }
 
 function tierCard(tier: RankRewardTier, index: number, peakIndex: number, owned: Set<string>): HTMLElement {
@@ -116,7 +116,7 @@ function tierCard(tier: RankRewardTier, index: number, peakIndex: number, owned:
         el(
           'div',
           { class: 'hint', style: 'margin:2px 0 0' },
-          index === 0 ? 'Where every season starts' : `${winsToReach(index)} ranked wins`,
+          index === 0 ? 'Where every season starts' : `${winsToReach(index)} RP`,
         ),
       ),
       el(

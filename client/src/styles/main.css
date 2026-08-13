@@ -3282,3 +3282,24 @@ input[type='text']:focus {
   font-size: 11px;
   color: var(--text-faint);
 }
+
+/* The offline ladder carries more columns than the old board did. */
+.lb-head.wide,
+.lb-row.wide {
+  grid-template-columns: 40px 1fr 116px 58px 44px 40px 40px 40px 56px;
+  gap: 8px;
+  font-size: 12px;
+}
+
+@media (max-width: 900px) {
+  .lb-head.wide,
+  .lb-row.wide {
+    grid-template-columns: 32px 1fr 96px 52px 40px;
+  }
+  /* Overall, level, wins, losses and streak drop first: the rank and the points
+     are what the board is for. */
+  .lb-head.wide > *:nth-child(n + 6),
+  .lb-row.wide > *:nth-child(n + 6) {
+    display: none;
+  }
+}

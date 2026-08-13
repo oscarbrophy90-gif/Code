@@ -1,7 +1,7 @@
 import {
   DIVISIONS_PER_TIER,
   ONLINE_TIERS,
-  WINS_PER_DIVISION,
+  POINTS_PER_DIVISION,
   grandChampLabel,
   onlineRank,
   type OnlineRecord,
@@ -94,7 +94,7 @@ export function drawRankBadge(canvas: HTMLCanvasElement, wins: number, placement
  * itself.
  */
 export function rankPanel(record: OnlineRecord, placement: number | null, compact = false): HTMLElement {
-  const rank = onlineRank(record.wins);
+  const rank = onlineRank(record.rp);
   const played = record.wins + record.losses > 0;
   const label = rank.grandChamp ? grandChampLabel(placement) : rank.label;
 
@@ -103,7 +103,7 @@ export function rankPanel(record: OnlineRecord, placement: number | null, compac
     style: compact ? 'width:52px;height:58px' : 'width:88px;height:98px',
   }) as HTMLCanvasElement;
   // The canvas has to be in the document before it has a layout size to read.
-  requestAnimationFrame(() => drawRankBadge(canvas, record.wins, placement));
+  requestAnimationFrame(() => drawRankBadge(canvas, record.rp, placement));
 
   const bits: HTMLElement[] = [
     el('div', { class: 'rank-label', style: `color:${rank.tier.color}` }, label),
@@ -115,8 +115,8 @@ export function rankPanel(record: OnlineRecord, placement: number | null, compac
         'div',
         { class: 'rank-sub' },
         placement !== null
-          ? `${record.wins} ranked wins · ${placement} of ${boardSize()} on the board`
-          : `${record.wins} ranked wins`,
+          ? `${record.rp} RP · ${placement} of ${boardSize()} on the ladder`
+          : `${record.rp} RP`,
       ),
     );
     if (!compact) {
@@ -133,8 +133,8 @@ export function rankPanel(record: OnlineRecord, placement: number | null, compac
       el(
         'div',
         { class: 'rank-sub' },
-        `${record.wins} ranked win${record.wins === 1 ? '' : 's'}`,
-        placement !== null ? ` · #${placement} on the board` : '',
+        `${record.rp} RP`,
+        placement !== null ? ` · #${placement} on the ladder` : '',
       ),
     );
     if (!compact) {
@@ -151,7 +151,7 @@ export function rankPanel(record: OnlineRecord, placement: number | null, compac
         el(
           'div',
           { class: 'rank-hint' },
-          `${remaining} more win${remaining === 1 ? '' : 's'} to rank up · ${rank.progress}/${rank.needed}`,
+          `${remaining} RP to rank up · ${rank.progress}/${rank.needed}`,
         ),
       );
     }
@@ -161,8 +161,8 @@ export function rankPanel(record: OnlineRecord, placement: number | null, compac
 }
 
 /** The whole ladder, for a "how this works" panel. */
-export function ladderStrip(currentWins: number): HTMLElement {
-  const here = onlineRank(currentWins);
+export function ladderStrip(currentPoints: number): HTMLElement {
+  const here = onlineRank(currentPoints);
   return el(
     'div',
     { class: 'ladder-strip' },
@@ -173,8 +173,8 @@ export function ladderStrip(currentWins: number): HTMLElement {
           class: `ladder-tier ${tier.id === here.tier.id ? 'on' : ''}`,
           title:
             tier.id === 'grandchamp'
-              ? `Grand Champ — ${DIVISIONS_PER_TIER * WINS_PER_DIVISION * (ONLINE_TIERS.length - 1)} wins, then placed against the world`
-              : `${tier.name} 3 · 2 · 1 — ${WINS_PER_DIVISION} wins per division`,
+              ? `Grand Champ — ${DIVISIONS_PER_TIER * POINTS_PER_DIVISION * (ONLINE_TIERS.length - 1)} RP, then placed against the ladder`
+              : `${tier.name} 3 · 2 · 1 — ${POINTS_PER_DIVISION} RP per division`,
         },
         el('span', { class: 'ladder-dot', style: `background:${tier.color}` }),
         tier.name,

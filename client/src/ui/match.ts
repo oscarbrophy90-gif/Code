@@ -27,8 +27,6 @@ import {
   type CourtSurface,
 } from '@hoops/shared';
 
-import { createGuestLink, createHostLink, type NetLink } from '../net/netlink.ts';
-import { online } from '../net/online.ts';
 import { Camera } from '../engine/camera.ts';
 import { GameLoop } from '../engine/loop.ts';
 import { InputManager } from '../engine/input.ts';
@@ -63,6 +61,8 @@ export interface MatchOptions {
   seed?: number;
   /** when set, the screen runs a timed training drill instead of a game */
   drill?: DrillDef | null;
+  /** extra sharpening on top of the difficulty preset, 0 to 1 */
+  aiEdge?: number;
   /**
    * Online match. 'host' runs the simulation and publishes it; 'guest' sends
    * its input and draws what the host sends back. Absent for every offline
@@ -96,13 +96,9 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
   // parked out of the way and never given a controller.
   const drill = opts.drill ?? null;
   const parkedBot = !!drill && (drill.mode === 'shooting' || drill.mode === 'finishing');
-  // Online matches have a person on the other side, so there is nobody to
-  // drive: the remote input arrives over the wire instead.
-  const netRole = opts.net ?? null;
-  const link: NetLink | null =
-    netRole === 'host' ? createHostLink(remoteSide) : netRole === 'guest' ? createGuestLink() : null;
-  const ai = parkedBot || netRole ? null : new AiController(remoteSide, opts.difficulty, seed ^ 0x5bf03, true, false);
-
+  const ai = parkedBot
+    ? null
+    : new AiController(remoteSide, opts.difficulty, seed ^ 0x5bf03, true, false, opts.aiEdge ?? 0);
   const park = PARK_BY_ID[opts.parkId] ?? PARK_BY_ID['downtown'];
 
   const cam = new Camera();
@@ -179,32 +175,16 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
   const pauseHost = el('div', { style: 'position:absolute;inset:0;pointer-events:none' });
   root.appendChild(pauseHost);
 
-  /**
-   * The server's verdict, when it got there before the buzzer did.
-   *
-   * A forfeit or a disconnect ends the match for both players, but only one of
-   * them saw it happen — the other is still stood on the court with the ball.
-   * The server tells them, and that is the result, not the local score.
-   */
-  let serverWon: boolean | null = null;
-
   const closeAndFinish = (quit: boolean) => {
     if (finished) return;
     finished = true;
     loop.stop();
     input.detach();
-    offSettled?.();
-    if (link) {
-      // Quitting an online game is a forfeit and the server is told so. Leaving
-      // silently would let a losing player close the tab for a free draw.
-      if (quit) online.forfeit();
-      link.dispose();
-    }
     resizeObserver.disconnect();
     window.removeEventListener('resize', resize);
     const winner = state.winner;
     opts.onFinish({
-      won: serverWon ?? winner === localSide,
+      won: winner === localSide,
       score: [state.score[localSide], state.score[remoteSide]],
       stats: state.stats[localSide],
       opponentStats: state.stats[remoteSide],
@@ -215,19 +195,6 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
       drillReps,
     });
   };
-
-  // The server can end an online match that has not ended here — the opponent
-  // forfeited, or their connection went. Without this the winner is left
-  // standing on the court holding the ball, waiting for a game nobody else is
-  // playing any more.
-  const offSettled = netRole
-    ? online.on<{ won: boolean; reason: string }>('matchSettled', (msg) => {
-        if (finished) return;
-        serverWon = msg.won;
-        toast(msg.reason === 'forfeit' ? 'Your opponent forfeited' : 'Your opponent left the match', 'info');
-        closeAndFinish(false);
-      })
-    : null;
 
   const renderPause = () => {
     clear(pauseHost);
@@ -312,35 +279,10 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
         localInput.emote = null;
       }
     }
-    // ------------------------------------------------------------- online
-    if (link?.role === 'guest') {
-      // The guest never simulates. It publishes what it pressed and draws the
-      // world the host sends back, which is the only way two browsers can agree
-      // on a game without trusting their floating point to match.
-      const now = performance.now();
-      link.send(localInput, now);
-      const before = state.phase;
-      const events = link.apply(state, now);
-      if (events.length > 0) handleEvents(events);
-      if (before !== 'over' && state.phase === 'over') {
-        audio.play('buzzer');
-        setTimeout(() => closeAndFinish(false), 1800);
-      }
-      playDribbleBounce();
-      playNetSwish();
-      return;
-    }
-
-    const nowMs = performance.now();
-    const mine = link?.role === 'host' ? link.localInput(localInput, nowMs) : localInput;
-    const remote: PlayerInput = link?.role === 'host'
-      ? link.remoteInput()
-      : ai
-        ? ai.update(state, dt)
-        : emptyInput();
+    const remote: PlayerInput = ai ? ai.update(state, dt) : emptyInput();
 
     const inputs: [PlayerInput, PlayerInput] =
-      localSide === 0 ? [mine, remote] : [remote, mine];
+      localSide === 0 ? [localInput, remote] : [remote, localInput];
 
     stepWorld(inputs, dt);
     if (drill) updateDrill(dt);
@@ -476,14 +418,8 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
     const events = drainEvents(state);
     if (before !== 'over' && state.phase === 'over') {
       audio.play('buzzer');
-      // The host owns the result: it ran the game, so it is the one the server
-      // believes. The guest finds out when the server settles the match.
-      if (link?.role === 'host' && state.winner !== null) online.reportResult(state.winner);
       setTimeout(() => closeAndFinish(false), 1800);
     }
-    // Published before they are handled locally, so the two screens react to
-    // the same whistle as close to together as the wire allows.
-    if (link?.role === 'host') link.publish(state, events, performance.now());
     handleEvents(events);
   };
 

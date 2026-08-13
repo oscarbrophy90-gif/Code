@@ -1,7 +1,7 @@
 import {
   DIVISIONS_PER_TIER,
   ONLINE_TIERS,
-  WINS_PER_DIVISION,
+  POINTS_PER_DIVISION,
   computeOverall,
   onlineRank,
   seasonForTime,
@@ -9,7 +9,7 @@ import {
 } from '@hoops/shared';
 
 import { store } from '../../state/store.ts';
-import { findPlayer } from '../matchmaking.ts';
+import { playRankedMatch } from '../rankedmatch.ts';
 import { boardSize } from '../../state/board.ts';
 import { navigate } from '../../main.ts';
 import { el, panel } from '../dom.ts';
@@ -24,7 +24,7 @@ import { rankPanel, ladderStrip } from '../rankbadge.ts';
  */
 export function renderRank(): HTMLElement {
   const record = store.profile.online;
-  const rank = onlineRank(record.wins);
+  const rank = onlineRank(record.rp);
   const played = record.wins + record.losses > 0;
   const position = store.position();
   const games = record.wins + record.losses;
@@ -37,7 +37,7 @@ export function renderRank(): HTMLElement {
     el(
       'p',
       { class: 'page-sub' },
-      'Ranked is online. Every match is against another person who pressed Find Player at the same time as you, and it is the only thing in the game that moves your rank.',
+      'Every ranked match is against a CPU built to your rank, your build and how you have been playing. Points, not wins: a win is worth more at the bottom of the ladder than at the top, and a loss costs more the higher you get.',
     ),
 
     panel(
@@ -93,23 +93,23 @@ export function renderRank(): HTMLElement {
           // Deliberately not their rating. You find out who they are by playing
           // them, which is the point of a queue — knowing in advance turns every
           // match into a decision about whether to bother.
-          el('div', { class: 'nextmatch-line' }, 'A real player, somewhere'),
+          el('div', { class: 'nextmatch-line' }, 'Somebody at your rank'),
           el(
             'div',
             { class: 'hint', style: 'margin:6px 0 0' },
             rank.grandChamp
               ? 'The top of the ladder. There is nothing above this, and it plays like it.'
-              : `Win ${rank.needed - rank.progress} more and you are ${nextLabel(record.wins)}. Lose and you drop one.`,
+              : `${rank.needed - rank.progress} points to ${nextLabel(record.rp)}. A loss costs you ground.`,
           ),
         ),
         el(
           'button',
           {
             class: 'btn primary lg',
-            id: 'find-player',
-            onclick: () => void findPlayer(),
+            id: 'play-ranked',
+            onclick: () => playRankedMatch(),
           },
-          'Find Player',
+          'Play Ranked Match',
         ),
       ),
     ),
@@ -120,16 +120,16 @@ export function renderRank(): HTMLElement {
       el(
         'p',
         { class: 'hint', style: 'margin:0 0 12px' },
-        `${WINS_PER_DIVISION} wins per division, three divisions per tier. Past Champion 1 you are Grand Champ, which has no divisions — from there you are placed against everyone else.`,
+        `${POINTS_PER_DIVISION} points per division, three divisions per tier. Wins are worth less and losses cost more the higher you climb, so holding a high rank takes a winning record and climbing takes a good one.`,
       ),
-      ladderStrip(record.wins),
+      ladderStrip(record.rp),
       el(
         'div',
         { class: 'ladder-table', style: 'margin-top:14px' },
-        el('div', { class: 'ladder-row head' }, el('span', {}, 'Tier'), el('span', {}, 'Wins to reach'), el('span', {}, '')),
+        el('div', { class: 'ladder-row head' }, el('span', {}, 'Tier'), el('span', {}, 'Points to reach'), el('span', {}, '')),
         ...ONLINE_TIERS.map((tier, i) => {
-          const at = i * DIVISIONS_PER_TIER * WINS_PER_DIVISION;
-          const reached = record.wins >= at;
+          const at = i * DIVISIONS_PER_TIER * POINTS_PER_DIVISION;
+          const reached = record.rp >= at;
           return el(
             'div',
             { class: `ladder-row ${tier.id === rank.tier.id ? 'on' : ''}` },
@@ -150,8 +150,8 @@ export function renderRank(): HTMLElement {
   return root;
 }
 
-function nextLabel(wins: number): string {
-  const next = onlineRank((Math.floor(wins / WINS_PER_DIVISION) + 1) * WINS_PER_DIVISION);
+function nextLabel(points: number): string {
+  const next = onlineRank((Math.floor(points / POINTS_PER_DIVISION) + 1) * POINTS_PER_DIVISION);
   return next.grandChamp ? 'Grand Champ' : next.label;
 }
 
