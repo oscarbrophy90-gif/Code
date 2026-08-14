@@ -264,3 +264,151 @@ test('the hang holds the hands on the iron: right height, right spot, dead still
   // The catch is a motion, not a snap — still under the no-teleport bar.
   assert.ok(t.maxStep < 0.5, `biggest single-frame move was ${t.maxStep.toFixed(2)}ft`);
 });
+
+test('a missed dunk kicks off the iron and flies: the board is a race, not a gift', () => {
+  // The dunker used to catch his own clang on the next frame — the ball was
+  // placed at rim height with his hands already there, so a miss handed the
+  // possession straight back. A missed dunk has to go somewhere.
+  const flights: { peak: number; travel: number; loose: number; ownDist: number }[] = [];
+  let immediateSelfBoards = 0;
+
+  for (let seed = 300; seed < 340; seed++) {
+    const a = generateOpponent(90, seed * 3 + 1);
+    a.attrs.dunk = 95;
+    a.attrs.vertical = 95;
+    a.attrs.speed = 90;
+    a.attrs.speedWithBall = 90;
+    a.attrs.acceleration = 90;
+    const b = generateOpponent(70, seed * 3 + 2);
+    // instantInbound off: this is the live rebound path, not the practice gym.
+    const state = createMatch(a, b, defaultMatchConfig({ manualCheck: false, shotClock: 999 }), seed);
+    for (let i = 0; i < 200; i++) stepMatch(state, [emptyInput(), emptyInput()], SIM_DT);
+
+    const p = state.players[0];
+    p.x = 1;
+    p.z = 16;
+    p.state = 'dribble';
+    p.stamina = 1;
+    state.ball.owner = 0;
+    state.ball.state = 'held';
+    state.needsClear = false;
+
+    const drive = { ...emptyInput(), mz: -1, sprint: true };
+    for (let i = 0; i < 40; i++) stepMatch(state, [drive, emptyInput()], SIM_DT);
+
+    // Released far too early: this dunk misses.
+    const release = 4 + (seed % 6);
+    let missed = false;
+    let peak = 0;
+    let looseFrames = 0;
+    let x0 = 0;
+    let z0 = 0;
+    let started = false;
+    let ownDist = 0;
+    let collectedBy: number | null = null;
+
+    for (let i = 0; i < 700 && collectedBy === null; i++) {
+      stepMatch(state, [i < release ? { ...drive, shoot: true } : drive, emptyInput()], SIM_DT);
+      for (const e of drainEvents(state)) if (e.type === 'miss') missed = true;
+      if (!missed) continue;
+      const ball = state.ball;
+      if (ball.state === 'loose') {
+        if (!started) {
+          started = true;
+          x0 = ball.x;
+          z0 = ball.z;
+        }
+        looseFrames++;
+        peak = Math.max(peak, ball.y);
+        ownDist = Math.hypot(ball.x - p.x, ball.z - p.z);
+      }
+      if (started && ball.state === 'held' && ball.owner !== null) collectedBy = ball.owner;
+    }
+
+    if (!started) continue;
+    const travel = Math.hypot(state.ball.x - x0, state.ball.z - z0);
+    flights.push({ peak, travel, loose: looseFrames * SIM_DT, ownDist });
+    // The dunker is neither controlled nor chasing here, so nothing he does
+    // can explain recovering it. Landing on it inside a fifth of a second is
+    // the bug itself.
+    if (collectedBy === 0 && looseFrames * SIM_DT < 0.2) immediateSelfBoards++;
+  }
+
+  assert.ok(flights.length >= 30, `only ${flights.length} of the scripted dunks missed`);
+  assert.equal(immediateSelfBoards, 0, `${immediateSelfBoards} misses were rebounded on the spot by the dunker`);
+
+  for (const f of flights) {
+    assert.ok(f.peak > COURT.rimY + 2, `carom peaked at ${f.peak.toFixed(1)}ft off a ${COURT.rimY}ft rim`);
+    assert.ok(f.travel > 5, `carom travelled only ${f.travel.toFixed(1)}ft`);
+    assert.ok(f.loose > 0.6, `ball was live for only ${f.loose.toFixed(2)}s`);
+  }
+});
+
+
+test('a climbing carom is nobody\'s, and the man who missed it is out of the play', () => {
+  const state = createMatch(
+    generateOpponent(85, 11),
+    generateOpponent(85, 12),
+    defaultMatchConfig({ manualCheck: false, shotClock: 999 }),
+    99,
+  );
+  for (let i = 0; i < 200; i++) stepMatch(state, [emptyInput(), emptyInput()], SIM_DT);
+
+  const ball = state.ball;
+  ball.state = 'loose';
+  ball.owner = null;
+  ball.shotBy = 0;
+  ball.settled = false;
+  ball.x = COURT.rimX;
+  ball.z = COURT.rimZ;
+  ball.y = COURT.rimY + 0.4;
+  ball.vx = 0;
+  ball.vz = 0;
+  ball.vy = 16;
+  // Both men parked under it and up in the air, so their reach covers the ball
+  // outright: only the gate can stop them plucking it straight off the iron.
+  for (const p of state.players) {
+    p.x = COURT.rimX;
+    p.z = COURT.rimZ + 0.5;
+    p.y = 3;
+    p.state = 'airborne';
+    p.stagger = 0;
+    p.reboundLock = 0;
+  }
+
+  let climbed = 0;
+  while (state.ball.state === 'loose' && !state.ball.settled && climbed++ < 300) {
+    for (const p of state.players) p.y = 3;
+    stepMatch(state, [emptyInput(), emptyInput()], SIM_DT);
+  }
+  assert.equal(state.ball.state, 'loose', 'the carom was gathered while it was still going up');
+  assert.ok(state.ball.settled, 'the carom never became a live ball');
+  assert.ok(state.ball.vy <= 0, 'the carom went live before it topped out');
+  assert.ok(state.ball.y > COURT.rimY, `the carom settled at ${state.ball.y.toFixed(1)}ft, under the rim`);
+  assert.ok(climbed > 30, `the carom was live after only ${climbed} frames`);
+
+  // And the lock: the man who missed cannot gather it even standing on top of
+  // it, until he has come down and turned around.
+  const dunker = state.players[0];
+  const pin = () => {
+    state.ball.x = dunker.x;
+    state.ball.z = dunker.z;
+    state.ball.y = 4;
+    state.ball.vx = 0;
+    state.ball.vz = 0;
+    state.ball.vy = 0;
+    state.ball.settled = true;
+  };
+  state.players[1].x = 20;
+  state.players[1].z = 30;
+  dunker.reboundLock = 0.5;
+  pin();
+  stepMatch(state, [emptyInput(), emptyInput()], SIM_DT);
+  assert.equal(state.ball.state, 'loose', 'the dunker rebounded his own miss while still locked out');
+
+  for (let i = 0; i < 200 && state.ball.state === 'loose'; i++) {
+    pin();
+    stepMatch(state, [emptyInput(), emptyInput()], SIM_DT);
+  }
+  assert.equal(state.ball.owner, 0, 'once the lock expires the dunker is back in the play');
+});

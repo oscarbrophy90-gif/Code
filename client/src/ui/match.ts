@@ -131,6 +131,21 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
         state.phase = 'live';
         state.check = null;
       },
+      /** live read of the ball and both men, for asserting on what the sim did */
+      peek() {
+        const ball = state.ball;
+        return {
+          time: state.time,
+          ball: { state: ball.state, owner: ball.owner, x: ball.x, y: ball.y, z: ball.z, settled: ball.settled },
+          players: state.players.map((p) => ({
+            state: p.state,
+            x: p.x,
+            y: p.y,
+            z: p.z,
+            reboundLock: p.reboundLock,
+          })),
+        };
+      },
     };
   }
   const courtRenderer = new CourtRenderer();

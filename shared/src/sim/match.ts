@@ -120,6 +120,7 @@ export function makePlayer(side: Side, cfg: SimPlayerConfig): SimPlayer {
     moveDirZ: 0,
     stagger: 0,
     staggerTimer: 0,
+    reboundLock: 0,
     shotElapsed: 0,
     shotProfile: null,
     shotType: 'jumper',
@@ -243,6 +244,7 @@ function setupCheckball(state: MatchState, offense: Side): void {
   off.state = 'dribble';
   off.stagger = 0;
   off.staggerTimer = 0;
+  off.reboundLock = 0;
   off.moveId = null;
   off.shotProfile = null;
   off.facing = Math.PI; // toward the rim
@@ -254,6 +256,7 @@ function setupCheckball(state: MatchState, offense: Side): void {
   def.state = 'idle';
   def.stagger = 0;
   def.staggerTimer = 0;
+  def.reboundLock = 0;
   def.facing = 0;
 
   const ball = state.ball;
@@ -422,6 +425,7 @@ function updatePlayer(state: MatchState, side: Side, input: PlayerInput, dt: num
   }
   p.comboTimer = Math.max(0, p.comboTimer - dt);
   if (p.comboTimer <= 0) p.comboCount = 0;
+  p.reboundLock = Math.max(0, p.reboundLock - dt);
 
   if (p.staggerTimer > 0) {
     p.staggerTimer -= dt;
@@ -951,6 +955,8 @@ function tryFumble(state: MatchState, side: Side, def: DribbleMoveDef, rng: Rng)
   const ball = state.ball;
   const away = normalize(p.moveDirX || rng.range(-1, 1), p.moveDirZ || rng.range(-1, 1));
   ball.state = 'loose';
+  // Off a hand, not off the iron: live the instant it gets away.
+  ball.settled = true;
   ball.owner = null;
   ball.shotBy = null;
   const power = rng.range(7, 13);
@@ -1465,6 +1471,14 @@ function slamDunk(state: MatchState, side: Side, rng: Rng): void {
     p.dunk = null;
     p.state = 'airborne';
     p.vy = 1.2;
+    if (!flight.made) {
+      // You do not rebound your own missed dunk out of the air. You are at the
+      // top of a jump with your momentum going through the rim and your back
+      // to the floor — by the time you come down and turn around, the ball has
+      // already kicked out of the paint. Roughly the fall plus the landing:
+      // long enough that the board is a race, short enough that you are in it.
+      p.reboundLock = 0.85;
+    }
   }
 }
 
@@ -1599,6 +1613,7 @@ function tryBlock(state: MatchState, defSide: Side, offSide: Side, rng: Rng, atR
     changePossession(state, defSide, 'block');
   } else {
     ball.state = 'loose';
+    ball.settled = true;
     ball.owner = null;
     ball.x = p.x;
     ball.z = p.z;
@@ -1741,18 +1756,31 @@ function updateBall(state: MatchState, dt: number, rng: Rng): void {
         state.events.push({ type: 'miss', side: ball.shotBy as Side });
         changePossession(state, other(ball.shotBy as Side), 'miss');
       } else if (ball.shotBy !== null && isDunkShot(state.players[ball.shotBy].shotType) && !state.config.instantInbound) {
-        // A missed dunk does not roll off gently — it clangs off the iron and
-        // goes straight up, and comes down as a live ball.
-        const off = normalize(ball.x - COURT.rimX + rng.range(-0.5, 0.5), ball.z - COURT.rimZ + rng.range(-0.5, 0.5));
+        // A missed dunk is thrown at the rim, not laid on it: it hammers off
+        // the iron and goes flying — high, and a long way out. The kick is the
+        // dunker's own approach line reversed and swung to one side, so the
+        // ball leaves the paint behind him instead of dropping back into the
+        // hands of the man who just missed it. Where it comes down is a race.
+        const shooter = state.players[ball.shotBy as Side];
+        const approach = normalize(COURT.rimX - shooter.shotFromX, COURT.rimZ - shooter.shotFromZ);
+        const swing = rng.range(-1.15, 1.15);
+        const cos = Math.cos(swing);
+        const sin = Math.sin(swing);
+        const off = {
+          x: -(approach.x * cos - approach.z * sin),
+          z: -(approach.x * sin + approach.z * cos),
+        };
+        const power = rng.range(8, 14);
         ball.state = 'loose';
-        ball.x = COURT.rimX + off.x * 0.7;
-        ball.z = COURT.rimZ + off.z * 0.7;
-        ball.y = COURT.rimY;
-        ball.vx = off.x * rng.range(3, 7);
-        ball.vz = off.z * rng.range(3, 7);
-        ball.vy = rng.range(14, 19);
+        ball.settled = false;
+        ball.x = COURT.rimX + off.x * 0.85;
+        ball.z = COURT.rimZ + off.z * 0.85;
+        ball.y = COURT.rimY + 0.35;
+        ball.vx = off.x * power;
+        ball.vz = off.z * power;
+        ball.vy = rng.range(13, 18);
         state.events.push({ type: 'miss', side: ball.shotBy as Side });
-        state.players[ball.shotBy as Side].makeStreak = 0;
+        shooter.makeStreak = 0;
       } else if (state.config.instantInbound) {
         // Practice: the ball is back in your hands the moment it misses. There
         // is no drill in chasing a carom across an empty gym.
@@ -1765,6 +1793,7 @@ function updateBall(state: MatchState, dt: number, rng: Rng): void {
         // to the rim so long misses bounce long.
         const off = normalize(ball.x - COURT.rimX + rng.range(-0.4, 0.4), ball.z - COURT.rimZ + rng.range(-0.4, 0.4));
         ball.state = 'loose';
+        ball.settled = false;
         ball.x = COURT.rimX + off.x * 0.9;
         ball.z = COURT.rimZ + off.z * 0.9;
         ball.y = COURT.rimY - 0.4;
@@ -1788,6 +1817,10 @@ function updateBall(state: MatchState, dt: number, rng: Rng): void {
     ball.x += ball.vx * dt;
     ball.z += ball.vz * dt;
     ball.y += ball.vy * dt;
+    // A carom is nobody's while it is still climbing off the iron above the
+    // rim. It becomes a live ball at the top of its flight — which is the
+    // moment everyone starts running to where it is going to land.
+    if (!ball.settled && (ball.vy <= 0 || ball.y <= COURT.rimY)) ball.settled = true;
     if (ball.y <= 0.4) {
       ball.y = 0.4;
       ball.vy = Math.abs(ball.vy) * 0.62;
@@ -1911,10 +1944,12 @@ function placeHeldBall(state: MatchState, p: SimPlayer, ball: Ball): void {
 
 function tryCollect(state: MatchState, rng: Rng): void {
   const ball = state.ball;
+  if (!ball.settled) return;
   const candidates: { side: Side; weight: number }[] = [];
 
   for (const side of [0, 1] as Side[]) {
     const p = state.players[side];
+    if (p.reboundLock > 0) continue;
     const dist = Math.hypot(ball.x - p.x, ball.z - p.z);
     const boardBadge = badgeLevel(p.cfg.badges, 'reboundChaser');
     // Chasing your own miss is an offensive board; everything else is defensive.
@@ -2198,6 +2233,7 @@ function updateFreeThrow(state: MatchState, inputs: [PlayerInput, PlayerInput], 
     state.shotClock = state.config.shotClock;
     const ball = state.ball;
     ball.state = 'loose';
+    ball.settled = false;
     ball.owner = null;
     ball.shotBy = ft.side;
     ball.x = COURT.rimX + rng.range(-1, 1);

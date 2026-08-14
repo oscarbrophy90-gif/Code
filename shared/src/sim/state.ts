@@ -205,6 +205,12 @@ export interface SimPlayer {
   /** 0..1, 1 = fully broken down */
   stagger: number;
   staggerTimer: number;
+  /**
+   * Seconds this player is out of the rebound. A missed dunk sets it: you are
+   * ten feet up with your momentum going through the rim, and you do not turn
+   * in mid-air and catch your own clang.
+   */
+  reboundLock: number;
   /** shot in flight from this player */
   shotElapsed: number;
   shotProfile: ShotProfile | null;
@@ -281,7 +287,12 @@ export interface Ball {
   toY: number;
   toZ: number;
   apex: number;
-  /** true once the ball has passed the rim plane and can be rebounded */
+  /**
+   * True once a loose ball can actually be gathered. A ball still climbing off
+   * the iron is nobody's yet — it goes up before it comes down, and the
+   * rebound is the race to where it lands. Balls that come loose off a hand
+   * (a strip, a swat) are live immediately.
+   */
   settled: boolean;
 }
 
