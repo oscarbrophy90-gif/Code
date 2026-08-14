@@ -469,7 +469,18 @@ export class PlayerRenderer {
       // the arm reads as loaded rather than as a straight wire.
       if (gripPoints && raise > 1.2) {
         const shoulderPt = sign < 0 ? tl : tr;
-        hand = { ...hand, x: gripPoints[i].x, y: gripPoints[i].y };
+        // The pin fades in over the catch — the same 0.16s the sim uses to
+        // swing the body under the rim — so the hands travel to the iron with
+        // the arms instead of snapping there in one frame, which was the
+        // glitch you could see at the start of every hang.
+        const catchT = p.dunk
+          ? Math.max(0, Math.min(1, (p.dunk.hang - p.stateTimer) / 0.16))
+          : 1;
+        hand = {
+          ...hand,
+          x: hand.x + (gripPoints[i].x - hand.x) * catchT,
+          y: hand.y + (gripPoints[i].y - hand.y) * catchT,
+        };
         elbow = {
           ...elbow,
           x: shoulderPt.x + (hand.x - shoulderPt.x) * 0.62 + sign * s * 0.16,
@@ -485,7 +496,7 @@ export class PlayerRenderer {
       ctx.stroke();
       // Fingers curled over the iron: a short hook past the grip point, drawn
       // in skin so it reads as a hand holding the rim rather than touching it.
-      if (gripPoints && raise > 1.2) {
+      if (gripPoints && raise > 1.2 && (!p.dunk || p.dunk.hang - p.stateTimer > 0.14)) {
         ctx.strokeStyle = armColor(sign);
         ctx.lineWidth = lineW * 0.6;
         ctx.beginPath();

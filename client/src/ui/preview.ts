@@ -9,7 +9,7 @@ import {
 import { store } from '../state/store.ts';
 import { el, overlay } from './dom.ts';
 import { AvatarRenderer, livePreview } from './avatar.ts';
-import { drawDunkFrame } from './dunkscene.ts';
+import { mountDunkPreview } from './dunkpreview.ts';
 
 /**
  * "Try before you buy". Every category gets a preview that shows the thing
@@ -161,20 +161,10 @@ function dunkAnimationPreview(item: StoreItem): HTMLElement {
   const cfg = store.simConfig();
   const packageId = item.id.replace('dunk-', '');
   const pkg = DUNK_PACKAGE_BY_ID[packageId];
-  const start = performance.now();
-  let raf = 0;
-
-  const frame = (now: number) => {
-    if (!canvas.isConnected) {
-      cancelAnimationFrame(raf);
-      return;
-    }
-    const ctx = canvas.getContext('2d');
-    const t = ((now - start) / 2600) % 1.18;
-    if (ctx) drawDunkFrame(ctx, canvas, { dunker: cfg, victim: null, packageId, posterized: false }, Math.min(1, t));
-    raf = requestAnimationFrame(frame);
-  };
-  raf = requestAnimationFrame(frame);
+  // The preview is the replay: your own player performs this package through
+  // the real simulation and it is drawn by the replay's own frame renderer,
+  // so what you buy is exactly what plays.
+  mountDunkPreview(canvas, cfg, packageId, false);
 
   return el(
     'div',

@@ -19,7 +19,7 @@ import { navigate, refresh } from '../../main.ts';
 import { el, fmt, panel, toast } from '../dom.ts';
 import { AvatarRenderer, livePreview } from '../avatar.ts';
 import { rankPanel, ladderStrip } from '../rankbadge.ts';
-import { drawDunkFrame } from '../dunkscene.ts';
+import { mountDunkPreview } from '../dunkpreview.ts';
 import { playCrateRoll } from '../crateroll.ts';
 import { crateCard } from '../cratecard.ts';
 import { drawItemCard } from '../itemcard.ts';
@@ -244,59 +244,37 @@ function renderCategory(category: StoreCategory): HTMLElement {
 function dunkPreview(): HTMLElement {
   const canvas = el('canvas', { class: 'dunk-preview' }) as HTMLCanvasElement;
   const cfg = store.simConfig();
-  const start = performance.now();
-  let raf = 0;
+  const packageId = store.player.loadout.dunkPackageId;
   // Two things play in a game off the same package, so both are previewable
-  // here: the clean flush, and the one with a defender under the rim wearing it.
-  let posterized = false;
-
-  // Only the jersey colours are read for the man getting dunked on, so a
-  // stand-in in contrasting kit is all the preview needs.
-  const victim = { ...cfg, name: 'Defender', jerseyPrimary: '#8c93a6', jerseySecondary: '#41485c' };
+  // here: the clean flush, and the one with a defender under the rim wearing
+  // it. Both are the real simulation performing your equipped package, drawn
+  // by the replay renderer — the preview and the game cannot disagree.
+  let stop = mountDunkPreview(canvas, cfg, packageId, false);
 
   const hint = el(
     'div',
     { class: 'hint', style: 'margin-top:6px' },
-    'Your equipped package, on a loop. This is what plays when you green a dunk.',
+    'Your equipped package, performed by your player through the real sim. This is what plays when you green a dunk.',
   );
 
   const setMode = (poster: boolean) => {
-    posterized = poster;
     normalBtn.classList.toggle('on', !poster);
     posterBtn.classList.toggle('on', poster);
+    stop();
+    stop = mountDunkPreview(canvas, cfg, packageId, poster);
     hint.textContent = poster
-      ? 'The poster finish. This is what plays when you green a dunk with a defender in front of you.'
-      : 'Your equipped package, on a loop. This is what plays when you green a dunk on an open rim.';
+      ? 'The poster: the same dunk with a defender planted in the lane. He goes down at the slam, exactly as in a game.'
+      : 'Your equipped package, performed by your player through the real sim. This is what plays when you green a dunk.';
   };
 
   const normalBtn = el('button', { class: 'btn sm on', onclick: () => setMode(false) }, 'Normal');
   const posterBtn = el('button', { class: 'btn sm', onclick: () => setMode(true) }, 'Poster');
 
-  const frame = (now: number) => {
-    if (!canvas.isConnected) {
-      cancelAnimationFrame(raf);
-      return;
-    }
-    const ctx = canvas.getContext('2d');
-    // A beat of hang at the top before it loops, so it does not feel jerky.
-    const t = ((now - start) / 2600) % 1.18;
-    if (ctx) {
-      drawDunkFrame(ctx, canvas, {
-        dunker: cfg,
-        victim: posterized ? victim : null,
-        packageId: store.player.loadout.dunkPackageId,
-        posterized,
-      }, Math.min(1, t));
-    }
-    raf = requestAnimationFrame(frame);
-  };
-  raf = requestAnimationFrame(frame);
-
   return el(
     'div',
-    { style: 'margin-bottom:10px' },
+    { style: 'margin-bottom:12px' },
     canvas,
-    el('div', { style: 'display:flex;gap:6px;margin-top:8px' }, normalBtn, posterBtn),
+    el('div', { class: 'row', style: 'gap:6px;margin-top:8px' }, normalBtn, posterBtn),
     hint,
   );
 }

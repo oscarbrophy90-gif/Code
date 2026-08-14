@@ -442,7 +442,14 @@ export class CourtRenderer {
   }
 
   /** Backboard, rim and net, drawn after the floor and before the players. */
-  drawHoop(ctx: CanvasRenderingContext2D, cam: Camera, park: ParkDef, netSwing: number): void {
+  /**
+   * `rimBend`, 0..1, tips the rim down at the front the way a slam does. The
+   * hinge is the attachment at the backboard — the back of the iron barely
+   * moves and the front dips over half a foot at full bend — and the net
+   * follows its own rim points down, so a power slam visibly bends the whole
+   * assembly rather than shaking the screen and leaving the hoop rigid.
+   */
+  drawHoop(ctx: CanvasRenderingContext2D, cam: Camera, park: ParkDef, netSwing: number, rimBend = 0): void {
     const bbHalf = COURT.backboardWidth / 2;
     const zb = COURT.backboardZ;
     const yTop = COURT.backboardBottomY + COURT.backboardHeight;
@@ -499,13 +506,19 @@ export class CourtRenderer {
       ctx.stroke();
     }
 
-    // Rim.
+    // Rim. Hinged at the back: how far a point dips under bend scales with how
+    // far it sits from the backboard attachment.
+    const bendDip = (z: number): number => {
+      if (rimBend <= 0) return 0;
+      const frontness = clamp01((z - (COURT.rimZ - COURT.rimRadius)) / (COURT.rimRadius * 2));
+      return rimBend * (0.06 + 0.5 * frontness);
+    };
     const rimPts = circle(COURT.rimX, COURT.rimZ, COURT.rimRadius, 26);
     ctx.beginPath();
     let started = false;
     let scale = 0;
     for (const [x, z] of rimPts) {
-      const p = cam.project(x, COURT.rimY, z);
+      const p = cam.project(x, COURT.rimY - bendDip(z), z);
       if (p.depth <= 0) continue;
       scale = p.scale;
       if (!started) {
@@ -529,10 +542,10 @@ export class CourtRenderer {
       const rz = COURT.rimZ + Math.sin(a) * COURT.rimRadius;
       const swayX = Math.cos(a) * netSwing * 0.35;
       const swayZ = Math.sin(a) * netSwing * 0.35;
-      const p1 = cam.project(rx, COURT.rimY, rz);
+      const p1 = cam.project(rx, COURT.rimY - bendDip(rz), rz);
       const p2 = cam.project(
         COURT.rimX + (rx - COURT.rimX) * 0.55 + swayX,
-        COURT.rimY - 1.35 - netSwing * 0.2,
+        COURT.rimY - bendDip(rz) - 1.35 - netSwing * 0.2,
         COURT.rimZ + (rz - COURT.rimZ) * 0.55 + swayZ,
       );
       if (p1.depth <= 0 || p2.depth <= 0) continue;
@@ -542,6 +555,10 @@ export class CourtRenderer {
       ctx.stroke();
     }
   }
+}
+
+function clamp01(v: number): number {
+  return Math.max(0, Math.min(1, v));
 }
 
 // ------------------------------------------------------------------ geometry

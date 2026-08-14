@@ -103,6 +103,9 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
 
   const cam = new Camera();
   const replayBuffer: ReplayFrame[] = [];
+  // Seconds since the last slam hit the iron; drives the rim's spring-back.
+  let slamAge = Infinity;
+  let slamPower = 0;
 
   // Test rig, only alive when the page was opened with ?dunkdebug: parks the
   // local player on a runway to the rim with the ball so an automated browser
@@ -523,6 +526,8 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
           const p = state.players[e.side];
           audio.play('dunk');
           shake = 1;
+          slamAge = 0;
+          slamPower = 1;
           hud.push('POSTER!', '#ff7a3d', p.x, p.z, true);
           break;
         }
@@ -563,6 +568,8 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
         case 'dunk':
           audio.play('dunk');
           shake = Math.min(1, shake + 0.5);
+          slamAge = 0;
+          slamPower = 0.8;
           break;
         case 'rebound': {
           const p = state.players[e.side];
@@ -609,7 +616,14 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
 
     courtRenderer.drawBackdrop(ctx, park, width, height, state.time);
     courtRenderer.drawCourt(ctx, cam, park, courtColor, surface);
-    courtRenderer.drawHoop(ctx, cam, park, netSwing);
+    // The rim: a slam snaps it down and it springs back with a damped
+    // oscillation; a body hanging off it holds it pulled down until they let
+    // go. A power slam is the rim moving, not the screen shaking.
+    slamAge += dt;
+    const spring = slamPower * Math.exp(-3.4 * slamAge) * Math.abs(Math.cos(slamAge * 9));
+    const hanging = state.players.some((pp) => pp.state === 'rimHang');
+    const rimBend = Math.max(spring, hanging ? 0.5 : 0);
+    courtRenderer.drawHoop(ctx, cam, park, netSwing, rimBend);
 
     // Shadows first so nobody's shadow lands on a body.
     for (const p of state.players) {

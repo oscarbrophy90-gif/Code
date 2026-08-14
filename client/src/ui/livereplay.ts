@@ -88,6 +88,66 @@ export function cutToDunk(frames: ReplayFrame[], side: Side): ReplayFrame[] {
   return frames.slice(start);
 }
 
+export interface FrameDrawOptions {
+  park: ParkDef;
+  courtColor: string | null;
+  surface: CourtSurface | null;
+  width: number;
+  height: number;
+  rimBend: number;
+}
+
+/**
+ * One recorded frame, drawn exactly the way the live game draws a frame:
+ * backdrop, court, hoop (with whatever the slam is doing to the rim), shadows,
+ * then players and ball in depth order. The in-game replay and the package
+ * previews both call this, which is what keeps "the preview shows the same
+ * thing as the replay" true by construction.
+ */
+export function drawReplayFrame(
+  ctx: CanvasRenderingContext2D,
+  cam: Camera,
+  courtRenderer: CourtRenderer,
+  playerRenderer: PlayerRenderer,
+  frame: ReplayFrame,
+  opts: FrameDrawOptions,
+): void {
+  courtRenderer.drawBackdrop(ctx, opts.park, opts.width, opts.height, frame.time);
+  courtRenderer.drawCourt(ctx, cam, opts.park, opts.courtColor, opts.surface);
+  courtRenderer.drawHoop(ctx, cam, opts.park, 0, opts.rimBend);
+
+  for (const p of frame.players) playerRenderer.drawShadow(ctx, cam, p.x, p.z, p.y, 1.05);
+  const drawables: { z: number; draw: () => void }[] = [
+    ...frame.players.map((p) => ({
+      z: p.z,
+      draw: () => playerRenderer.draw(ctx, cam, p, frame.time, false, frame.ball.owner === p.side),
+    })),
+    { z: frame.ball.z, draw: () => playerRenderer.drawBall(ctx, cam, frame.ball, frame.time) },
+  ];
+  drawables.sort((a, b) => a.z - b.z);
+  for (const d of drawables) d.draw();
+}
+
+/**
+ * What the slam is doing to the rim at a point in a recording: nothing until
+ * the slam, then a damped spring, held down while somebody is hanging on it.
+ * Time comes from the recorded sim clock, so slow motion slows the spring too.
+ */
+export function replayRimBend(frames: ReplayFrame[], idx: number, side: Side): number {
+  let slamIdx = -1;
+  for (let i = 0; i <= idx; i++) {
+    if (frames[i].players[side].state === 'rimHang') {
+      slamIdx = i;
+      break;
+    }
+  }
+  if (slamIdx < 0) return 0;
+  const since = frames[idx].time - frames[slamIdx].time;
+  const spring = Math.exp(-3.4 * since) * Math.abs(Math.cos(since * 9));
+  const hanging = frames[idx].players[side].state === 'rimHang';
+  return Math.max(spring, hanging ? 0.5 : 0);
+}
+
 export function playLiveReplay(host: HTMLElement, opts: LiveReplayOptions): Promise<void> {
   const frames = cutToDunk(opts.frames, opts.side);
   if (frames.length < 12) return Promise.resolve();
@@ -168,12 +228,15 @@ export function playLiveReplay(host: HTMLElement, opts: LiveReplayOptions): Prom
 
     const draw = (now: number) => {
       if (done) return;
-      const dt = Math.min(0.05, (now - lastNow) / 1000);
+      // Floored at zero: a rAF timestamp is the frame's vsync time and the very
+    // first one can predate the performance.now() taken at mount, and a
+    // negative dt walked the pointer to frames[-1].
+    const dt = Math.max(0, Math.min(0.05, (now - lastNow) / 1000));
       lastNow = now;
 
       const idx = Math.min(frames.length - 1, Math.floor(pointer));
       const frameDt = idx + 1 < frames.length ? Math.max(1 / 240, frames[idx + 1].time - frames[idx].time) : 1 / 60;
-      pointer += (dt * rate(idx)) / frameDt;
+      pointer = Math.max(0, pointer + (dt * rate(idx)) / frameDt);
 
       if (pointer >= frames.length - 1) {
         pointer = frames.length - 1;
@@ -184,7 +247,7 @@ export function playLiveReplay(host: HTMLElement, opts: LiveReplayOptions): Prom
         }
       }
 
-      const frame = frames[Math.min(frames.length - 1, Math.floor(pointer))];
+      const frame = frames[Math.max(0, Math.min(frames.length - 1, Math.floor(pointer)))];
       const dunker = frame.players[opts.side];
 
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -208,20 +271,14 @@ export function playLiveReplay(host: HTMLElement, opts: LiveReplayOptions): Prom
       };
       cam.update(width, height);
 
-      courtRenderer.drawBackdrop(ctx, opts.park, width, height, frame.time);
-      courtRenderer.drawCourt(ctx, cam, opts.park, opts.courtColor, opts.surface);
-      courtRenderer.drawHoop(ctx, cam, opts.park, 0);
-
-      for (const p of frame.players) playerRenderer.drawShadow(ctx, cam, p.x, p.z, p.y, 1.05);
-      const drawables: { z: number; draw: () => void }[] = [
-        ...frame.players.map((p) => ({
-          z: p.z,
-          draw: () => playerRenderer.draw(ctx, cam, p, frame.time, false, frame.ball.owner === p.side),
-        })),
-        { z: frame.ball.z, draw: () => playerRenderer.drawBall(ctx, cam, frame.ball, frame.time) },
-      ];
-      drawables.sort((a, b) => a.z - b.z);
-      for (const d of drawables) d.draw();
+      drawReplayFrame(ctx, cam, courtRenderer, playerRenderer, frame, {
+        park: opts.park,
+        courtColor: opts.courtColor,
+        surface: opts.surface,
+        width,
+        height,
+        rimBend: replayRimBend(frames, Math.max(0, Math.min(frames.length - 1, Math.floor(pointer))), opts.side),
+      });
 
       // Letterbox, which is most of what "this is a replay" reads as.
       ctx.fillStyle = 'rgba(4, 5, 9, 0.92)';
