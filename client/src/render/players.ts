@@ -1,5 +1,6 @@
 import { COURT, EMOTE_DURATION, STEAL_TIME, THREE_CELEBRATION_TIME, WIN_CELEBRATION_TIME, SKIN_TONES, type Appearance, type Ball, type MatchState, type SimPlayer } from '@hoops/shared';
 import { emotePose, type EmotePose } from './emotes.ts';
+import { dunkFlightPose, dunkHangPose } from './dunkstyle.ts';
 import type { Camera } from '../engine/camera.ts';
 import { hexA, mix } from './court.ts';
 import { drawInk, inkedAt, tattooLook, type InkSpot } from './tattoos.ts';
@@ -118,7 +119,35 @@ export class PlayerRenderer {
         crouch = 0.22 * (1 - t);
         break;
       }
-      case 'finishing':
+      case 'finishing': {
+        // A live dunk plays its package's own choreography — the same style
+        // the replay uses, so what you perform is what you rewatch. A layup
+        // finish (no flight object) keeps the plain reach.
+        if (p.dunk) {
+          const t = p.dunk.duration > 0 ? 1 - p.stateTimer / p.dunk.duration : 1;
+          armPose = dunkFlightPose(p.dunk.packageId, t);
+          crouch = armPose.crouch;
+          poseLean = armPose.lean;
+          bob = armPose.bob;
+        } else {
+          armLift = 1.25;
+        }
+        break;
+      }
+      case 'rimHang': {
+        // Hanging off the iron. The pose swings with the leftover violence of
+        // the slam and settles as the timer runs down.
+        if (p.dunk) {
+          const remaining = p.dunk.hang > 0 ? p.stateTimer / p.dunk.hang : 0;
+          armPose = dunkHangPose(p.dunk.packageId, remaining, time);
+          crouch = armPose.crouch;
+          poseLean = armPose.lean;
+          bob = armPose.bob;
+        } else {
+          armLift = 1.5;
+        }
+        break;
+      }
       case 'airborne':
         armLift = 1.25;
         break;

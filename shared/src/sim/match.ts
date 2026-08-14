@@ -9,7 +9,7 @@ import {
   type ShotType,
 } from '../shooting.ts';
 import { COURT, clampToCourt, distanceToRim, isBeyondArc, shotValue } from './court.ts';
-import { MOVE_BY_ID, DUNK_PACKAGE_BY_ID, type DribbleMoveDef, type DribbleMoveId } from './moves.ts';
+import { MOVE_BY_ID, DUNK_PACKAGE_BY_ID, dunkHangTime, type DribbleMoveDef, type DribbleMoveId } from './moves.ts';
 import {
   emptyStats,
   type Ball,
@@ -123,6 +123,7 @@ export function makePlayer(side: Side, cfg: SimPlayerConfig): SimPlayer {
     shotElapsed: 0,
     shotProfile: null,
     shotType: 'jumper',
+    dunk: null,
     shotFromX: 0,
     shotFromZ: 0,
     shotIsThree: false,
@@ -320,7 +321,7 @@ export function stepMatch(state: MatchState, inputs: [PlayerInput, PlayerInput],
 
   // A shot already in the air beats the buzzer.
   const handler = state.players[state.possession];
-  const shotUnderway = handler.state === 'shooting' || handler.state === 'finishing';
+  const shotUnderway = handler.state === 'shooting' || handler.state === 'finishing' || handler.state === 'rimHang';
   if (live && state.shotClock <= 0 && state.ball.state === 'held' && !shotUnderway) {
     turnover(state, state.possession, 'shotClock');
   }
@@ -439,7 +440,10 @@ function updatePlayer(state: MatchState, side: Side, input: PlayerInput, dt: num
   }
 
   // Vertical ---------------------------------------------------------------
-  if (p.y > 0 || p.vy > 0) {
+  // A dunk flight and a rim hang own their own height — gravity would drag the
+  // dunker off the designed arc and off the iron.
+  const choreographed = (p.state === 'finishing' || p.state === 'rimHang') && p.dunk !== null;
+  if (!choreographed && (p.y > 0 || p.vy > 0)) {
     p.vy -= GRAVITY * dt;
     p.y += p.vy * dt;
     if (p.y <= 0) {
@@ -467,9 +471,68 @@ function updatePlayer(state: MatchState, side: Side, input: PlayerInput, dt: num
   }
 
   if (p.state === 'finishing') {
-    p.stateTimer -= 0;
+    const flight = p.dunk;
+    if (!flight) {
+      // A finishing state with no flight is a stale save of the old system;
+      // put the player down rather than holding them in the air forever.
+      p.state = 'airborne';
+      return;
+    }
+    // Where along the flight this frame is. stateTimer was already ticked at
+    // the top of updatePlayer, so t hits exactly 1 on the slam frame.
+    const t = clamp01(1 - p.stateTimer / flight.duration);
+    // The ground track eases in and out; the climb front-loads so the body is
+    // already up at half-flight and the last stretch is at the iron — rising
+    // through the whole approach is what makes it read as one jump rather
+    // than a lift.
+    const ease = t * t * (3 - 2 * t);
+    const prevX = p.x;
+    const prevZ = p.z;
+    p.x = lerp(flight.fromX, flight.toX, ease);
+    p.z = lerp(flight.fromZ, flight.toZ, ease);
+    p.y = flight.slamY * Math.sin(Math.min(1, t * 1.06) * Math.PI * 0.5);
+    // Velocity mirrors the motion so the renderer's lean and the camera read
+    // the drive rather than seeing a stationary figure being carried.
+    if (dt > 0) {
+      p.vx = (p.x - prevX) / dt;
+      p.vz = (p.z - prevZ) / dt;
+    }
+    p.facing = Math.atan2(-(COURT.rimX - p.x), COURT.rimZ - p.z);
+
     if (p.stateTimer <= 0) {
-      completeFinish(state, side, rng);
+      slamDunk(state, side, rng);
+    }
+    return;
+  }
+
+  if (p.state === 'rimHang') {
+    const flight = p.dunk;
+    // Hands on the iron: pinned under the rim with a slight settling sway that
+    // decays, so the hang reads as weight rather than as a freeze-frame.
+    if (flight) {
+      const settle = clamp01(p.stateTimer / Math.max(0.01, flight.hang));
+      p.x = flight.toX;
+      p.z = flight.toZ;
+      p.y = flight.slamY * 0.82 + Math.sin(state.time * 7) * 0.06 * settle;
+      p.vx = 0;
+      p.vz = 0;
+    }
+    if (p.stateTimer <= 0) {
+      // Let go. The drop is plain gravity from hang height, and this is also
+      // the moment the replay is cued — after the live dunk, never instead of
+      // it.
+      if (flight) {
+        state.events.push({
+          type: 'dunkHighlight',
+          side,
+          packageId: flight.packageId,
+          posterized: flight.poster,
+          value: flight.value,
+        });
+      }
+      p.dunk = null;
+      p.state = 'airborne';
+      p.vy = 0;
     }
     return;
   }
@@ -1105,6 +1168,8 @@ function buildShotProfile(state: MatchState, side: Side, shotType: ShotType): Sh
 function startShot(state: MatchState, side: Side, shotType: ShotType): void {
   const p = state.players[side];
   p.state = 'shooting';
+  // A flight from a previous dunk must never leak into a new shot.
+  p.dunk = null;
   p.shotElapsed = 0;
   p.shotType = shotType;
   p.shotFromX = p.x;
@@ -1157,40 +1222,28 @@ function releaseShot(state: MatchState, side: Side, rng: Rng): void {
     shotType: p.shotType,
   });
 
-  // A greened dunk earns the cutaway. A poster is one taken over a body.
+  // A dunk does not launch like a jumper: the release starts the flight, the
+  // player carries the ball to the iron, and the slam happens at the rim in
+  // live play. The poster fall, the rim hang and the replay all key off the
+  // slam rather than off this release — see startDunkFlight and slamDunk.
   const isDunk = p.shotType === 'dunk' || p.shotType === 'contactDunk';
-  if (isDunk && result.made && isAutomatic(result.grade)) {
-    // What makes it a poster is that somebody was actually in the way — close,
-    // and between you and the rim when you went up. It used to also require the
-    // defender to have left his feet, so a man standing his ground under the
-    // basket got you the ordinary animation: measured at 0% posters against a
-    // defender planted directly in your path. Standing there and wearing it is
-    // the most posterisable thing in basketball.
-    const dx = d.x - p.shotFromX;
-    const dz = d.z - p.shotFromZ;
-    const defDist = Math.hypot(dx, dz);
-    const toRim = normalize(COURT.rimX - p.shotFromX, COURT.rimZ - p.shotFromZ);
-    const inFront = defDist > 0.01 ? (toRim.x * dx + toRim.z * dz) / defDist : 1;
-    const inTheWay = defDist < 6.5 && inFront > 0.2;
-    const posterized = p.shotType === 'contactDunk' || inTheWay || (profile.heavilyContested && d.y > 0.3);
-    if (posterized) {
-      state.stats[side].contactDunks++;
-      awardBadgeProgress(p.cfg.badges, p.cfg.attrs, 'contactDunk', 2);
+  if (isDunk) {
+    const emphatic = result.made && isAutomatic(result.grade);
+    if (emphatic && p.shotType !== 'contactDunk') {
+      // A green over a body still counts the contact even without the badge
+      // roll — standing there and wearing it is what a poster is.
+      const dx = d.x - p.shotFromX;
+      const dz = d.z - p.shotFromZ;
+      const defDist = Math.hypot(dx, dz);
+      const toRim = normalize(COURT.rimX - p.shotFromX, COURT.rimZ - p.shotFromZ);
+      const inFront = defDist > 0.01 ? (toRim.x * dx + toRim.z * dz) / defDist : 1;
+      if (defDist < 6.5 && inFront > 0.2) {
+        state.stats[side].contactDunks++;
+        awardBadgeProgress(p.cfg.badges, p.cfg.attrs, 'contactDunk', 2);
+      }
     }
-    state.events.push({
-      type: 'dunkHighlight',
-      side,
-      packageId: p.cfg.dunkPackageId,
-      posterized,
-      value,
-    });
-    if (posterized) {
-      // Being posterised is its own punishment: you land badly.
-      d.state = 'fallen';
-      d.stateTimer = 1.2;
-      d.staggerTimer = 1.2;
-      d.stagger = 1;
-    }
+    startDunkFlight(state, side, result.made, emphatic, value, rng);
+    // Badge feed still runs below; the launch is the flight's job now.
   }
 
   // Badge feed.
@@ -1216,8 +1269,10 @@ function releaseShot(state: MatchState, side: Side, rng: Rng): void {
     awardBadgeProgress(d.cfg.badges, d.cfg.attrs, distanceToRim(p.x, p.z) < 9 ? 'rimContest' : 'smother', 1);
   }
 
-  launchBall(state, side, result.made, value, result.timingError, rng);
-  state.ball.shotGrade = result.grade;
+  if (!isDunk) {
+    launchBall(state, side, result.made, value, result.timingError, rng);
+    state.ball.shotGrade = result.grade;
+  }
 }
 
 
@@ -1270,6 +1325,133 @@ function launchBall(
 
 // ------------------------------------------------------------------ finishes
 
+/**
+ * Puts a dunk in the air.
+ *
+ * Everything after this is choreography: the result is already decided (the
+ * meter graded it, or the AI's takeoff roll came up) and the flight shows it.
+ * The player is carried from where they left the ground to the front of the
+ * rim with the ball in hand — no more jumping straight up on the spot while
+ * the ball flies to the basket by itself, which is what "the dunks feel
+ * glitchy" actually was.
+ */
+function startDunkFlight(
+  state: MatchState,
+  side: Side,
+  made: boolean,
+  emphatic: boolean,
+  value: 1 | 2,
+  rng: Rng,
+): void {
+  const p = state.players[side];
+  const d = state.players[other(side)];
+  const pkg = DUNK_PACKAGE_BY_ID[p.cfg.dunkPackageId] ?? DUNK_PACKAGE_BY_ID['basic-slam'];
+
+  // Land the feet a step in front of the iron, coming in along the line you
+  // took off on — so a baseline drive slams from the baseline side.
+  const approach = normalize(COURT.rimX - p.x, COURT.rimZ - p.z);
+  const toX = COURT.rimX - approach.x * 1.15;
+  const toZ = COURT.rimZ - approach.z * 1.15;
+
+  // Hands over the iron at the slam: feet high enough that standing reach plus
+  // a raised arm clears 10 feet, with the build's vertical adding style height.
+  const standingReach = (p.cfg.heightIn / 12) * 1.32 + (p.cfg.wingspanIn - p.cfg.heightIn) / 12;
+  const slamY = Math.max(2.1, COURT.rimY + 0.4 - standingReach - 1.1 + jumpHeight(p) * 0.18);
+
+  // A poster is a dunk taken with somebody actually in the way — close, and
+  // between you and the rim when you went up.
+  const dx = d.x - p.x;
+  const dz = d.z - p.z;
+  const defDist = Math.hypot(dx, dz);
+  const inFront = defDist > 0.01 ? (approach.x * dx + approach.z * dz) / defDist : 1;
+  const poster = made && emphatic && (p.shotType === 'contactDunk' || (defDist < 6.5 && inFront > 0.2));
+
+  p.state = 'finishing';
+  p.dunk = {
+    fromX: p.x,
+    fromZ: p.z,
+    toX,
+    toZ,
+    slamY,
+    duration: Math.max(0.45, Math.min(1.1, pkg.duration * 0.72)),
+    made,
+    emphatic,
+    poster,
+    value,
+    hang: dunkHangTime(pkg),
+    packageId: p.cfg.dunkPackageId,
+  };
+  p.stateTimer = p.dunk.duration;
+  p.shotFromX = p.x;
+  p.shotFromZ = p.z;
+  p.vy = 0;
+  p.y = Math.max(p.y, 0.001);
+
+  // The ball rides in the dunker's hand for the whole flight.
+  state.ball.state = 'dunking';
+  state.ball.owner = side;
+  void rng;
+}
+
+/**
+ * The slam, at the end of the flight.
+ *
+ * The ball goes through (or off) the iron here, the defender who got taken
+ * through eats the floor here, and an emphatic make hangs on the rim from here.
+ * All three at the same instant, because the contact, the make and the fall
+ * are one moment — the fall reading half a second before the ball was even at
+ * the rim was most of what made posters look broken.
+ */
+function slamDunk(state: MatchState, side: Side, rng: Rng): void {
+  const p = state.players[side];
+  const d = state.players[other(side)];
+  const flight = p.dunk;
+  if (!flight) {
+    p.state = 'airborne';
+    return;
+  }
+
+  const contact = p.shotType === 'contactDunk';
+  state.events.push(contact ? { type: 'contactDunk', side } : { type: 'dunk', side });
+
+  // Through the net (or off the iron) from the slam point, not from wherever
+  // the shot started — a 0.12s drop instead of a 0.34s flight from nowhere.
+  state.ball.state = 'held';
+  launchBall(state, side, flight.made, flight.value, 0, rng);
+  state.ball.flightDuration = 0.12;
+  state.ball.shotGrade = flight.made ? 'green' : 'late';
+
+  if (flight.poster) {
+    // Taken through, and down. The fall lasts long enough to still be on the
+    // floor when the dunker lets go of the rim — the picture the whole poster
+    // system exists for.
+    d.state = 'fallen';
+    d.stateTimer = Math.max(1.4, flight.hang + 0.9);
+    d.staggerTimer = d.stateTimer;
+    d.stagger = 1;
+    d.vx = 0;
+    d.vz = 0;
+    d.handUp = false;
+  }
+
+  if (flight.made && flight.emphatic) {
+    // Hands stay on the iron. The flight object survives into the hang so the
+    // renderer knows which package is hanging and the drop knows where from.
+    p.state = 'rimHang';
+    p.stateTimer = flight.hang;
+    p.y = flight.slamY * 0.82;
+    p.vy = 0;
+    p.vx = 0;
+    p.vz = 0;
+  } else {
+    // No hang without the finish. Down the normal way, ball clanging or
+    // dropping as the launch decided.
+    p.dunk = null;
+    p.state = 'airborne';
+    p.vy = 1.2;
+  }
+}
+
 function startFinish(state: MatchState, side: Side, rng: Rng): void {
   const p = state.players[side];
   const d = state.players[other(side)];
@@ -1296,70 +1478,56 @@ function startFinish(state: MatchState, side: Side, rng: Rng): void {
         : 0;
     const contact = contactRoll > 0 && rng.chance(clamp01((contactRoll - 0.6) * 1.8));
     p.shotType = contact ? 'contactDunk' : 'dunk';
-    p.state = 'finishing';
-    p.stateTimer = contact ? pkg.duration : pkg.duration * 0.85;
+    p.stamina = clamp01(p.stamina - 0.06 * staminaDrainMult(p));
+
+    // The whole result is decided at takeoff — block, foul, make — and the
+    // flight afterwards shows it. It used to be decided when the timer ran
+    // out, which is why a blocked "dunk" was a player who had visibly already
+    // dunked being told he had not. The jump comes first so a block meets a
+    // man in the air rather than one still standing on the floor.
+    p.state = 'airborne';
     p.vy = Math.sqrt(2 * GRAVITY * jumpHeight(p));
     p.y = 0.001;
-    p.stamina = clamp01(p.stamina - 0.06 * staminaDrainMult(p));
-    if (contact) {
-      d.staggerTimer = 0.7;
-      d.stagger = 1;
-      d.state = 'staggered';
-    }
+    if (tryBlock(state, other(side), side, rng, true)) return;
+    if (tryFoul(state, other(side), side, rng, true)) return;
+
+    const rimPressure = clamp01(1 - defDist / 6) * (d.y > 0.4 ? 1.2 : 0.75);
+    const noFear = badgeLevel(p.cfg.badges, 'noFear');
+    const base = contact ? 0.97 : 0.9;
+    const chance = clamp01(
+      base -
+        rimPressure * 0.32 * (1 - noFear * 0.5) +
+        (p.cfg.attrs.dunk - 70) / 300 +
+        badgeLevel(p.cfg.badges, 'riseUp') * 0.06,
+    );
+    const made = rng.chance(chance);
+
+    const stats = state.stats[side];
+    stats.fga++;
+    if (contact) stats.contactDunks++;
+
+    state.events.push({
+      type: 'shotRelease',
+      side,
+      grade: made ? 'green' : 'late',
+      made,
+      value: 1,
+      timingError: 0,
+      shotType: p.shotType,
+    });
+
+    awardBadgeProgress(p.cfg.badges, p.cfg.attrs, 'dunkMake', 1);
+    if (contact) awardBadgeProgress(p.cfg.badges, p.cfg.attrs, 'contactDunk', 2);
+    if (defDist < 4) awardBadgeProgress(p.cfg.badges, p.cfg.attrs, 'contestedFinish', 1.5);
+    if (d.cfg.heightIn > p.cfg.heightIn) awardBadgeProgress(p.cfg.badges, p.cfg.attrs, 'finishOverTaller', 1.5);
+
+    startDunkFlight(state, side, made, made && contact, 1, rng);
   } else {
     const euro = p.moveId === 'euro';
     startShot(state, side, euro ? 'euroLayup' : dist < 4.5 ? 'layup' : 'floater');
     return;
   }
-  p.shotFromX = p.x;
-  p.shotFromZ = p.z;
   p.shotIsThree = false;
-}
-
-function completeFinish(state: MatchState, side: Side, rng: Rng): void {
-  const p = state.players[side];
-  const d = state.players[other(side)];
-  p.state = 'airborne';
-
-  if (tryBlock(state, other(side), side, rng, true)) return;
-  if (tryFoul(state, other(side), side, rng, true)) return;
-
-  const contact = p.shotType === 'contactDunk';
-  const defDist = Math.hypot(d.x - p.x, d.z - p.z);
-  const rimPressure = clamp01(1 - defDist / 6) * (d.y > 0.4 ? 1.2 : 0.75);
-  const noFear = badgeLevel(p.cfg.badges, 'noFear');
-  const base = contact ? 0.97 : 0.9;
-  const chance = clamp01(
-    base -
-      rimPressure * 0.32 * (1 - noFear * 0.5) +
-      (p.cfg.attrs.dunk - 70) / 300 +
-      badgeLevel(p.cfg.badges, 'riseUp') * 0.06,
-  );
-  const made = rng.chance(chance);
-
-  const stats = state.stats[side];
-  stats.fga++;
-  if (contact) stats.contactDunks++;
-
-  state.events.push({
-    type: 'shotRelease',
-    side,
-    grade: made ? 'green' : 'late',
-    made,
-    value: 1,
-    timingError: 0,
-    shotType: p.shotType,
-  });
-  state.events.push(contact ? { type: 'contactDunk', side } : { type: 'dunk', side });
-
-  awardBadgeProgress(p.cfg.badges, p.cfg.attrs, 'dunkMake', 1);
-  if (contact) awardBadgeProgress(p.cfg.badges, p.cfg.attrs, 'contactDunk', 2);
-  if (defDist < 4) awardBadgeProgress(p.cfg.badges, p.cfg.attrs, 'contestedFinish', 1.5);
-  if (d.cfg.heightIn > p.cfg.heightIn) awardBadgeProgress(p.cfg.badges, p.cfg.attrs, 'finishOverTaller', 1.5);
-
-  launchBall(state, side, made, 1, 0, rng);
-  state.ball.flightDuration = 0.34;
-  state.ball.shotGrade = made ? 'green' : 'late';
 }
 
 // -------------------------------------------------------------------- blocks
@@ -1521,6 +1689,19 @@ function updateBall(state: MatchState, dt: number, rng: Rng): void {
   if (ball.state === 'held' && ball.owner !== null) {
     const p = state.players[ball.owner];
     placeHeldBall(state, p, ball);
+    ball.vx = ball.vy = ball.vz = 0;
+    return;
+  }
+
+  // Carried through a dunk flight: in the dunker's raised hand the whole way,
+  // so there is never a frame where the ball is at the rim before he is.
+  if (ball.state === 'dunking' && ball.owner !== null) {
+    const p = state.players[ball.owner];
+    const fwdX = -Math.sin(p.facing);
+    const fwdZ = Math.cos(p.facing);
+    ball.x = p.x + fwdX * 0.5;
+    ball.z = p.z + fwdZ * 0.5;
+    ball.y = reachHeight(p) * 0.97;
     ball.vx = ball.vy = ball.vz = 0;
     return;
   }
@@ -2077,7 +2258,10 @@ function returnBallTo(state: MatchState, side: Side): void {
   ball.shotWillGoIn = false;
   ball.settled = false;
   ball.vx = ball.vy = ball.vz = 0;
-  if (p.state !== 'staggered') p.state = 'dribble';
+  // A make-it-take-it inbound can hand the ball back to a player who is still
+  // hanging on the rim he just scored on. The hang finishes first — stomping
+  // it here was why the rim hang died the instant the ball dropped through.
+  if (p.state !== 'staggered' && p.state !== 'rimHang') p.state = 'dribble';
   state.possession = side;
   state.needsClear = false;
   state.shotClock = state.config.shotClock;

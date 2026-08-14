@@ -2,6 +2,7 @@ import type { AttributeKey } from '../types.ts';
 import type { StoreItem } from '../economy.ts';
 import { GENERATED_DUNKS } from '../data/catalogue.ts';
 import { PACK_DUNKS } from '../data/dunkpack.ts';
+import { PACK_DUNKS_2 } from '../data/dunkpack2.ts';
 import { RANK_DUNKS } from '../data/rankpack.ts';
 
 export type DribbleMoveId =
@@ -100,7 +101,26 @@ const CORE_DUNKS: DunkPackageDef[] = [
 ];
 
 /** The five originals, the generated rest, the pack, and the ranked rewards. */
-export const DUNK_PACKAGES: DunkPackageDef[] = [...CORE_DUNKS, ...GENERATED_DUNKS, ...PACK_DUNKS, ...RANK_DUNKS];
+export const DUNK_PACKAGES: DunkPackageDef[] = [...CORE_DUNKS, ...GENERATED_DUNKS, ...PACK_DUNKS, ...PACK_DUNKS_2, ...RANK_DUNKS];
+
+/**
+ * How long a package hangs on the iron after an emphatic make.
+ *
+ * Read off the package rather than stored on it, because a hundred-odd packs
+ * predate the field. Rarity sets the base — the top of the catalogue is sold
+ * partly on hang time — and a name that promises a hang gets one. Bounded hard:
+ * under 0.4s reads as a bounce off the rim, and past 1.6s the game is waiting
+ * on a pose.
+ */
+export function dunkHangTime(pkg: DunkPackageDef): number {
+  const rarity = pkg.rarity ?? (pkg.mythic ? 'mythic' : pkg.price > 12000 ? 'legendary' : pkg.price > 8000 ? 'epic' : pkg.price > 0 ? 'rare' : 'common');
+  let hang =
+    rarity === 'mythic' ? 1.25 : rarity === 'legendary' ? 1.05 : rarity === 'epic' ? 0.85 : rarity === 'rare' ? 0.65 : 0.5;
+  const key = `${pkg.id} ${pkg.name}`.toLowerCase();
+  if (key.includes('hang') || key.includes('finale') || key.includes('ascension')) hang += 0.35;
+  if (key.includes('quick') || key.includes('fast')) hang -= 0.15;
+  return Math.max(0.4, Math.min(1.6, hang));
+}
 
 export const DUNK_PACKAGE_BY_ID: Record<string, DunkPackageDef> = Object.fromEntries(
   DUNK_PACKAGES.map((d) => [d.id, d]),

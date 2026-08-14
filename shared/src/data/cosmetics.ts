@@ -181,7 +181,7 @@ const dunkItems: StoreItem[] = DUNK_PACKAGES.map((d) => ({
           : d.price > 8000
             ? ('epic' as const)
             : ('rare' as const)),
-  rotationOnly: d.mythic && !d.rankReward,
+  rotationOnly: (d.mythic || d.rarity === 'mythic') && !d.rankReward,
   requirement: d.rankReward ? `Reach ${d.rankReward} and finish the season` : undefined,
   colors: (d.mythic ? ['#05060a', '#ff4d8d'] : ['#ff7a3d', '#ffd23d']) as [string, string],
   description: `${d.blurb} Requires ${d.requires} Dunk / ${d.requiresVertical} Vertical.`,

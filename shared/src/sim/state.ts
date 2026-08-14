@@ -64,6 +64,7 @@ export type PlayerActState =
   | 'moveLock'
   | 'shooting'
   | 'finishing'
+  | 'rimHang'
   | 'airborne'
   | 'landing'
   | 'staggered'
@@ -72,6 +73,35 @@ export type PlayerActState =
   | 'stealing'
   | 'emoting'
   | 'celebrating';
+
+/**
+ * A dunk in flight, written at takeoff and read every frame until the landing.
+ *
+ * The result is decided before the flight starts — the meter graded the release,
+ * or the AI's takeoff roll came up — and the flight is the sim *showing* that
+ * result: the player carried from where they left the ground to the front of
+ * the rim, the ball in hand the whole way, the slam at the end. Deciding at the
+ * rim instead would put the outcome half a second after the input that earned
+ * it, which is how a dunk stops feeling like something you did.
+ */
+export interface DunkFlight {
+  fromX: number;
+  fromZ: number;
+  /** where the feet end up: just in front of the rim */
+  toX: number;
+  toZ: number;
+  /** feet height at the slam, hands over the iron */
+  slamY: number;
+  duration: number;
+  made: boolean;
+  /** made *and* green/contact — the ones that earn the hang and the replay */
+  emphatic: boolean;
+  poster: boolean;
+  value: 1 | 2;
+  /** seconds hanging on the iron after an emphatic make */
+  hang: number;
+  packageId: string;
+}
 
 /**
  * Everything the renderer needs to draw a player wearing what they own. It is
@@ -170,6 +200,8 @@ export interface SimPlayer {
   shotElapsed: number;
   shotProfile: ShotProfile | null;
   shotType: ShotType;
+  /** live dunk choreography; null except between takeoff and landing */
+  dunk: DunkFlight | null;
   shotFromX: number;
   shotFromZ: number;
   shotIsThree: boolean;

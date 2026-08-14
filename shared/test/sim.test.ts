@@ -1211,7 +1211,9 @@ test('sprinting into the rim and greening it produces a dunk highlight', () => {
 
     const hold = { ...drive, shoot: true };
     const release = 30 + attempt;
-    for (let i = 0; i < 140; i++) {
+    // The highlight cues after the live sequence — flight, slam, rim hang —
+    // rather than at the release, so the budget covers the whole performance.
+    for (let i = 0; i < 420; i++) {
       const input = i < release ? hold : { ...drive, shoot: false };
       stepMatch(state, [input, emptyInput()], SIM_DT);
       for (const e of drainEvents(state)) {
@@ -1464,7 +1466,7 @@ test('a dunk over a defender in your way is a poster, an open one is not', () =>
 
       const drive = { ...emptyInput(), mz: -1, sprint: true };
       const release = 26 + (seed % 22);
-      for (let i = 0; i < 160; i++) {
+      for (let i = 0; i < 420; i++) {
         // Hold the defender where the case under test needs him.
         if (park === 'front') {
           d.x = p.x * 0.5;
@@ -1671,7 +1673,7 @@ test('the catalogue is as deep as the shop claims', () => {
 
   // The three packs sit on top of what was already there rather than replacing
   // it, so these are originals-plus-pack totals, not the pack size.
-  assert.equal(count('dunkPackage') - ranked('dunkPackage'), 144, '50 originals plus the 94 new names');
+  assert.equal(count('dunkPackage') - ranked('dunkPackage'), 224, '50 originals plus the two packs of 94 and 80');
   assert.equal(count('title') - ranked('title'), 105, '23 originals plus the 82 new names');
   assert.equal(count('tattoo'), 108, '8 originals plus the 100 new designs');
   for (const c of ['dunkPackage', 'title', 'tattoo']) {
