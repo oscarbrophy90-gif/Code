@@ -77,12 +77,21 @@ export class Camera {
    * Frames the action: the camera drifts with the ball handler and pulls back
    * as the two players separate, the way a broadcast camera would.
    */
-  follow(focusX: number, focusZ: number, spread: number, dt: number): void {
+  follow(focusX: number, focusZ: number, spread: number, dt: number, distance = 1): void {
     // The rim is the anchor of a half-court game, so the camera only drifts
     // slightly with the ball — enough to feel alive, never enough to lose it.
+    //
+    // `distance` scales how far back the whole rig sits, from the player's
+    // camera setting. The look target stays put and the position moves away
+    // along both axes, which keeps the rim in the same part of the frame at
+    // every distance instead of drifting up the screen as you pull out.
+    // Clamped to [1, 2.2]: further out is safe at any setting, but nearer
+    // than the classic framing would put the front of the court apron behind
+    // the camera plane, which is how polygons end up smeared across the sky.
+    const d = Math.max(1, Math.min(2.2, distance));
     const targetCamX = focusX * 0.16;
-    const targetCamZ = 44 + spread * 0.34 + Math.max(0, focusZ - 20) * 0.5;
-    const targetCamY = 16.5 + spread * 0.11;
+    const targetCamZ = (44 + spread * 0.34 + Math.max(0, focusZ - 20) * 0.5) * d;
+    const targetCamY = (16.5 + spread * 0.11) * (0.55 + d * 0.45);
     const targetLookX = focusX * 0.22;
     const targetLookZ = 8 + focusZ * 0.2;
 

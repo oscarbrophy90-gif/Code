@@ -560,7 +560,7 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
     const remotePlayer = state.players[remoteSide];
     const handler = state.ball.owner !== null ? state.players[state.ball.owner] : local;
     const spread = Math.hypot(local.x - remotePlayer.x, local.z - remotePlayer.z);
-    cam.follow(handler.x, handler.z, spread, dt);
+    cam.follow(handler.x, handler.z, spread, dt, settings.cameraDistance ?? 1);
     cam.update(width, height);
 
     ctx.save();

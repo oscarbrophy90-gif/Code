@@ -100,6 +100,15 @@ export interface DunkFlight {
   value: 1 | 2;
   /** seconds hanging on the iron after an emphatic make */
   hang: number;
+  /**
+   * Where the body hangs: feet directly under the grip point on the near edge
+   * of the iron, at a height that puts the drawn hands exactly on the rim.
+   * Filled in at the slam — the flight ends at the slam spot and the catch
+   * blends from there to here over the first beat of the hang.
+   */
+  hangX: number;
+  hangZ: number;
+  hangY: number;
   packageId: string;
 }
 

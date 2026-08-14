@@ -97,6 +97,7 @@ export function defaultSettings(): GameSettings {
     musicVolume: 0.4,
     touchControls: matchMedia('(pointer: coarse)').matches,
     reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
+    cameraDistance: 1,
     serverUrl: '',
   };
 }

@@ -428,6 +428,28 @@ export class PlayerRenderer {
 
     ctx.lineWidth = lineW * 0.92;
     const hands: { x: number; y: number }[] = [];
+    // Hanging on the rim, the hands are not posed — they are pinned to the
+    // iron itself. The grip points are projected with the same camera the
+    // court renderer draws the rim with, so the fingers land on the drawn
+    // hoop to the pixel whatever the body underneath is doing. Posing the
+    // arms and hoping the heights lined up is exactly what had the hands
+    // floating a few feet under the rim.
+    let gripPoints: { x: number; y: number }[] | null = null;
+    if (p.state === 'rimHang' && p.dunk) {
+      const gx = p.x - COURT.rimX;
+      const gz = p.z - COURT.rimZ;
+      const glen = Math.hypot(gx, gz) || 1;
+      // Perpendicular along the rim edge, so the two hands grip shoulder-width
+      // apart on the iron rather than stacking on one point.
+      const px = -gz / glen;
+      const pz = gx / glen;
+      const edgeX = COURT.rimX + (gx / glen) * 0.72;
+      const edgeZ = COURT.rimZ + (gz / glen) * 0.72;
+      gripPoints = [
+        cam.project(edgeX - px * 0.42, COURT.rimY + 0.08, edgeZ - pz * 0.42),
+        cam.project(edgeX + px * 0.42, COURT.rimY + 0.08, edgeZ + pz * 0.42),
+      ];
+    }
     // Where each glyph goes, collected as the limbs are drawn and inked at the
     // end so the linework always sits on top of the body, never under it.
     const inkSpots: InkSpot[] = [];
@@ -440,8 +462,20 @@ export class PlayerRenderer {
       const reach = armPose ? armPose.fwd[i] : 0;
       // Arms are a little longer and a little wider than they were — at preview
       // size the old ones read as wires coming off the shoulders.
-      const elbow = at(shoulderY - 0.38 + raise * 0.46, sign * (shoulderHalf + 0.3) * out, -raise * 0.12 + reach * 0.5);
-      const hand = at(shoulderY - 0.76 + raise * 1.16, sign * (shoulderHalf + 0.2 + raise * 0.12) * out, -raise * 0.3 + reach);
+      let elbow = at(shoulderY - 0.38 + raise * 0.46, sign * (shoulderHalf + 0.3) * out, -raise * 0.12 + reach * 0.5);
+      let hand = at(shoulderY - 0.76 + raise * 1.16, sign * (shoulderHalf + 0.2 + raise * 0.12) * out, -raise * 0.3 + reach);
+      // A gripping hand goes where the iron is. The elbow follows: two thirds
+      // of the way up the line from shoulder to grip, bowed slightly out, so
+      // the arm reads as loaded rather than as a straight wire.
+      if (gripPoints && raise > 1.2) {
+        const shoulderPt = sign < 0 ? tl : tr;
+        hand = { ...hand, x: gripPoints[i].x, y: gripPoints[i].y };
+        elbow = {
+          ...elbow,
+          x: shoulderPt.x + (hand.x - shoulderPt.x) * 0.62 + sign * s * 0.16,
+          y: shoulderPt.y + (hand.y - shoulderPt.y) * 0.62,
+        };
+      }
       hands.push(hand);
       ctx.strokeStyle = armColor(sign);
       ctx.beginPath();
@@ -449,6 +483,17 @@ export class PlayerRenderer {
       ctx.lineTo(elbow.x, elbow.y);
       ctx.lineTo(hand.x, hand.y);
       ctx.stroke();
+      // Fingers curled over the iron: a short hook past the grip point, drawn
+      // in skin so it reads as a hand holding the rim rather than touching it.
+      if (gripPoints && raise > 1.2) {
+        ctx.strokeStyle = armColor(sign);
+        ctx.lineWidth = lineW * 0.6;
+        ctx.beginPath();
+        ctx.moveTo(hand.x, hand.y);
+        ctx.lineTo(hand.x + sign * s * 0.1, hand.y - s * 0.14);
+        ctx.stroke();
+        ctx.lineWidth = lineW * 0.92;
+      }
 
       // A shooting sleeve is one arm only, over whatever is underneath.
       if (worn === 'armsleeve' && sign > 0) {

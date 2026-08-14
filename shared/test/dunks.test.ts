@@ -27,6 +27,7 @@ interface Trace {
   events: SimEvent[];
   hangFrames: number;
   fallenDuringHang: boolean;
+  hangSpots: { x: number; y: number; z: number; heightIn: number }[];
   state: MatchState;
 }
 
@@ -56,7 +57,7 @@ function runDunk(seed: number, opts: { defender: 'front' | 'away'; release: numb
   const drive = { ...emptyInput(), mz: -1, sprint: true };
   for (let i = 0; i < 40; i++) stepMatch(state, [drive, emptyInput()], SIM_DT);
 
-  const trace: Trace = { states: [], maxStep: 0, flight: [], events: [], hangFrames: 0, fallenDuringHang: false, state };
+  const trace: Trace = { states: [], maxStep: 0, flight: [], events: [], hangFrames: 0, fallenDuringHang: false, hangSpots: [], state };
   let prevX = p.x;
   let prevZ = p.z;
   for (let i = 0; i < 500; i++) {
@@ -90,6 +91,8 @@ function runDunk(seed: number, opts: { defender: 'front' | 'away'; release: numb
     if (actState === 'rimHang') {
       trace.hangFrames++;
       if (d.state === 'fallen') trace.fallenDuringHang = true;
+      trace.hangSpots.push({ x: p.x, y: p.y, z: p.z, heightIn: p.cfg.heightIn });
+      trace.maxStep = Math.max(trace.maxStep, Math.hypot(p.x - prevX, p.z - prevZ));
     }
     prevX = p.x;
     prevZ = p.z;
@@ -233,4 +236,31 @@ test('the new pack is real stock: unique ids, sane gates, motions the renderer c
     assert.ok(d.requiresVertical >= 0 && d.requiresVertical <= 99, `${d.id} gates at ${d.requiresVertical} Vertical`);
     assert.ok(d.duration >= 0.4 && d.duration <= 1.3, `${d.id} runs ${d.duration}s`);
   }
+});
+
+test('the hang holds the hands on the iron: right height, right spot, dead still', () => {
+  const t = greenRun(71, 'away');
+  assert.ok(t.hangSpots.length > 30, `hang recorded ${t.hangSpots.length} frames`);
+
+  // Skip the catch — the first beat swings the body under the grip — and
+  // measure the held hang.
+  const held = t.hangSpots.slice(Math.ceil(0.2 / SIM_DT));
+  assert.ok(held.length > 10, 'the hang outlasts the catch');
+
+  for (const spot of held) {
+    // The renderer's fully raised hand sits heightFt * 0.81 + 0.98 above the
+    // feet; the sim hangs the feet so that lands exactly on the 10ft iron.
+    const handY = spot.y + (spot.heightIn / 12) * 0.81 + 0.98;
+    assert.ok(Math.abs(handY - COURT.rimY) < 0.15, `hands ${handY.toFixed(2)}ft on a ${COURT.rimY}ft rim`);
+    // And the body hangs at the near edge of the iron, not out on the floor.
+    const fromRim = Math.hypot(spot.x - COURT.rimX, spot.z - COURT.rimZ);
+    assert.ok(fromRim > 0.4 && fromRim < 1.1, `hanging ${fromRim.toFixed(2)}ft from the rim centre`);
+  }
+
+  // Iron does not bob: once caught, the height holds to the millimetre.
+  const ys = held.map((s2) => s2.y);
+  assert.ok(Math.max(...ys) - Math.min(...ys) < 0.02, 'the hang height must not wobble');
+
+  // The catch is a motion, not a snap — still under the no-teleport bar.
+  assert.ok(t.maxStep < 0.5, `biggest single-frame move was ${t.maxStep.toFixed(2)}ft`);
 });

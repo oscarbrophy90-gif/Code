@@ -107,6 +107,17 @@ export function renderSettings(): HTMLElement {
             },
           ),
         ),
+        // The camera distance is a real dolly, not a crop: 100% is the classic
+        // broadcast framing and 200% sits twice as far back, with the rim held
+        // in the same part of the frame the whole way.
+        slider({
+          label: 'Camera distance',
+          value: Math.round((s.cameraDistance ?? 1) * 100),
+          min: 100,
+          max: 200,
+          display: (v) => `${v}%`,
+          onInput: (v) => set('cameraDistance', v / 100),
+        }),
         toggle('Camera shake', s.cameraShake, (v) => {
           set('cameraShake', v);
           refresh();

@@ -507,13 +507,18 @@ function updatePlayer(state: MatchState, side: Side, input: PlayerInput, dt: num
 
   if (p.state === 'rimHang') {
     const flight = p.dunk;
-    // Hands on the iron: pinned under the rim with a slight settling sway that
-    // decays, so the hang reads as weight rather than as a freeze-frame.
     if (flight) {
-      const settle = clamp01(p.stateTimer / Math.max(0.01, flight.hang));
-      p.x = flight.toX;
-      p.z = flight.toZ;
-      p.y = flight.slamY * 0.82 + Math.sin(state.time * 7) * 0.06 * settle;
+      // The catch: the first beat of the hang swings the body from the slam
+      // spot to directly under the grip, so grabbing the rim is a motion
+      // rather than a snap. After that the height holds dead still — the
+      // hands are on the iron, and iron does not bob. The sway lives in the
+      // renderer's dangling legs, not in the position.
+      const elapsed = flight.hang - p.stateTimer;
+      const catchT = clamp01(elapsed / 0.16);
+      const ease = catchT * (2 - catchT);
+      p.x = lerp(flight.toX, flight.hangX, ease);
+      p.z = lerp(flight.toZ, flight.hangZ, ease);
+      p.y = lerp(flight.slamY, flight.hangY, ease);
       p.vx = 0;
       p.vz = 0;
     }
@@ -1379,6 +1384,9 @@ function startDunkFlight(
     poster,
     value,
     hang: dunkHangTime(pkg),
+    hangX: toX,
+    hangZ: toZ,
+    hangY: slamY,
     packageId: p.cfg.dunkPackageId,
   };
   p.stateTimer = p.dunk.duration;
@@ -1435,11 +1443,19 @@ function slamDunk(state: MatchState, side: Side, rng: Rng): void {
   }
 
   if (flight.made && flight.emphatic) {
-    // Hands stay on the iron. The flight object survives into the hang so the
-    // renderer knows which package is hanging and the drop knows where from.
+    // Hands stay on the iron. The hang point is worked out here: directly
+    // under the grip on the near edge of the rim, at a height that puts the
+    // renderer's fully raised hands exactly on the iron. The 0.81/0.98 pair
+    // mirrors the renderer's arm geometry (shoulder at 0.83 of body height,
+    // hand at full raise 0.98ft above it) — the sim owning the number is what
+    // keeps the hands from floating under the rim or passing through it.
+    const grip = normalize(p.x - COURT.rimX, p.z - COURT.rimZ);
+    flight.hangX = COURT.rimX + grip.x * 0.7;
+    flight.hangZ = COURT.rimZ + grip.z * 0.7;
+    const heightFt = p.cfg.heightIn / 12;
+    flight.hangY = Math.max(1.4, COURT.rimY - (heightFt * 0.81 + 0.98));
     p.state = 'rimHang';
     p.stateTimer = flight.hang;
-    p.y = flight.slamY * 0.82;
     p.vy = 0;
     p.vx = 0;
     p.vz = 0;

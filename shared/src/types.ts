@@ -341,6 +341,13 @@ export interface GameSettings {
   touchControls: boolean;
   reducedMotion: boolean;
   /**
+   * How far back the match camera sits, as a multiplier on the standard
+   * framing. 1 is the classic broadcast distance; 2 is twice as far out. The
+   * projection is a real pinhole camera, so pulling back keeps the whole
+   * court legible rather than shrinking a crop.
+   */
+  cameraDistance: number;
+  /**
    * Where the online server is.
    *
    * Empty means "wherever this page came from", which is right whenever the

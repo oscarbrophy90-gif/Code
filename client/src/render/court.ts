@@ -177,6 +177,34 @@ export class CourtRenderer {
     // colour in its own right — the orange band the fence stands in — rather
     // than a darker version of the playing surface.
     const apron = park.palette.apron ?? mix(floor, '#05070b', 0.55);
+
+    // The ground under and past the apron, filled in screen space. At the
+    // classic camera distance the apron reaches the bottom of the frame on its
+    // own; pulled back, its front edge climbs up the screen and sky showed
+    // *below* the court, which read as the whole park floating. The front edge
+    // of the apron is a straight line once projected, so everything under that
+    // line is street.
+    {
+      const fl = cam.project(-HW - 9, 0, D + 10);
+      const fr = cam.project(HW + 9, 0, D + 10);
+      if (fl.depth > 0.05 && fr.depth > 0.05) {
+        const canvas = ctx.canvas;
+        const w = canvas.width / (ctx.getTransform().a || 1);
+        const h = canvas.height / (ctx.getTransform().d || 1);
+        // Extend the edge line across the whole frame width.
+        const slope = (fr.y - fl.y) / Math.max(1e-3, fr.x - fl.x);
+        const yAt = (x: number) => fl.y + (x - fl.x) * slope;
+        ctx.fillStyle = mix(apron, '#05070b', 0.66);
+        ctx.beginPath();
+        ctx.moveTo(-4, yAt(-4));
+        ctx.lineTo(w + 4, yAt(w + 4));
+        ctx.lineTo(w + 4, h + 4);
+        ctx.lineTo(-4, h + 4);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+
     this.poly(ctx, cam, [
       [-HW - 9, -5],
       [HW + 9, -5],
