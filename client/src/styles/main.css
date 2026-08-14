@@ -1956,6 +1956,33 @@ input[type='text']:focus {
   margin-top: 4px;
 }
 
+/* The corner tag that says this is a replay, not live play. */
+.dunk-replay-tag {
+  position: absolute;
+  top: max(18px, 4vh);
+  left: 24px;
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.28em;
+  color: #ff5c5c;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dunk-replay-tag::before {
+  content: '';
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #ff5c5c;
+  animation: replay-blink 1.1s steps(2, start) infinite;
+}
+
+@keyframes replay-blink {
+  to { opacity: 0.25; }
+}
+
 .dunk-skip {
   position: absolute;
   right: 16px;

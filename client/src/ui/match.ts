@@ -37,7 +37,7 @@ import { Hud } from '../render/hud.ts';
 import { store } from '../state/store.ts';
 import { el, clear, toast } from './dom.ts';
 import { buildTouchControls } from './touch.ts';
-import { playDunkScene } from './dunkscene.ts';
+import { playLiveReplay, snapshotFrame, type ReplayFrame } from './livereplay.ts';
 
 export interface MatchResult {
   won: boolean;
@@ -102,6 +102,31 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
   const park = PARK_BY_ID[opts.parkId] ?? PARK_BY_ID['downtown'];
 
   const cam = new Camera();
+  const replayBuffer: ReplayFrame[] = [];
+
+  // Test rig, only alive when the page was opened with ?dunkdebug: parks the
+  // local player on a runway to the rim with the ball so an automated browser
+  // can practise dunks without playing the whole game first. It writes plain
+  // sim state, the same fields the game itself resets between possessions.
+  if (new URLSearchParams(window.location.search).has('dunkdebug')) {
+    (window as unknown as { __dunkDebug?: unknown }).__dunkDebug = {
+      /** the last shot the local side released, so a test can aim its timing */
+      lastRelease: null as { grade: string; shotType: string; made: boolean } | null,
+      runway() {
+        const p = state.players[localSide];
+        p.x = 1;
+        p.z = 16;
+        p.state = 'dribble';
+        p.stamina = 1;
+        state.ball.owner = localSide;
+        state.ball.state = 'held';
+        state.needsClear = false;
+        state.shotClock = 14;
+        state.phase = 'live';
+        state.check = null;
+      },
+    };
+  }
   const courtRenderer = new CourtRenderer();
   const playerRenderer = new PlayerRenderer();
   const hud = new Hud();
@@ -428,6 +453,8 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
       countDrillEvent(e);
       switch (e.type) {
         case 'shotRelease': {
+          const dbg = (window as unknown as { __dunkDebug?: { lastRelease: unknown } }).__dunkDebug;
+          if (dbg && e.side === localSide) dbg.lastRelease = { grade: e.grade, shotType: e.shotType, made: e.made };
           const p = state.players[e.side];
           // Arm the net for this shot. A miss or a block disarms it again.
           swishPending = e.made;
@@ -500,17 +527,22 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
           break;
         }
         case 'dunkHighlight': {
-          // Cut away to the animation. The world is frozen while it plays so
-          // nothing happens off screen, and it is always skippable.
+          // The replay: the recorded frames of the dunk that just happened,
+          // played back through the game's own renderer from a low camera.
+          // The world is frozen while it plays and it is always skippable.
           if (e.side === localSide && !settings.reducedMotion) {
             audio.play('dunk');
             cutscene = true;
-            void playDunkScene(root, {
-              dunker: configs[e.side],
-              victim: configs[e.side === 0 ? 1 : 0],
-              packageId: e.packageId,
+            void playLiveReplay(root, {
+              frames: [...replayBuffer],
+              side: e.side,
+              park,
+              courtColor,
+              surface: surface ?? null,
               posterized: e.posterized,
-              value: e.value,
+              packageId: e.packageId,
+              dunkerName: configs[e.side].name,
+              victimName: configs[e.side === 0 ? 1 : 0].name,
             }).then(() => {
               cutscene = false;
             });
@@ -567,6 +599,13 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
     if (shake > 0 && settings.cameraShake && !settings.reducedMotion) {
       ctx.translate((Math.random() - 0.5) * shake * 9, (Math.random() - 0.5) * shake * 9);
     }
+
+    // The replay recorder: the last few seconds of real sim frames, kept so a
+    // dunk replay can be the dunk that actually happened. Recorded here, after
+    // the sim stepped and before anything is drawn, so a recorded frame is
+    // exactly a drawn frame.
+    replayBuffer.push(snapshotFrame(state));
+    if (replayBuffer.length > 620) replayBuffer.shift();
 
     courtRenderer.drawBackdrop(ctx, park, width, height, state.time);
     courtRenderer.drawCourt(ctx, cam, park, courtColor, surface);
