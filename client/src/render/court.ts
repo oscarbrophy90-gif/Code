@@ -507,7 +507,11 @@ export class CourtRenderer {
     }
 
     // Rim. Hinged at the back: how far a point dips under bend scales with how
-    // far it sits from the backboard attachment.
+    // far it sits from the backboard attachment. The bend is sanitised first —
+    // a single NaN here poisons every rim point and the whole hoop vanishes,
+    // which is a failure mode far worse than ignoring a bad input.
+    if (!Number.isFinite(rimBend)) rimBend = 0;
+    rimBend = clamp01(rimBend);
     const bendDip = (z: number): number => {
       if (rimBend <= 0) return 0;
       const frontness = clamp01((z - (COURT.rimZ - COURT.rimRadius)) / (COURT.rimRadius * 2));

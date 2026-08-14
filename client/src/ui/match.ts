@@ -104,7 +104,10 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
   const cam = new Camera();
   const replayBuffer: ReplayFrame[] = [];
   // Seconds since the last slam hit the iron; drives the rim's spring-back.
-  let slamAge = Infinity;
+  // Starts large-but-finite, never Infinity: Math.cos(Infinity) is NaN, and
+  // one NaN in the bend made every rim point project to NaN — which is a rim
+  // that silently never draws until the first dunk of the game.
+  let slamAge = 1e6;
   let slamPower = 0;
 
   // Test rig, only alive when the page was opened with ?dunkdebug: parks the
