@@ -117,12 +117,24 @@ export function drawReplayFrame(
   courtRenderer.drawHoop(ctx, cam, opts.park, 0, opts.rimBend);
 
   for (const p of frame.players) playerRenderer.drawShadow(ctx, cam, p.x, p.z, p.y, 1.05);
+  const carried = frame.ball.state === 'dunking' ? frame.ball.owner : null;
   const drawables: { z: number; draw: () => void }[] = [
     ...frame.players.map((p) => ({
       z: p.z,
-      draw: () => playerRenderer.draw(ctx, cam, p, frame.time, false, frame.ball.owner === p.side),
+      draw: () =>
+        playerRenderer.draw(
+          ctx,
+          cam,
+          p,
+          frame.time,
+          false,
+          frame.ball.owner === p.side,
+          carried === p.side ? frame.ball : null,
+        ),
     })),
-    { z: frame.ball.z, draw: () => playerRenderer.drawBall(ctx, cam, frame.ball, frame.time) },
+    ...(carried === null
+      ? [{ z: frame.ball.z, draw: () => playerRenderer.drawBall(ctx, cam, frame.ball, frame.time) }]
+      : []),
   ];
   drawables.sort((a, b) => a.z - b.z);
   for (const d of drawables) d.draw();

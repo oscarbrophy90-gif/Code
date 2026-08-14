@@ -1,6 +1,6 @@
 import { COURT, EMOTE_DURATION, STEAL_TIME, THREE_CELEBRATION_TIME, WIN_CELEBRATION_TIME, SKIN_TONES, type Appearance, type Ball, type MatchState, type SimPlayer } from '@hoops/shared';
 import { emotePose, type EmotePose } from './emotes.ts';
-import { dunkFlightPose, dunkHangPose } from './dunkstyle.ts';
+import { dunkCarryHand, dunkFlightPose, dunkHangPose } from './dunkstyle.ts';
 import type { Camera } from '../engine/camera.ts';
 import { hexA, mix } from './court.ts';
 import { drawInk, inkedAt, tattooLook, type InkSpot } from './tattoos.ts';
@@ -72,6 +72,14 @@ export class PlayerRenderer {
     time: number,
     isLocal: boolean,
     hasBall: boolean,
+    /**
+     * The ball, when this player is carrying it through a dunk flight. Drawn
+     * here, in the posed hand, rather than by the standalone ball pass — the
+     * sim only knows "roughly overhead", and the choreography swings the hands
+     * everywhere but roughly overhead. The hand is the truth; the ball follows
+     * the hand.
+     */
+    carriedBall: Ball | null = null,
   ): void {
     const feet = cam.project(p.x, p.y, p.z);
     if (feet.depth <= 0.05) return;
@@ -529,6 +537,17 @@ export class PlayerRenderer {
       }
     }
 
+    // The ball in the dunking hand, every frame of the flight. Which hand is
+    // the package's own call: lead hand for a one-hand motion, held between
+    // both for a two-hand one.
+    if (carriedBall && p.state === 'finishing' && p.dunk && hands.length === 2) {
+      const carry = dunkCarryHand(p.dunk.packageId);
+      const bx = carry === 2 ? (hands[0].x + hands[1].x) / 2 : hands[carry].x;
+      const by = carry === 2 ? (hands[0].y + hands[1].y) / 2 : hands[carry].y;
+      const r = Math.max(2, s * 0.4);
+      paintBallSprite(ctx, bx, by - r * 0.35, r, time * 5);
+    }
+
     // Wristbands go on last so they sit on top of the arm.
     if (worn === 'wristbands') {
       ctx.fillStyle = look.accessoryPrimary;
@@ -781,28 +800,7 @@ export class PlayerRenderer {
       ctx.restore();
     }
 
-    const g = ctx.createRadialGradient(p.x - r * 0.34, p.y - r * 0.34, r * 0.15, p.x, p.y, r);
-    g.addColorStop(0, '#ffa463');
-    g.addColorStop(0.6, '#ef7a2f');
-    g.addColorStop(1, '#a8441a');
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
-    ctx.fillStyle = g;
-    ctx.fill();
-
-    // Seams, spinning with flight time.
-    ctx.strokeStyle = 'rgba(40,18,8,0.75)';
-    ctx.lineWidth = Math.max(0.7, r * 0.11);
-    const spin = time * 5 + ball.flightTime * 9;
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.ellipse(p.x, p.y, r, r * Math.abs(Math.cos(spin)), 0, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.ellipse(p.x, p.y, r * Math.abs(Math.sin(spin + 1)), r, 0, 0, Math.PI * 2);
-    ctx.stroke();
+    paintBallSprite(ctx, p.x, p.y, r, time * 5 + ball.flightTime * 9);
   }
 
   /** Shows where an in-flight shot will land, which teaches shot feedback. */
@@ -1064,6 +1062,31 @@ function drawHair(
       break;
   }
   ctx.restore();
+}
+
+/** The ball itself, at a screen point — shared by the free ball and the one
+ * drawn in a dunker's hand mid-flight. */
+function paintBallSprite(ctx: CanvasRenderingContext2D, x: number, y: number, r: number, spin: number): void {
+  const g = ctx.createRadialGradient(x - r * 0.34, y - r * 0.34, r * 0.15, x, y, r);
+  g.addColorStop(0, '#ffa463');
+  g.addColorStop(0.6, '#ef7a2f');
+  g.addColorStop(1, '#a8441a');
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fillStyle = g;
+  ctx.fill();
+
+  ctx.strokeStyle = 'rgba(40,18,8,0.75)';
+  ctx.lineWidth = Math.max(0.7, r * 0.11);
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.ellipse(x, y, r, r * Math.abs(Math.cos(spin)), 0, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.ellipse(x, y, r * Math.abs(Math.sin(spin + 1)), r, 0, 0, Math.PI * 2);
+  ctx.stroke();
 }
 
 /**

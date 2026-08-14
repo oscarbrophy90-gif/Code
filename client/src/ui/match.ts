@@ -631,13 +631,27 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
     }
 
     // Depth sort: draw far (small z) before near (large z).
+    // A ball being carried through a dunk flight is drawn by the dunker's own
+    // draw call, in the posed hand — the standalone pass would put it at the
+    // sim's rough overhead point while the choreography swings the hands away.
+    const carried = state.ball.state === 'dunking' ? state.ball.owner : null;
     const drawables: { z: number; draw: () => void }[] = [
       ...state.players.map((p) => ({
         z: p.z,
         draw: () =>
-          playerRenderer.draw(ctx, cam, p, state.time, p.side === localSide, state.ball.owner === p.side),
+          playerRenderer.draw(
+            ctx,
+            cam,
+            p,
+            state.time,
+            p.side === localSide,
+            state.ball.owner === p.side,
+            carried === p.side ? state.ball : null,
+          ),
       })),
-      { z: state.ball.z, draw: () => playerRenderer.drawBall(ctx, cam, state.ball, state.time) },
+      ...(carried === null
+        ? [{ z: state.ball.z, draw: () => playerRenderer.drawBall(ctx, cam, state.ball, state.time) }]
+        : []),
     ];
     drawables.sort((a, b) => a.z - b.z);
     for (const d of drawables) d.draw();

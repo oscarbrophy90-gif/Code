@@ -200,6 +200,18 @@ export function turnsFor(id: string): number {
   return style.motion === 'spin540' ? 1.5 : style.motion === 'spin360' ? 1 : style.motion === 'spin' ? 0.5 : 0;
 }
 
+/**
+ * Which drawn hand carries the ball through a flight: 0 left, 1 right, 2 both
+ * (drawn between them). Follows the style — a one-hand motion carries in its
+ * lead hand, everything else keeps two hands on it — so the ball rides where
+ * the choreography says the ball is.
+ */
+export function dunkCarryHand(id: string): 0 | 1 | 2 {
+  const style = styleFor(id);
+  if (!style.oneHand) return 2;
+  return style.from === 1 ? 1 : 0;
+}
+
 const REST_POSE: EmotePose = { arm: [0, 0], out: [1, 1], fwd: [0, 0], crouch: 0, lean: 0, alpha: 1, bob: 0, spin: 0, stride: 1 };
 
 /**
