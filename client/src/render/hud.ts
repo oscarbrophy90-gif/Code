@@ -120,7 +120,13 @@ export class Hud {
   }
 
   // ------------------------------------------------------------- score bug
-  drawScoreBug(ctx: CanvasRenderingContext2D, state: MatchState, w: number, localSide: Side): void {
+  drawScoreBug(
+    ctx: CanvasRenderingContext2D,
+    state: MatchState,
+    w: number,
+    localSide: Side,
+    teamLabels: [string, string] | null = null,
+  ): void {
     const pad = 14;
     const barW = Math.min(430, w - pad * 2);
     const x = (w - barW) / 2;
@@ -135,8 +141,11 @@ export class Hud {
     ctx.lineWidth = 1;
     ctx.stroke();
 
-    const names = [state.players[0].cfg.name, state.players[1].cfg.name];
-    const colors = [state.players[0].cfg.jerseyPrimary, state.players[1].cfg.jerseyPrimary];
+    // Team modes label the squads; 1v1 keeps naming the two players. Colors
+    // come from each team's first player — the whole team wears one kit.
+    const first = [state.players[state.teams[0][0]], state.players[state.teams[1][0]]];
+    const names = teamLabels ?? [first[0].cfg.name, first[1].cfg.name];
+    const colors = [first[0].cfg.jerseyPrimary, first[1].cfg.jerseyPrimary];
 
     for (const side of [0, 1] as Side[]) {
       const left = side === 0;

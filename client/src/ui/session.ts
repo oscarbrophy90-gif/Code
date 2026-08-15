@@ -41,6 +41,8 @@ import { AvatarRenderer, livePreview } from './avatar.ts';
 
 export interface StartMatchOptions {
   opponent: SimPlayerConfig;
+  /** 3v3: the other two opponents and your two AI teammates */
+  squads?: { opponents: SimPlayerConfig[]; teammates: SimPlayerConfig[] } | null;
   opponentRankPoints?: number;
   difficulty: Difficulty;
   parkId: string;
@@ -95,9 +97,11 @@ export function startMatch(opts: StartMatchOptions): void {
   void playWalkout({
     player: store.simConfig(),
     opponent: opts.opponent,
+    playerTeam: opts.squads ? [store.simConfig(), ...opts.squads.teammates] : undefined,
+    opponentTeam: opts.squads ? [opts.opponent, ...opts.squads.opponents] : undefined,
     difficulty: opts.difficulty,
     venue: PARK_BY_ID[opts.parkId]?.name ?? 'Hoops Elite',
-    subtitle: opts.eventName ?? labelFor(opts.playlist),
+    subtitle: opts.eventName ?? (opts.squads ? '3v3 Squads' : labelFor(opts.playlist)),
     hideDifficulty: Boolean(opts.ranked),
     identity: {
       username: store.profile.username,
@@ -119,6 +123,7 @@ export function startMatch(opts: StartMatchOptions): void {
 function launchMatch(opts: StartMatchOptions): void {
   const node = createMatchScreen({
     opponent: opts.opponent,
+    squads: opts.squads ?? null,
     difficulty: opts.difficulty,
     parkId: opts.parkId,
     config: { ...opts.config, playlist: opts.playlist === 'event' ? 'casual' : opts.playlist },

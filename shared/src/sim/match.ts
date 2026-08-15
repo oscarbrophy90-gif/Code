@@ -30,6 +30,62 @@ const clamp = (v: number, lo: number, hi: number) => (v < lo ? lo : v > hi ? hi 
 const clamp01 = (v: number) => clamp(v, 0, 1);
 const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
 
+// ---------------------------------------------------------------- team lookups
+//
+// The sim thinks in players (pids) and teams (sides). Everywhere the 1v1 code
+// said "the opponent" it meant one specific man because there was only one;
+// these are what that phrase resolves to when there are several. In 1v1 every
+// one of them returns the single other player, which is what keeps the old
+// game exactly the old game.
+
+/** The defender nearest this player — the "opp" of every 1v1 duel. */
+function nearestOpponent(state: MatchState, p: SimPlayer): SimPlayer {
+  let best: SimPlayer | null = null;
+  let bestDist = Infinity;
+  for (const pid of state.teams[other(p.side)]) {
+    const d = state.players[pid];
+    const dist = Math.hypot(d.x - p.x, d.z - p.z);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = d;
+    }
+  }
+  return best ?? p;
+}
+
+/** Teammates of a player, not including the player. Empty in 1v1. */
+function teammatesOf(state: MatchState, pid: number): SimPlayer[] {
+  return state.teams[state.players[pid].side]
+    .filter((id) => id !== pid)
+    .map((id) => state.players[id]);
+}
+
+/**
+ * The player a dead-ball possession starts with: the first pid on the team.
+ * Team 0 lists the human first, so the ball comes back to you; a CPU team
+ * leads with its primary handler.
+ */
+function primaryOf(state: MatchState, side: Side): SimPlayer {
+  return state.players[state.teams[side][0]];
+}
+
+/**
+ * Who this player is guarding: teams are paired tallest-on-tallest, the way
+ * pickup teams actually sort themselves out. Deterministic, so both the sim
+ * and the AI can ask and get the same answer.
+ */
+export function matchupOf(state: MatchState, pid: number): SimPlayer {
+  const p = state.players[pid];
+  const mine = [...state.teams[p.side]].sort(
+    (a, b) => state.players[b].cfg.heightIn - state.players[a].cfg.heightIn || a - b,
+  );
+  const theirs = [...state.teams[other(p.side)]].sort(
+    (a, b) => state.players[b].cfg.heightIn - state.players[a].cfg.heightIn || a - b,
+  );
+  const rank = mine.indexOf(pid);
+  return state.players[theirs[Math.min(rank, theirs.length - 1)]];
+}
+
 // ---------------------------------------------------------------- attributes
 
 function sprintSpeed(p: SimPlayer): number {
@@ -99,9 +155,10 @@ export const WIN_CELEBRATION_TIME = 6;
  * and hand it to the very same renderer the court uses — a preview drawn by
  * different code is a preview that can lie to you.
  */
-export function makePlayer(side: Side, cfg: SimPlayerConfig): SimPlayer {
+export function makePlayer(side: Side, cfg: SimPlayerConfig, pid = side as number): SimPlayer {
   return {
     side,
+    pid,
     cfg,
     x: side === 0 ? -3 : 3,
     z: side === 0 ? 24 : 18,
@@ -165,6 +222,7 @@ function makeBall(): Ball {
     owner: 0,
     shotWillGoIn: false,
     shotBy: null,
+    passTo: null,
     shotValue: 1,
     shotGrade: null,
     flightTime: 0,
@@ -203,23 +261,44 @@ export function createMatch(
   config: MatchConfig,
   seed: number,
 ): MatchState {
+  return createTeamMatch([a], [b], config, seed);
+}
+
+/**
+ * A match between two teams of any (equal) size. `createMatch` is the 1v1
+ * special case; 3v3 hands three configs a side. Team 0's first config is its
+ * primary handler — the human, on the human's team — and pids run team 0
+ * first, so in 1v1 pid equals side everywhere.
+ */
+export function createTeamMatch(
+  teamA: SimPlayerConfig[],
+  teamB: SimPlayerConfig[],
+  config: MatchConfig,
+  seed: number,
+): MatchState {
+  const players = [
+    ...teamA.map((cfg, i) => makePlayer(0, cfg, i)),
+    ...teamB.map((cfg, i) => makePlayer(1, cfg, teamA.length + i)),
+  ];
   const state: MatchState = {
     frame: 0,
     time: 0,
     rngState: seed >>> 0 || 1,
     phase: 'checkball',
     phaseTimer: 1.4,
-    players: [makePlayer(0, a), makePlayer(1, b)],
+    players,
+    teams: [teamA.map((_, i) => i), teamB.map((_, i) => teamA.length + i)],
     ball: makeBall(),
     score: [0, 0],
     possession: 0,
     needsClear: false,
     shotClock: config.shotClock,
     clock: config.timeLimit,
-    stats: [emptyStats(), emptyStats()],
+    stats: players.map(() => emptyStats()),
     freeThrow: null,
-    checkGuard: [false, false],
+    checkGuard: players.map(() => false),
     check: null,
+    passRequest: null,
     events: [],
     config,
     winner: null,
@@ -229,57 +308,69 @@ export function createMatch(
 }
 
 function setupCheckball(state: MatchState, offense: Side): void {
-  const off = state.players[offense];
-  const def = state.players[other(offense)];
+  const off = primaryOf(state, offense);
+  const def = matchupOf(state, off.pid);
   state.possession = offense;
   state.phase = 'checkball';
   state.phaseTimer = 1.2;
   state.shotClock = state.config.shotClock;
   state.needsClear = false;
+  state.passRequest = null;
 
-  off.x = 0;
-  off.z = 25;
-  off.vx = off.vz = 0;
-  off.y = off.vy = 0;
-  off.state = 'dribble';
-  off.stagger = 0;
-  off.staggerTimer = 0;
-  off.reboundLock = 0;
-  off.moveId = null;
-  off.shotProfile = null;
-  off.facing = Math.PI; // toward the rim
+  const reset = (p: SimPlayer, x: number, z: number, facing: number, act: 'dribble' | 'idle') => {
+    p.x = x;
+    p.z = z;
+    p.vx = p.vz = 0;
+    p.y = p.vy = 0;
+    p.state = act;
+    p.stagger = 0;
+    p.staggerTimer = 0;
+    p.reboundLock = 0;
+    p.moveId = null;
+    p.shotProfile = null;
+    p.facing = facing;
+  };
 
-  def.x = 0;
-  def.z = 20;
-  def.vx = def.vz = 0;
-  def.y = def.vy = 0;
-  def.state = 'idle';
-  def.stagger = 0;
-  def.staggerTimer = 0;
-  def.reboundLock = 0;
-  def.facing = 0;
+  reset(off, 0, 25, Math.PI, 'dribble'); // toward the rim
+  reset(def, 0, 20, 0, 'idle');
+
+  // The rest of both teams spread the floor while the ball is checked:
+  // offensive teammates to the wings, their men goalside of them.
+  const offMates = teammatesOf(state, off.pid);
+  offMates.forEach((mate, i) => {
+    const side = i % 2 === 0 ? -1 : 1;
+    reset(mate, side * 14, 20 - Math.floor(i / 2) * 5, Math.PI, 'idle');
+    const guard = matchupOf(state, mate.pid);
+    reset(guard, mate.x * 0.72, Math.max(8, mate.z - 4.5), 0, 'idle');
+  });
 
   const ball = state.ball;
   ball.state = 'held';
-  ball.owner = offense;
+  ball.owner = off.pid;
   ball.settled = false;
   ball.shotBy = null;
+  ball.passTo = null;
   ball.shotGrade = null;
   ball.vx = ball.vy = ball.vz = 0;
   state.check = state.config.manualCheck
-    ? { stage: 'wait', timer: 0, from: offense, to: other(offense) }
+    ? { stage: 'wait', timer: 0, from: off.pid, to: def.pid }
     : null;
   state.events.push({ type: 'phase', phase: 'checkball' });
 }
 
 // ------------------------------------------------------------------ stepping
 
-export function stepMatch(state: MatchState, inputs: [PlayerInput, PlayerInput], dt = SIM_DT): void {
+export function stepMatch(state: MatchState, inputs: PlayerInput[], dt = SIM_DT): void {
   if (state.phase === 'over') return;
   const rng = new Rng(state.rngState);
 
   state.frame++;
   state.time += dt;
+
+  if (state.passRequest) {
+    state.passRequest.timer -= dt;
+    if (state.passRequest.timer <= 0) state.passRequest = null;
+  }
 
   if (state.phase === 'deadball' || state.phase === 'checkball') {
     state.phaseTimer -= dt;
@@ -306,27 +397,30 @@ export function stepMatch(state: MatchState, inputs: [PlayerInput, PlayerInput],
   }
 
   const checking = state.phase === 'checkball' && !!state.check;
-  for (const side of [0, 1] as Side[]) {
-    let input = live ? inputs[side] : checking ? frozen(inputs[side]) : neutral(inputs[side]);
+  for (let pid = 0; pid < state.players.length; pid++) {
+    const raw = inputs[pid] ?? emptyInputFallback;
+    let input = live ? raw : checking ? frozen(raw) : neutral(raw);
     // The guard reads the RAW button, not the neutralised one: during the check
     // ceremony shoot is already forced false, so testing the processed input
     // would clear the guard immediately and let the held button fire a shot the
     // moment play went live.
-    if (state.checkGuard[side]) {
-      if (inputs[side].shoot) input = { ...input, shoot: false };
-      else state.checkGuard[side] = false;
+    if (state.checkGuard[pid]) {
+      if (raw.shoot) input = { ...input, shoot: false };
+      else state.checkGuard[pid] = false;
     }
-    updatePlayer(state, side, input, dt, rng);
+    updatePlayer(state, pid, input, dt, rng);
   }
 
   updateBall(state, dt, rng);
   resolveBodies(state, dt);
 
   // A shot already in the air beats the buzzer.
-  const handler = state.players[state.possession];
-  const shotUnderway = handler.state === 'shooting' || handler.state === 'finishing' || handler.state === 'rimHang';
+  const shotUnderway = state.teams[state.possession].some((pid) => {
+    const p = state.players[pid];
+    return p.state === 'shooting' || p.state === 'finishing' || p.state === 'rimHang';
+  });
   if (live && state.shotClock <= 0 && state.ball.state === 'held' && !shotUnderway) {
-    turnover(state, state.possession, 'shotClock');
+    turnover(state, state.ball.owner ?? state.teams[state.possession][0], 'shotClock');
   }
 
   if (state.config.timeLimit > 0 && state.clock <= 0 && state.winner === null) {
@@ -336,9 +430,16 @@ export function stepMatch(state: MatchState, inputs: [PlayerInput, PlayerInput],
   state.rngState = rng.snapshot();
 }
 
+/** A missing input slot reads as a player doing nothing. */
+const emptyInputFallback: PlayerInput = {
+  mx: 0, mz: 0, sprint: false, shoot: false, moveShoot: false, drive: false,
+  move: null, moveDirX: 0, moveDirZ: 0, steal: false, contest: false, fake: false,
+  pass: false, emote: null,
+};
+
 /** During dead ball phases we honour movement but suppress actions. */
 function neutral(input: PlayerInput): PlayerInput {
-  return { ...input, shoot: false, drive: false, move: null, steal: false, contest: false, fake: false };
+  return { ...input, shoot: false, drive: false, move: null, steal: false, contest: false, fake: false, pass: false };
 }
 
 /** Nobody moves during a check. You stand there and check the ball. */
@@ -357,7 +458,7 @@ const CHECK_PASS_TIME = 0.42;
  * either player presses during it does anything else, so checking in can never
  * turn into a jump or a shot.
  */
-function updateCheck(state: MatchState, inputs: [PlayerInput, PlayerInput], dt: number): void {
+function updateCheck(state: MatchState, inputs: PlayerInput[], dt: number): void {
   const check = state.check;
   if (!check) return;
   const ball = state.ball;
@@ -365,8 +466,10 @@ function updateCheck(state: MatchState, inputs: [PlayerInput, PlayerInput], dt: 
   if (check.stage === 'wait') {
     // A short beat so the ball is visibly in hand before you can check it.
     if (state.phaseTimer > 0) return;
-    if (!inputs[0].shoot && !inputs[1].shoot) return;
-    state.checkGuard = [inputs[0].shoot, inputs[1].shoot];
+    if (!inputs[check.from]?.shoot && !inputs[check.to]?.shoot) return;
+    state.checkGuard = state.players.map(
+      (_, pid) => (pid === check.from || pid === check.to) && !!inputs[pid]?.shoot,
+    );
     check.stage = 'out';
     check.timer = 0;
     ball.state = 'dead';
@@ -400,7 +503,7 @@ function updateCheck(state: MatchState, inputs: [PlayerInput, PlayerInput], dt: 
   // Back in the offence's hands: play on.
   ball.state = 'held';
   ball.owner = check.from;
-  state.possession = check.from;
+  state.possession = state.players[check.from].side;
   state.check = null;
   state.phase = 'live';
   state.events.push({ type: 'phase', phase: 'live' });
@@ -408,9 +511,9 @@ function updateCheck(state: MatchState, inputs: [PlayerInput, PlayerInput], dt: 
 
 // ------------------------------------------------------------------- players
 
-function updatePlayer(state: MatchState, side: Side, input: PlayerInput, dt: number, rng: Rng): void {
+function updatePlayer(state: MatchState, side: number, input: PlayerInput, dt: number, rng: Rng): void {
   const p = state.players[side];
-  const opp = state.players[other(side)];
+  const opp = nearestOpponent(state, p);
   const hasBall = state.ball.owner === side && state.ball.state === 'held';
 
   // Timers -----------------------------------------------------------------
@@ -537,6 +640,7 @@ function updatePlayer(state: MatchState, side: Side, input: PlayerInput, dt: num
           packageId: flight.packageId,
           posterized: flight.poster,
           value: flight.value,
+          victim: flight.victim,
         });
       }
       p.dunk = null;
@@ -681,6 +785,10 @@ function updatePlayer(state: MatchState, side: Side, input: PlayerInput, dt: num
 
   // --- action inputs -------------------------------------------------------
   if (hasBall) {
+    if (input.pass && p.y === 0) {
+      if (tryPass(state, side, rng)) return;
+    }
+
     if (input.fake && p.fakeTimer <= 0 && p.y === 0) {
       p.fakeTimer = 0.45;
       p.state = 'idle';
@@ -734,6 +842,19 @@ function updatePlayer(state: MatchState, side: Side, input: PlayerInput, dt: num
 
     p.state = 'dribble';
   } else {
+    // Calling for the ball. It only means something while a teammate actually
+    // has it, and it is a request, not a command — the handler's AI weighs it
+    // against whatever it was about to do itself.
+    if (
+      input.pass &&
+      state.ball.state === 'held' &&
+      state.ball.owner !== null &&
+      state.players[state.ball.owner].side === p.side
+    ) {
+      state.passRequest = { pid: side, timer: 1.4 };
+      state.events.push({ type: 'passCall', side });
+    }
+
     // --- defence ----------------------------------------------------------
     if (input.contest && p.y === 0 && p.state !== 'contesting') {
       const dx = opp.x - p.x;
@@ -767,7 +888,7 @@ function normalize(x: number, z: number): { x: number; z: number } {
 }
 
 function applyMovement(state: MatchState, p: SimPlayer, input: PlayerInput, dt: number, control: number): void {
-  const hasBall = state.ball.owner === p.side && state.ball.state === 'held';
+  const hasBall = state.ball.owner === p.pid && state.ball.state === 'held';
   const staggerControl = 1 - p.stagger * 0.85;
   const airControl = p.y > 0 ? 0.25 : 1;
   const authority = control * staggerControl * airControl;
@@ -833,7 +954,7 @@ function applyMovement(state: MatchState, p: SimPlayer, input: PlayerInput, dt: 
     p.outOfBoundsTimer += dt;
     if (p.outOfBoundsTimer > 0.4) {
       p.outOfBoundsTimer = 0;
-      turnover(state, p.side, 'outOfBounds');
+      turnover(state, p.pid, 'outOfBounds');
       return;
     }
   } else {
@@ -862,15 +983,143 @@ function applyMovement(state: MatchState, p: SimPlayer, input: PlayerInput, dt: 
   // the painted line in the corners: standing at the corner three you were
   // visibly behind the arc but 22ft from the rim, so the game kept telling you
   // to clear and refused to let you shoot.
-  if (state.needsClear && state.ball.owner === p.side && isBeyondArc(p.x, p.z)) {
+  if (state.needsClear && state.ball.owner === p.pid && isBeyondArc(p.x, p.z)) {
     state.needsClear = false;
-    state.events.push({ type: 'clear', side: p.side });
+    state.events.push({ type: 'clear', side: p.pid });
   }
+}
+
+// ------------------------------------------------------------------- passing
+
+/**
+ * The best teammate to throw to right now: the most open man, biased hard
+ * toward whoever is calling for it. Returns null with nobody to throw to —
+ * which is every 1v1 possession, where the button quietly does nothing.
+ */
+function bestPassTarget(state: MatchState, from: number): SimPlayer | null {
+  const p = state.players[from];
+  let best: SimPlayer | null = null;
+  let bestScore = -Infinity;
+  for (const mate of teammatesOf(state, from)) {
+    if (mate.state === 'fallen' || mate.state === 'staggered') continue;
+    const guard = nearestOpponent(state, mate);
+    const open = Math.hypot(guard.x - mate.x, guard.z - mate.z);
+    const dist = Math.hypot(mate.x - p.x, mate.z - p.z);
+    // Openness is most of it; very long cross-court passes are discounted, and
+    // the man who called for it gets the benefit of every doubt. Deep position
+    // counts too: a big sealed on the block is a great pass even with his man
+    // draped on him — that is what a post entry is.
+    const rim = distanceToRim(mate.x, mate.z);
+    const seal = rim < 13 && open > 1.2 ? (13 - rim) * 0.3 : 0;
+    let score = open - dist * 0.14 + seal;
+    if (state.passRequest?.pid === mate.pid) score += 6;
+    if (score > bestScore) {
+      bestScore = score;
+      best = mate;
+    }
+  }
+  return best;
+}
+
+/**
+ * Throws a real pass: a flat, quick flight the receiver meets where they are
+ * going. A defender parked in the lane can pick it off — throwing through a
+ * body is a turnover you earned, not bad luck.
+ */
+function tryPass(state: MatchState, from: number, rng: Rng): boolean {
+  const to = bestPassTarget(state, from);
+  if (!to) return false;
+  const p = state.players[from];
+  const ball = state.ball;
+
+  // Pass Accuracy finally does what its card always promised: a real passer
+  // zips it — faster flight, tighter line, harder to pick.
+  const zip = clamp01((p.cfg.attrs.passAccuracy - 25) / 74);
+  const dist = Math.hypot(to.x - p.x, to.z - p.z);
+  const duration = (0.16 + dist * 0.016) * lerp(1.18, 0.82, zip);
+  // Lead the receiver: the pass goes where they will be when it arrives.
+  const lead = clampToCourt(to.x + to.vx * duration * 0.8, to.z + to.vz * duration * 0.8);
+  const leadX = lead.x;
+  const leadZ = lead.z;
+
+  // Interception check, decided at the throw: the defender closest to the
+  // midpoint of the lane, if he is basically standing in it, gets a hand up.
+  const midX = (p.x + leadX) / 2;
+  const midZ = (p.z + leadZ) / 2;
+  let laneDist = Infinity;
+  let picker: SimPlayer | null = null;
+  for (const pid of state.teams[other(p.side)]) {
+    const d = state.players[pid];
+    if (d.stagger > 0.4 || d.state === 'fallen') continue;
+    const dd = Math.hypot(d.x - midX, d.z - midZ);
+    if (dd < laneDist) {
+      laneDist = dd;
+      picker = d;
+    }
+  }
+  if (picker && laneDist < 2.6) {
+    const hands = clamp01((picker.cfg.attrs.steal - 25) / 74);
+    // Capped: even the worst pass into the worst spot is a gamble for the
+    // defender, not a guarantee — a pass system where half the passes die
+    // is a pass system nobody uses.
+    const pickChance = Math.min(0.5, (1 - laneDist / 2.6) * (0.32 + hands * 0.38) * lerp(1.25, 0.6, zip));
+    if (rng.chance(pickChance)) {
+      // Tipped. The ball squirts loose off the deflection, live at once.
+      ball.state = 'loose';
+      ball.settled = true;
+      ball.owner = null;
+      ball.shotBy = null;
+      ball.passTo = null;
+      ball.x = midX;
+      ball.z = midZ;
+      ball.y = 3.5;
+      const away = normalize(midX - picker.x + rng.range(-1, 1), midZ - picker.z + rng.range(-1, 1));
+      const power = rng.range(6, 11);
+      ball.vx = away.x * power;
+      ball.vz = away.z * power;
+      ball.vy = rng.range(2, 5);
+      state.stats[from].turnovers++;
+      state.stats[from].gradePoints -= 0.4;
+      state.stats[picker.pid].gradePoints += 0.4;
+      state.events.push({ type: 'turnover', side: from, reason: 'strip' });
+      state.passRequest = null;
+      return true;
+    }
+  }
+
+  ball.state = 'pass';
+  ball.owner = null;
+  ball.shotBy = null;
+  ball.passTo = to.pid;
+  ball.settled = false;
+  ball.flightTime = 0;
+  ball.flightDuration = duration;
+  ball.fromX = p.x;
+  ball.fromZ = p.z;
+  ball.fromY = 3.6;
+  ball.toX = leadX;
+  ball.toZ = leadZ;
+  ball.toY = 3.4;
+  ball.apex = 4.6 + dist * 0.06;
+  ball.vx = ball.vy = ball.vz = 0;
+
+  p.state = 'idle';
+  p.facing = Math.atan2(-(leadX - p.x), leadZ - p.z);
+  state.passRequest = null;
+  state.events.push({ type: 'pass', from, to: to.pid });
+  return true;
 }
 
 /** Body-up: the defender slows and redirects a driving handler. */
 function resolveBodies(state: MatchState, dt: number): void {
-  const [a, b] = state.players;
+  for (let i = 0; i < state.players.length; i++) {
+    for (let j = i + 1; j < state.players.length; j++) {
+      resolvePair(state, state.players[i], state.players[j], dt);
+    }
+  }
+}
+
+function resolvePair(state: MatchState, a: SimPlayer, b: SimPlayer, dt: number): void {
   const dx = b.x - a.x;
   const dz = b.z - a.z;
   const dist = Math.hypot(dx, dz);
@@ -881,11 +1130,15 @@ function resolveBodies(state: MatchState, dt: number): void {
   const nz = dz / dist;
   const overlap = minDist - dist;
 
-  const handler = state.ball.owner === 0 ? a : state.ball.owner === 1 ? b : null;
-  const defender = handler ? state.players[other(handler.side)] : null;
+  // The strength battle is a handler-versus-defender thing: it only runs when
+  // this pair is the man with the ball and an opponent. Two teammates, or two
+  // players away from the play, just get separated evenly.
+  const handler = state.ball.owner === a.pid ? a : state.ball.owner === b.pid ? b : null;
+  const defender = handler ? (handler === a ? b : a) : null;
+  const isDuel = handler !== null && defender !== null && handler.side !== defender.side;
 
   let aShare = 0.5;
-  if (handler && defender) {
+  if (isDuel && handler && defender) {
     const handlerPower =
       handler.cfg.attrs.strength * 0.6 + handler.cfg.attrs.ballHandle * 0.4 + badgeLevel(handler.cfg.badges, 'bully') * 20;
     const defPower =
@@ -927,7 +1180,7 @@ function resolveBodies(state: MatchState, dt: number): void {
  * at it — which is what makes spamming moves on a low Ball Handle build a bad
  * idea rather than a free animation.
  */
-function tryFumble(state: MatchState, side: Side, def: DribbleMoveDef, rng: Rng): boolean {
+function tryFumble(state: MatchState, side: number, def: DribbleMoveDef, rng: Rng): boolean {
   const p = state.players[side];
   const handle = p.cfg.attrs.ballHandle;
 
@@ -941,7 +1194,7 @@ function tryFumble(state: MatchState, side: Side, def: DribbleMoveDef, rng: Rng)
   chance *= 1 - badgeLevel(p.cfg.badges, 'tightHandles') * 0.3;
   chance *= 1 - badgeLevel(p.cfg.badges, 'handlesForDays') * 0.25;
   // Pressure matters: a defender in your chest turns a wobble into a turnover.
-  const d = state.players[other(side)];
+  const d = nearestOpponent(state, p);
   const pressure = clamp01(1 - Math.hypot(d.x - p.x, d.z - p.z) / 7);
   chance *= 1 + pressure * 0.8;
   // A retreat pulls the ball away from the defender rather than across him, so
@@ -976,7 +1229,7 @@ function tryFumble(state: MatchState, side: Side, def: DribbleMoveDef, rng: Rng)
   return true;
 }
 
-function tryDribbleMove(state: MatchState, side: Side, moveId: DribbleMoveId, input: PlayerInput, rng: Rng): void {
+function tryDribbleMove(state: MatchState, side: number, moveId: DribbleMoveId, input: PlayerInput, rng: Rng): void {
   const p = state.players[side];
   const def = MOVE_BY_ID[moveId];
   if (!def) return;
@@ -1032,14 +1285,14 @@ const ANKLE_BREAKER_CEILING = 0.25;
 
 function resolveAnkleBreaker(
   state: MatchState,
-  side: Side,
+  side: number,
   base: number,
   misdirection: number,
   dir: { x: number; z: number },
   rng: Rng,
 ): void {
   const p = state.players[side];
-  const d = state.players[other(side)];
+  const d = nearestOpponent(state, p);
   const dist = Math.hypot(d.x - p.x, d.z - p.z);
   if (dist > 8) return;
 
@@ -1109,7 +1362,7 @@ function resolveAnkleBreaker(
  * the green window instead, which is driven by the Dunk rating: a 40 gets a
  * sliver, a 90 gets a real target.
  */
-function canDunkNow(state: MatchState, side: Side): boolean {
+function canDunkNow(state: MatchState, side: number): boolean {
   const p = state.players[side];
   return (
     distanceToRim(p.x, p.z) < 11 &&
@@ -1123,9 +1376,9 @@ function canDunkNow(state: MatchState, side: Side): boolean {
  * A dunk taken at somebody who has left their feet at you is a contact dunk —
  * the poster. It needs a package that can do it and the strength to finish it.
  */
-function dunkTypeFor(state: MatchState, side: Side): ShotType {
+function dunkTypeFor(state: MatchState, side: number): ShotType {
   const p = state.players[side];
-  const d = state.players[other(side)];
+  const d = nearestOpponent(state, p);
   const pkg = DUNK_PACKAGE_BY_ID[p.cfg.dunkPackageId] ?? DUNK_PACKAGE_BY_ID['basic-slam'];
   const defDist = Math.hypot(d.x - p.x, d.z - p.z);
   const contesting = d.y > 0.4 || d.state === 'contesting';
@@ -1134,9 +1387,9 @@ function dunkTypeFor(state: MatchState, side: Side): ShotType {
 
 // -------------------------------------------------------------------- shots
 
-function buildShotProfile(state: MatchState, side: Side, shotType: ShotType): ShotProfile {
+function buildShotProfile(state: MatchState, side: number, shotType: ShotType): ShotProfile {
   const p = state.players[side];
-  const d = state.players[other(side)];
+  const d = nearestOpponent(state, p);
   const dist = distanceToRim(p.x, p.z);
   const three = isBeyondArc(p.x, p.z);
   const defDist = Math.hypot(d.x - p.x, d.z - p.z);
@@ -1176,7 +1429,7 @@ function buildShotProfile(state: MatchState, side: Side, shotType: ShotType): Sh
   });
 }
 
-function startShot(state: MatchState, side: Side, shotType: ShotType): void {
+function startShot(state: MatchState, side: number, shotType: ShotType): void {
   const p = state.players[side];
   p.state = 'shooting';
   // A flight from a previous dunk must never leak into a new shot.
@@ -1195,9 +1448,9 @@ function startShot(state: MatchState, side: Side, shotType: ShotType): void {
   p.stamina = clamp01(p.stamina - 0.022 * staminaDrainMult(p));
 }
 
-function releaseShot(state: MatchState, side: Side, rng: Rng): void {
+function releaseShot(state: MatchState, side: number, rng: Rng): void {
   const p = state.players[side];
-  const d = state.players[other(side)];
+  const d = nearestOpponent(state, p);
   const profile = p.shotProfile ?? buildShotProfile(state, side, p.shotType);
   const releasePoint = clamp(p.shotElapsed / profile.meterDuration, 0, 1.4);
 
@@ -1206,8 +1459,8 @@ function releaseShot(state: MatchState, side: Side, rng: Rng): void {
 
   // Block check at the release point, then a foul check on what got through.
   const interior = distanceToRim(p.x, p.z) < 9;
-  if (tryBlock(state, other(side), side, rng, false)) return;
-  if (tryFoul(state, other(side), side, rng, interior)) return;
+  if (tryBlockByAny(state, side, rng, false)) return;
+  if (tryFoulByAny(state, side, rng, interior)) return;
 
   const three = p.shotIsThree;
   const result = resolveShot(profile, releasePoint, rng.next(), three);
@@ -1294,7 +1547,7 @@ function isDunkShot(type: ShotType): boolean {
 
 function launchBall(
   state: MatchState,
-  side: Side,
+  side: number,
   made: boolean,
   value: 1 | 2,
   timingError: number,
@@ -1307,6 +1560,7 @@ function launchBall(
   ball.state = 'shot';
   ball.owner = null;
   ball.shotBy = side;
+  ball.passTo = null;
   ball.shotWillGoIn = made;
   ball.shotValue = value;
   ball.settled = false;
@@ -1348,14 +1602,14 @@ function launchBall(
  */
 function startDunkFlight(
   state: MatchState,
-  side: Side,
+  side: number,
   made: boolean,
   emphatic: boolean,
   value: 1 | 2,
   rng: Rng,
 ): void {
   const p = state.players[side];
-  const d = state.players[other(side)];
+  const d = nearestOpponent(state, p);
   const pkg = DUNK_PACKAGE_BY_ID[p.cfg.dunkPackageId] ?? DUNK_PACKAGE_BY_ID['basic-slam'];
 
   // Land the feet a step in front of the iron, coming in along the line you
@@ -1379,6 +1633,7 @@ function startDunkFlight(
 
   p.state = 'finishing';
   p.dunk = {
+    victim: poster ? d.pid : -1,
     fromX: p.x,
     fromZ: p.z,
     toX,
@@ -1416,9 +1671,10 @@ function startDunkFlight(
  * are one moment — the fall reading half a second before the ball was even at
  * the rim was most of what made posters look broken.
  */
-function slamDunk(state: MatchState, side: Side, rng: Rng): void {
+function slamDunk(state: MatchState, side: number, rng: Rng): void {
   const p = state.players[side];
-  const d = state.players[other(side)];
+  const flight0 = p.dunk;
+  const d = flight0 && flight0.victim >= 0 ? state.players[flight0.victim] : nearestOpponent(state, p);
   const flight = p.dunk;
   if (!flight) {
     p.state = 'airborne';
@@ -1482,9 +1738,9 @@ function slamDunk(state: MatchState, side: Side, rng: Rng): void {
   }
 }
 
-function startFinish(state: MatchState, side: Side, rng: Rng): void {
+function startFinish(state: MatchState, side: number, rng: Rng): void {
   const p = state.players[side];
-  const d = state.players[other(side)];
+  const d = nearestOpponent(state, p);
   const dist = distanceToRim(p.x, p.z);
   const defDist = Math.hypot(d.x - p.x, d.z - p.z);
 
@@ -1518,8 +1774,8 @@ function startFinish(state: MatchState, side: Side, rng: Rng): void {
     p.state = 'airborne';
     p.vy = Math.sqrt(2 * GRAVITY * jumpHeight(p));
     p.y = 0.001;
-    if (tryBlock(state, other(side), side, rng, true)) return;
-    if (tryFoul(state, other(side), side, rng, true)) return;
+    if (tryBlockByAny(state, side, rng, true)) return;
+    if (tryFoulByAny(state, side, rng, true)) return;
 
     const rimPressure = clamp01(1 - defDist / 6) * (d.y > 0.4 ? 1.2 : 0.75);
     const noFear = badgeLevel(p.cfg.badges, 'noFear');
@@ -1562,7 +1818,39 @@ function startFinish(state: MatchState, side: Side, rng: Rng): void {
 
 // -------------------------------------------------------------------- blocks
 
-function tryBlock(state: MatchState, defSide: Side, offSide: Side, rng: Rng, atRim: boolean): boolean {
+/**
+ * Every defender gets their crack at the shot, nearest first. In 1v1 that is
+ * one man — the same single check it has always been. `tryBlock`'s own gates
+ * (in the air, within reach) throw out anyone not actually in the play before
+ * any dice are rolled, so a far-side defender never changes the rng stream.
+ */
+function tryBlockByAny(state: MatchState, offSide: number, rng: Rng, atRim: boolean): boolean {
+  const p = state.players[offSide];
+  const defenders = [...state.teams[other(p.side)]].sort(
+    (a, b) =>
+      Math.hypot(state.players[a].x - p.x, state.players[a].z - p.z) -
+      Math.hypot(state.players[b].x - p.x, state.players[b].z - p.z),
+  );
+  for (const pid of defenders) {
+    if (tryBlock(state, pid, offSide, rng, atRim)) return true;
+  }
+  return false;
+}
+
+function tryFoulByAny(state: MatchState, offSide: number, rng: Rng, atRim: boolean): boolean {
+  const p = state.players[offSide];
+  const defenders = [...state.teams[other(p.side)]].sort(
+    (a, b) =>
+      Math.hypot(state.players[a].x - p.x, state.players[a].z - p.z) -
+      Math.hypot(state.players[b].x - p.x, state.players[b].z - p.z),
+  );
+  for (const pid of defenders) {
+    if (tryFoul(state, pid, offSide, rng, atRim)) return true;
+  }
+  return false;
+}
+
+function tryBlock(state: MatchState, defSide: number, offSide: number, rng: Rng, atRim: boolean): boolean {
   const d = state.players[defSide];
   const p = state.players[offSide];
   if (d.y < 0.35) return false;
@@ -1610,7 +1898,7 @@ function tryBlock(state: MatchState, defSide: Side, offSide: Side, rng: Rng, atR
     // A block is a stop, always: the ball goes to whoever swatted it. Only a
     // miss goes to the glass — you have to earn a block, so it should not turn
     // into a scramble the shooter can win back.
-    changePossession(state, defSide, 'block');
+    changePossession(state, state.players[defSide].side, 'block');
   } else {
     ball.state = 'loose';
     ball.settled = true;
@@ -1636,6 +1924,7 @@ function changePossession(state: MatchState, to: Side, reason: 'miss' | 'block' 
   state.ball.state = 'dead';
   state.ball.owner = null;
   state.ball.shotBy = null;
+  state.ball.passTo = null;
   state.ball.shotGrade = null;
   state.phase = 'deadball';
   state.phaseTimer = 0.85;
@@ -1645,10 +1934,12 @@ function changePossession(state: MatchState, to: Side, reason: 'miss' | 'block' 
 
 // -------------------------------------------------------------------- steals
 
-function attemptSteal(state: MatchState, defSide: Side, rng: Rng): void {
+function attemptSteal(state: MatchState, defSide: number, rng: Rng): void {
   const d = state.players[defSide];
-  const p = state.players[other(defSide)];
-  if (state.ball.owner !== p.side) return;
+  if (state.ball.owner === null || state.ball.state !== 'held') return;
+  const p = state.players[state.ball.owner];
+  // You can only strip an opponent.
+  if (p.side === d.side) return;
 
   const dist = Math.hypot(p.x - d.x, p.z - d.z);
   // Reaching in is now a real decision rather than something you hold down. A
@@ -1690,11 +1981,11 @@ function attemptSteal(state: MatchState, defSide: Side, rng: Rng): void {
     state.ball.state = 'held';
     state.stats[defSide].steals++;
     state.stats[defSide].gradePoints += 0.7;
-    state.stats[p.side].turnovers++;
-    state.stats[p.side].gradePoints -= 0.6;
+    state.stats[p.pid].turnovers++;
+    state.stats[p.pid].gradePoints -= 0.6;
     state.events.push({ type: 'steal', side: defSide });
     awardBadgeProgress(d.cfg.badges, d.cfg.attrs, 'steal', 2);
-    state.possession = defSide;
+    state.possession = d.side;
     state.needsClear = true;
     state.shotClock = state.config.shotClock;
     p.greenStreak = 0;
@@ -1737,6 +2028,38 @@ function updateBall(state: MatchState, dt: number, rng: Rng): void {
     return;
   }
 
+  // A pass in flight: a quick, flat arc from hand to hand. The receiver takes
+  // it where the throw led them; a pass to nobody (the receiver went down
+  // mid-flight) turns into a live loose ball where it lands.
+  if (ball.state === 'pass') {
+    ball.flightTime += dt;
+    const t = clamp01(ball.flightTime / ball.flightDuration);
+    ball.x = lerp(ball.fromX, ball.toX, t);
+    ball.z = lerp(ball.fromZ, ball.toZ, t);
+    const arc = 4 * (ball.apex - (ball.fromY + ball.toY) / 2) * t * (1 - t);
+    ball.y = lerp(ball.fromY, ball.toY, t) + arc;
+
+    if (t >= 1) {
+      const to = ball.passTo !== null ? state.players[ball.passTo] : null;
+      if (to && to.state !== 'fallen' && to.state !== 'staggered') {
+        ball.state = 'held';
+        ball.owner = to.pid;
+        ball.passTo = null;
+        ball.vx = ball.vy = ball.vz = 0;
+        if (to.state === 'idle') to.state = 'dribble';
+      } else {
+        ball.state = 'loose';
+        ball.settled = true;
+        ball.owner = null;
+        ball.passTo = null;
+        ball.vx = (ball.toX - ball.fromX) / Math.max(0.1, ball.flightDuration) * 0.4;
+        ball.vz = (ball.toZ - ball.fromZ) / Math.max(0.1, ball.flightDuration) * 0.4;
+        ball.vy = 0;
+      }
+    }
+    return;
+  }
+
   if (ball.state === 'shot') {
     ball.flightTime += dt;
     const t = clamp01(ball.flightTime / ball.flightDuration);
@@ -1746,22 +2069,23 @@ function updateBall(state: MatchState, dt: number, rng: Rng): void {
     const arc = 4 * (ball.apex - (ball.fromY + ball.toY) / 2) * t * (1 - t);
     ball.y = lerp(ball.fromY, ball.toY, t) + arc;
 
-    if (t >= 1) {
+    if (t >= 1 && ball.shotBy !== null) {
+      const shotBy = ball.shotBy;
       if (ball.shotWillGoIn) {
-        scoreBasket(state, ball.shotBy as Side, ball.shotValue);
+        scoreBasket(state, shotBy, ball.shotValue);
       } else if (state.config.turnoverOnMiss) {
         // Possession rules: you miss, they get the ball.
-        const shooter = state.players[ball.shotBy as Side];
+        const shooter = state.players[shotBy];
         shooter.makeStreak = 0;
-        state.events.push({ type: 'miss', side: ball.shotBy as Side });
-        changePossession(state, other(ball.shotBy as Side), 'miss');
-      } else if (ball.shotBy !== null && isDunkShot(state.players[ball.shotBy].shotType) && !state.config.instantInbound) {
+        state.events.push({ type: 'miss', side: shotBy });
+        changePossession(state, other(shooter.side), 'miss');
+      } else if (isDunkShot(state.players[shotBy].shotType) && !state.config.instantInbound) {
         // A missed dunk is thrown at the rim, not laid on it: it hammers off
         // the iron and goes flying — high, and a long way out. The kick is the
         // dunker's own approach line reversed and swung to one side, so the
         // ball leaves the paint behind him instead of dropping back into the
         // hands of the man who just missed it. Where it comes down is a race.
-        const shooter = state.players[ball.shotBy as Side];
+        const shooter = state.players[shotBy];
         const approach = normalize(COURT.rimX - shooter.shotFromX, COURT.rimZ - shooter.shotFromZ);
         const swing = rng.range(-1.15, 1.15);
         const cos = Math.cos(swing);
@@ -1779,15 +2103,15 @@ function updateBall(state: MatchState, dt: number, rng: Rng): void {
         ball.vx = off.x * power;
         ball.vz = off.z * power;
         ball.vy = rng.range(13, 18);
-        state.events.push({ type: 'miss', side: ball.shotBy as Side });
+        state.events.push({ type: 'miss', side: shotBy });
         shooter.makeStreak = 0;
       } else if (state.config.instantInbound) {
         // Practice: the ball is back in your hands the moment it misses. There
         // is no drill in chasing a carom across an empty gym.
-        const shooter = state.players[ball.shotBy as Side];
+        const shooter = state.players[shotBy];
         shooter.makeStreak = 0;
-        state.events.push({ type: 'miss', side: ball.shotBy as Side });
-        returnBallTo(state, ball.shotBy as Side);
+        state.events.push({ type: 'miss', side: shotBy });
+        returnBallTo(state, shotBy);
       } else {
         // Rim carom. Direction is derived from where the shot landed relative
         // to the rim so long misses bounce long.
@@ -1804,8 +2128,8 @@ function updateBall(state: MatchState, dt: number, rng: Rng): void {
         ball.vx = off.x * power;
         ball.vz = off.z * power;
         ball.vy = rng.range(7, 12);
-        state.events.push({ type: 'miss', side: ball.shotBy as Side });
-        const shooter = state.players[ball.shotBy as Side];
+        state.events.push({ type: 'miss', side: shotBy });
+        const shooter = state.players[shotBy];
         shooter.makeStreak = 0;
       }
     }
@@ -1945,15 +2269,17 @@ function placeHeldBall(state: MatchState, p: SimPlayer, ball: Ball): void {
 function tryCollect(state: MatchState, rng: Rng): void {
   const ball = state.ball;
   if (!ball.settled) return;
-  const candidates: { side: Side; weight: number }[] = [];
+  // The team that shot it is chasing an offensive board; teammates count.
+  const shooterTeam = ball.shotBy !== null ? state.players[ball.shotBy].side : null;
+  const candidates: { side: number; weight: number }[] = [];
 
-  for (const side of [0, 1] as Side[]) {
-    const p = state.players[side];
+  for (const p of state.players) {
+    const side = p.pid;
     if (p.reboundLock > 0) continue;
     const dist = Math.hypot(ball.x - p.x, ball.z - p.z);
     const boardBadge = badgeLevel(p.cfg.badges, 'reboundChaser');
-    // Chasing your own miss is an offensive board; everything else is defensive.
-    const boardRating = ball.shotBy === side ? p.cfg.attrs.offensiveRebound : p.cfg.attrs.defensiveRebound;
+    // Chasing your own team's miss is an offensive board; everything else is defensive.
+    const boardRating = shooterTeam === p.side ? p.cfg.attrs.offensiveRebound : p.cfg.attrs.defensiveRebound;
     const grabRadius = 2.0 + (boardRating / 99) * 1.4 + boardBadge * 0.9;
     const reach = reachHeight(p) + 0.6;
     if (dist <= grabRadius && ball.y <= reach && p.stagger < 0.7) {
@@ -1970,19 +2296,31 @@ function tryCollect(state: MatchState, rng: Rng): void {
 
   if (candidates.length === 0) return;
 
-  let winner: Side;
+  let winner: number;
   if (candidates.length === 1) {
     winner = candidates[0].side;
   } else {
+    // One roll across everyone in the scrum, weight for weight — with exactly
+    // two candidates this is the same coin the 1v1 game always flipped.
     const total = candidates.reduce((s, c) => s + c.weight, 0);
-    winner = rng.next() * total < candidates[0].weight ? candidates[0].side : candidates[1].side;
-    const loser = state.players[other(winner)];
-    awardBadgeProgress(loser.cfg.badges, loser.cfg.attrs, 'boxOut', 0.5);
+    let roll = rng.next() * total;
+    winner = candidates[candidates.length - 1].side;
+    for (const c of candidates) {
+      if (roll < c.weight) {
+        winner = c.side;
+        break;
+      }
+      roll -= c.weight;
+    }
+    for (const c of candidates) {
+      if (c.side === winner) continue;
+      const loser = state.players[c.side];
+      awardBadgeProgress(loser.cfg.badges, loser.cfg.attrs, 'boxOut', 0.5);
+    }
   }
 
   const p = state.players[winner];
-  const wasShooter = ball.shotBy;
-  const offensive = wasShooter === winner;
+  const offensive = shooterTeam !== null && shooterTeam === p.side;
 
   // Getting a hand on it is not the same as coming down with it. A weak board
   // man tips it away and has to go again; a strong one snatches it clean.
@@ -2006,6 +2344,7 @@ function tryCollect(state: MatchState, rng: Rng): void {
   ball.state = 'held';
   ball.owner = winner;
   ball.shotBy = null;
+  ball.passTo = null;
   ball.shotGrade = null;
 
   state.stats[winner].rebounds++;
@@ -2014,7 +2353,7 @@ function tryCollect(state: MatchState, rng: Rng): void {
   awardBadgeProgress(p.cfg.badges, p.cfg.attrs, 'rebound', 1);
   if (offensive) awardBadgeProgress(p.cfg.badges, p.cfg.attrs, 'putback', 1);
 
-  state.possession = winner;
+  state.possession = p.side;
   // A clear is owed on a change of possession, and an offensive rebound is not
   // one — it is the same possession continuing. Asking for a clear on your own
   // board was 35% of all clears, almost all of them taken about three feet from
@@ -2034,7 +2373,7 @@ function tryCollect(state: MatchState, rng: Rng): void {
  * Rates are deliberately low — fouls should punish a reckless contest, not
  * interrupt the flow of every possession.
  */
-function tryFoul(state: MatchState, defSide: Side, offSide: Side, rng: Rng, atRim: boolean): boolean {
+function tryFoul(state: MatchState, defSide: number, offSide: number, rng: Rng, atRim: boolean): boolean {
   const d = state.players[defSide];
   const p = state.players[offSide];
   const dist = Math.hypot(p.x - d.x, p.z - d.z);
@@ -2058,7 +2397,7 @@ function tryFoul(state: MatchState, defSide: Side, offSide: Side, rng: Rng, atRi
   return true;
 }
 
-function awardFreeThrows(state: MatchState, offSide: Side, defSide: Side, shots: number): void {
+function awardFreeThrows(state: MatchState, offSide: number, defSide: number, shots: number): void {
   state.stats[offSide].foulsDrawn++;
   state.stats[defSide].foulsCommitted++;
   state.stats[defSide].gradePoints -= 0.25;
@@ -2067,7 +2406,7 @@ function awardFreeThrows(state: MatchState, offSide: Side, defSide: Side, shots:
   state.freeThrow = { side: offSide, remaining: shots };
   state.phase = 'freeThrow';
   state.phaseTimer = 1.1;
-  state.possession = offSide;
+  state.possession = state.players[offSide].side;
   state.needsClear = false;
   state.events.push({ type: 'phase', phase: 'freeThrow' });
 
@@ -2077,7 +2416,6 @@ function awardFreeThrows(state: MatchState, offSide: Side, defSide: Side, shots:
 function setupFreeThrowPositions(state: MatchState): void {
   const shooterSide = state.freeThrow!.side;
   const shooter = state.players[shooterSide];
-  const other_ = state.players[other(shooterSide)];
 
   shooter.x = 0;
   shooter.z = COURT.freeThrowZ;
@@ -2089,24 +2427,33 @@ function setupFreeThrowPositions(state: MatchState): void {
   shooter.shotElapsed = 0;
   shooter.facing = Math.PI;
 
-  other_.x = 7;
-  other_.z = COURT.freeThrowZ - 6;
-  other_.vx = other_.vz = other_.y = other_.vy = 0;
-  other_.state = 'idle';
-  other_.stagger = 0;
-  other_.facing = 0;
+  // Everybody else lines the lane, alternating sides the way a stripe actually
+  // fills: opponents nearest the rim, teammates behind them.
+  let slot = 0;
+  for (const p of state.players) {
+    if (p.pid === shooterSide) continue;
+    const dir = slot % 2 === 0 ? 1 : -1;
+    const row = Math.floor(slot / 2);
+    p.x = dir * 7;
+    p.z = COURT.freeThrowZ - 6 + row * 3.2;
+    p.vx = p.vz = p.y = p.vy = 0;
+    p.state = 'idle';
+    p.stagger = 0;
+    p.facing = 0;
+    slot++;
+  }
 
   const ball = state.ball;
   ball.state = 'held';
   ball.owner = shooterSide;
   ball.shotBy = null;
+  ball.passTo = null;
   ball.shotGrade = null;
   // A trip to the line is also a breather.
-  shooter.stamina = clamp01(shooter.stamina + 0.14);
-  other_.stamina = clamp01(other_.stamina + 0.1);
+  for (const p of state.players) p.stamina = clamp01(p.stamina + (p.pid === shooterSide ? 0.14 : 0.1));
 }
 
-function buildFreeThrowProfile(state: MatchState, side: Side): ShotProfile {
+function buildFreeThrowProfile(state: MatchState, side: number): ShotProfile {
   const p = state.players[side];
   return computeShotProfile({
     attrs: p.cfg.attrs,
@@ -2126,14 +2473,14 @@ function buildFreeThrowProfile(state: MatchState, side: Side): ShotProfile {
   });
 }
 
-function updateFreeThrow(state: MatchState, inputs: [PlayerInput, PlayerInput], dt: number, rng: Rng): void {
+function updateFreeThrow(state: MatchState, inputs: PlayerInput[], dt: number, rng: Rng): void {
   const ft = state.freeThrow;
   if (!ft) {
     state.phase = 'live';
     return;
   }
   const shooter = state.players[ft.side];
-  const input = inputs[ft.side];
+  const input = inputs[ft.side] ?? emptyInputFallback;
 
   if (state.phaseTimer > 0) {
     state.phaseTimer -= dt;
@@ -2197,17 +2544,18 @@ function updateFreeThrow(state: MatchState, inputs: [PlayerInput, PlayerInput], 
   state.events.push({ type: 'freeThrow', side: ft.side, made: result.made, remaining: ft.remaining });
 
   if (result.made) {
+    const team = shooter.side;
     stats.ftm++;
     stats.points++;
-    state.score[ft.side] += 1;
+    state.score[team] += 1;
     state.events.push({ type: 'score', side: ft.side, value: 1, score: [state.score[0], state.score[1]] });
     awardBadgeProgress(shooter.cfg.badges, shooter.cfg.attrs, 'anyMake', 0.5);
 
     const target = state.config.targetScore;
-    const opp = state.score[other(ft.side)];
-    if ((state.score[ft.side] >= target && state.score[ft.side] - opp >= state.config.winBy) || state.score[ft.side] >= state.config.maxScore) {
+    const opp = state.score[other(team)];
+    if ((state.score[team] >= target && state.score[team] - opp >= state.config.winBy) || state.score[team] >= state.config.maxScore) {
       state.freeThrow = null;
-      finishGame(state, ft.side);
+      finishGame(state, team);
       return;
     }
   }
@@ -2221,13 +2569,14 @@ function updateFreeThrow(state: MatchState, inputs: [PlayerInput, PlayerInput], 
   // Last attempt resolved: a make keeps the ball (make it take it), a miss is
   // a live rebound off the rim.
   state.freeThrow = null;
+  const shooterTeam = shooter.side;
   if (result.made) {
     state.phase = 'deadball';
     state.phaseTimer = 0.9;
-    state.possession = state.config.makeItTakeIt ? ft.side : other(ft.side);
+    state.possession = state.config.makeItTakeIt ? shooterTeam : other(shooterTeam);
     state.events.push({ type: 'phase', phase: 'deadball' });
   } else if (state.config.turnoverOnMiss) {
-    changePossession(state, other(ft.side), 'miss');
+    changePossession(state, other(shooterTeam), 'miss');
   } else {
     state.phase = 'live';
     state.shotClock = state.config.shotClock;
@@ -2248,9 +2597,10 @@ function updateFreeThrow(state: MatchState, inputs: [PlayerInput, PlayerInput], 
 
 // ------------------------------------------------------------------- scoring
 
-function scoreBasket(state: MatchState, side: Side, value: 1 | 2): void {
+function scoreBasket(state: MatchState, side: number, value: 1 | 2): void {
   const p = state.players[side];
-  state.score[side] += value;
+  const team = p.side;
+  state.score[team] += value;
   const stats = state.stats[side];
   stats.points += value;
   stats.fgm++;
@@ -2258,7 +2608,7 @@ function scoreBasket(state: MatchState, side: Side, value: 1 | 2): void {
   p.makeStreak++;
   stats.bestStreak = Math.max(stats.bestStreak, p.makeStreak);
   stats.gradePoints += value === 2 ? 0.9 : 0.6;
-  state.players[other(side)].makeStreak = 0;
+  for (const pid of state.teams[other(team)]) state.players[pid].makeStreak = 0;
 
   state.events.push({ type: 'score', side, value, score: [state.score[0], state.score[1]] });
 
@@ -2275,24 +2625,24 @@ function scoreBasket(state: MatchState, side: Side, value: 1 | 2): void {
   ball.shotBy = null;
 
   const target = state.config.targetScore;
-  const opp = state.score[other(side)];
+  const opp = state.score[other(team)];
   const won =
-    (state.score[side] >= target && state.score[side] - opp >= state.config.winBy) ||
-    state.score[side] >= state.config.maxScore;
+    (state.score[team] >= target && state.score[team] - opp >= state.config.winBy) ||
+    state.score[team] >= state.config.maxScore;
 
   if (won) {
-    finishGame(state, side);
+    finishGame(state, team);
     return;
   }
 
   if (state.config.instantInbound) {
-    returnBallTo(state, state.config.makeItTakeIt ? side : other(side));
+    returnBallTo(state, state.config.makeItTakeIt ? side : state.teams[other(team)][0]);
     return;
   }
 
   state.phase = 'deadball';
   state.phaseTimer = 1.0;
-  state.possession = state.config.makeItTakeIt ? side : other(side);
+  state.possession = state.config.makeItTakeIt ? team : other(team);
   state.events.push({ type: 'phase', phase: 'deadball' });
 }
 
@@ -2300,12 +2650,13 @@ function scoreBasket(state: MatchState, side: Side, value: 1 | 2): void {
  * Puts the ball straight back in a player's hands where they stand and keeps
  * play live. Practice modes only — a game always restarts from a check.
  */
-function returnBallTo(state: MatchState, side: Side): void {
+function returnBallTo(state: MatchState, side: number): void {
   const p = state.players[side];
   const ball = state.ball;
   ball.state = 'held';
   ball.owner = side;
   ball.shotBy = null;
+  ball.passTo = null;
   ball.shotGrade = null;
   ball.shotWillGoIn = false;
   ball.settled = false;
@@ -2314,19 +2665,19 @@ function returnBallTo(state: MatchState, side: Side): void {
   // hanging on the rim he just scored on. The hang finishes first — stomping
   // it here was why the rim hang died the instant the ball dropped through.
   if (p.state !== 'staggered' && p.state !== 'rimHang') p.state = 'dribble';
-  state.possession = side;
+  state.possession = p.side;
   state.needsClear = false;
   state.shotClock = state.config.shotClock;
   state.phase = 'live';
 }
 
-function turnover(state: MatchState, side: Side, reason: 'shotClock' | 'outOfBounds' | 'strip'): void {
+function turnover(state: MatchState, side: number, reason: 'shotClock' | 'outOfBounds' | 'strip'): void {
   state.stats[side].turnovers++;
   state.stats[side].gradePoints -= 0.5;
   state.events.push({ type: 'turnover', side, reason });
   state.phase = 'deadball';
   state.phaseTimer = 0.8;
-  state.possession = other(side);
+  state.possession = other(state.players[side].side);
   state.ball.state = 'dead';
   state.ball.owner = null;
 }
@@ -2334,12 +2685,17 @@ function turnover(state: MatchState, side: Side, reason: 'shotClock' | 'outOfBou
 function finishGame(state: MatchState, winner: Side): void {
   state.phase = 'over';
   state.winner = winner;
-  state.players[winner].state = 'celebrating';
-  state.players[winner].celebration = 'win';
-  state.players[winner].celebrationTimer = WIN_CELEBRATION_TIME;
-  // The loser is not celebrating anything.
-  state.players[other(winner)].celebration = null;
-  state.players[other(winner)].celebrationTimer = 0;
+  for (const pid of state.teams[winner]) {
+    const p = state.players[pid];
+    p.state = 'celebrating';
+    p.celebration = 'win';
+    p.celebrationTimer = WIN_CELEBRATION_TIME;
+  }
+  // The losers are not celebrating anything.
+  for (const pid of state.teams[other(winner)]) {
+    state.players[pid].celebration = null;
+    state.players[pid].celebrationTimer = 0;
+  }
   state.events.push({ type: 'gameOver', winner, score: [state.score[0], state.score[1]] });
 }
 
@@ -2363,7 +2719,7 @@ export function dribbleTempo(p: SimPlayer): number {
  * than a boolean means a caller can spot the exact frame a new bounce began
  * without a threshold to tune or a crossing to miss, however long the frame was.
  */
-export function dribbleBounceIndex(state: MatchState, side: Side): number | null {
+export function dribbleBounceIndex(state: MatchState, side: number): number | null {
   const p = state.players[side];
   if (p.state !== 'dribble') return null;
   if (state.ball.owner !== side || state.ball.state !== 'held') return null;
@@ -2390,7 +2746,7 @@ export function ballThroughRim(state: MatchState): boolean {
 }
 
 /** Live shot meter data for the HUD. Returns null when no shot is running. */
-export function activeShotMeter(state: MatchState, side: Side): {
+export function activeShotMeter(state: MatchState, side: number): {
   progress: number;
   profile: ShotProfile;
 } | null {
@@ -2403,9 +2759,9 @@ export function activeShotMeter(state: MatchState, side: Side): {
 }
 
 /** Current contest pressure on the ball handler, for HUD feedback. */
-export function currentContest(state: MatchState, side: Side): number {
+export function currentContest(state: MatchState, side: number): number {
   const p = state.players[side];
-  const d = state.players[other(side)];
+  const d = nearestOpponent(state, p);
   const dist = Math.hypot(d.x - p.x, d.z - p.z);
   const toShooter = normalize(p.x - d.x, p.z - d.z);
   const defFacing = Math.sin(d.facing) * toShooter.x + -Math.cos(d.facing) * toShooter.z;

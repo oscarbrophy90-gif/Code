@@ -19,6 +19,7 @@ export * from './sim/moves.ts';
 export * from './sim/state.ts';
 export * from './sim/match.ts';
 export { AiController, DIFFICULTY_PRESETS, AI_FAIRNESS_FLOOR, ankleThreatFor, sharpen, type AiProfile } from './sim/ai.ts';
+export * from './sim/squad.ts';
 
 export * from './data/teams.ts';
 export * from './data/parks.ts';

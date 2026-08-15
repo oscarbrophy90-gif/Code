@@ -294,7 +294,11 @@ export class PlayerRenderer {
     const hip = at(hipY, lean * 0.3);
     const shoulder = at(shoulderY, lean * 0.55);
     const head = at(headY, lean * 0.7);
-    const lineW = Math.max(1.6, s * 0.34);
+    // Mass reads in the limbs: a 285lb centre is drawn visibly thicker than a
+    // 170lb guard, on top of already being drawn taller. Reach, contests and
+    // rebounds have always used the real numbers — now the picture does too.
+    const bulk = 0.88 + Math.max(0, Math.min(1, (p.cfg.weightLb - 155) / 175)) * 0.3;
+    const lineW = Math.max(1.6, s * 0.34 * bulk);
 
     ctx.save();
     ctx.lineCap = 'round';

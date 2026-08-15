@@ -33,7 +33,8 @@ import { audio } from '../engine/audio.ts';
  */
 
 export interface ReplayFrame {
-  players: [SimPlayer, SimPlayer];
+  /** every player on the floor, indexed by pid — two in 1v1, six in 3v3 */
+  players: SimPlayer[];
   ball: Ball;
   time: number;
 }
@@ -50,7 +51,7 @@ export function snapshotFrame(state: MatchState): ReplayFrame {
     shotProfile: p.shotProfile ? { ...p.shotProfile } : null,
   });
   return {
-    players: [snap(state.players[0]), snap(state.players[1])],
+    players: state.players.map(snap),
     ball: { ...state.ball },
     time: state.time,
   };
@@ -58,8 +59,8 @@ export function snapshotFrame(state: MatchState): ReplayFrame {
 
 export interface LiveReplayOptions {
   frames: ReplayFrame[];
-  /** which side threw it down */
-  side: Side;
+  /** pid of the player who threw it down */
+  side: number;
   park: ParkDef;
   courtColor: string | null;
   surface: CourtSurface | null;
@@ -75,7 +76,7 @@ export interface LiveReplayOptions {
  * replay was cued (the hang ended), so the cut is "walk back to the takeoff,
  * then a second more".
  */
-export function cutToDunk(frames: ReplayFrame[], side: Side): ReplayFrame[] {
+export function cutToDunk(frames: ReplayFrame[], side: number): ReplayFrame[] {
   let takeoff = frames.length - 1;
   for (let i = frames.length - 1; i >= 0; i--) {
     const st = frames[i].players[side].state;
@@ -116,7 +117,7 @@ export function drawReplayFrame(
   courtRenderer.drawCourt(ctx, cam, opts.park, opts.courtColor, opts.surface);
   courtRenderer.drawHoop(ctx, cam, opts.park, 0, opts.rimBend);
 
-  for (const p of frame.players) playerRenderer.drawShadow(ctx, cam, p.x, p.z, p.y, 1.05);
+  for (const p of frame.players) playerRenderer.drawShadow(ctx, cam, p.x, p.z, p.y, 0.9 + (p.cfg.heightIn - 70) * 0.012);
   const carried = frame.ball.state === 'dunking' ? frame.ball.owner : null;
   const drawables: { z: number; draw: () => void }[] = [
     ...frame.players.map((p) => ({
@@ -128,8 +129,8 @@ export function drawReplayFrame(
           p,
           frame.time,
           false,
-          frame.ball.owner === p.side,
-          carried === p.side ? frame.ball : null,
+          frame.ball.owner === p.pid,
+          carried === p.pid ? frame.ball : null,
         ),
     })),
     ...(carried === null
@@ -145,7 +146,7 @@ export function drawReplayFrame(
  * the slam, then a damped spring, held down while somebody is hanging on it.
  * Time comes from the recorded sim clock, so slow motion slows the spring too.
  */
-export function replayRimBend(frames: ReplayFrame[], idx: number, side: Side): number {
+export function replayRimBend(frames: ReplayFrame[], idx: number, side: number): number {
   let slamIdx = -1;
   for (let i = 0; i <= idx; i++) {
     if (frames[i].players[side].state === 'rimHang') {

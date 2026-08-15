@@ -19,6 +19,13 @@ import { captureSceneKeys, el } from './dom.ts';
 export interface WalkoutOptions {
   player: SimPlayerConfig;
   opponent: SimPlayerConfig;
+  /**
+   * Team modes: everyone walking out, you/your lead first. When present the
+   * cutscene shows one banner per squad — all three players standing together
+   * — instead of two solo cards.
+   */
+  playerTeam?: SimPlayerConfig[];
+  opponentTeam?: SimPlayerConfig[];
   difficulty: Difficulty;
   /** park / court name shown on the title card */
   venue: string;
@@ -97,14 +104,23 @@ export function playWalkout(opts: WalkoutOptions): Promise<void> {
     document.body.appendChild(stage);
 
     // -------------------------------------------------------------- the beats
+    const teams = !!(opts.playerTeam?.length && opts.opponentTeam?.length);
     at(BEAT.intro * 0.1, () => {
-      body.appendChild(entrantCard(opts.opponent, 'right', 'Now entering'));
+      body.appendChild(
+        teams
+          ? teamCard(opts.opponentTeam!, 'right', 'Now entering')
+          : entrantCard(opts.opponent, 'right', 'Now entering'),
+      );
       audio.play('ui', 0.8);
     });
 
     const second = BEAT.intro + BEAT.card;
     at(second, () => {
-      body.appendChild(entrantCard(opts.player, 'left', 'And their opponent', opts.identity, opts.nameEffectId, opts.bannerId));
+      body.appendChild(
+        teams
+          ? teamCard(opts.playerTeam!, 'left', 'And their opponents', opts.identity)
+          : entrantCard(opts.player, 'left', 'And their opponent', opts.identity, opts.nameEffectId, opts.bannerId),
+      );
       audio.play('ui', 1.15);
     });
 
@@ -215,6 +231,65 @@ function entrantCard(
 }
 
 /**
+ * One whole squad on one banner: three figures shoulder to shoulder, drawn at
+ * their true relative heights — the 7'4" centre towers over the 6'3" guard
+ * because the canvas is sized off the same inches the game plays with — with
+ * name, position and height under each.
+ */
+function teamCard(
+  team: SimPlayerConfig[],
+  side: 'left' | 'right',
+  kicker: string,
+  identity?: { username: string; wins: number; losses: number; placement: number | null },
+): HTMLElement {
+  const lead = team[0];
+  const base = window.innerWidth < 720 ? 118 : 190;
+
+  const figures = el(
+    'div',
+    { class: 'walkout-squad' },
+    ...team.map((cfg) => {
+      const canvas = el('canvas', { class: 'walkout-figure' }) as HTMLCanvasElement;
+      // One shared frame; drawFigure scales the body inside it by true height,
+      // so the squad reads like a real team photo.
+      drawFigure(canvas, cfg, base);
+      const overall = computeOverall(cfg.attrs, cfg.position ?? 'SF');
+      return el(
+        'div',
+        { class: 'walkout-squad-slot' },
+        canvas,
+        el('div', { class: 'walkout-squad-name' }, cfg.name),
+        el(
+          'div',
+          { class: 'walkout-squad-line' },
+          `${cfg.position ?? '—'} · ${formatHeight(cfg.heightIn)} · ${overall} OVR`,
+        ),
+      );
+    }),
+  );
+
+  return el(
+    'div',
+    { class: `walkout-card team ${side}`, style: `--c1:${lead.jerseyPrimary};--c2:${lead.jerseySecondary}` },
+    el('div', { class: 'walkout-spot' }),
+    figures,
+    el(
+      'div',
+      { class: 'walkout-info' },
+      el('div', { class: 'walkout-kicker' }, kicker),
+      el('div', { class: 'walkout-name' }, `${lead.name} ×3`),
+      identity ? el('div', { class: 'walkout-username' }, identity.username) : null,
+      el(
+        'div',
+        { class: 'walkout-vitals' },
+        el('span', {}, '3v3 Squad'),
+        lead.archetype ? el('span', {}, `Led by the ${lead.archetype}`) : null,
+      ),
+    ),
+  );
+}
+
+/**
  * The rank shield, standing next to the player at figure height.
  *
  * Sized off the same number the figure uses so the two always match, whatever
@@ -277,8 +352,11 @@ export function drawFigure(canvas: HTMLCanvasElement, cfg: SimPlayerConfig, heig
   ctx.clearRect(0, 0, width, height);
 
   const skin = SKIN_TONES[cfg.skinTone] ?? SKIN_TONES[3];
-  // 70in maps to the short end of the frame, 89in fills it.
-  const fill = 0.82 + Math.max(0, Math.min(1, (cfg.heightIn - 70) / 19)) * 0.18;
+  // True proportion: the drawn height IS the listed height. A 7'4" frame next
+  // to a 6'6" one is 13% taller on screen because it is 13% taller in inches —
+  // the old mapping squeezed that to a third of the real difference, which is
+  // why every walkout looked like a height chart with the numbers filed off.
+  const fill = 0.97 * Math.min(1, cfg.heightIn / 89);
   const bulk = 0.85 + Math.max(0, Math.min(1, (cfg.weightLb - 155) / 175)) * 0.42;
 
   const cx = width / 2;

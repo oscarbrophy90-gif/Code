@@ -34,6 +34,7 @@ export const CONTROL_SHEET: ControlBinding[] = [
   { keys: ['E'], label: 'Drive & Finish', action: 'Attack the rim for a layup, dunk or contact dunk' },
   { keys: ['F'], label: 'Steal', action: 'Reach in — a miss leaves you out of position' },
   { keys: ['R'], label: 'Pump Fake', action: 'Sell the shot and get the defender in the air' },
+  { keys: ['Tab'], label: 'Pass / Call for it', action: '3v3: with the ball, hit the open teammate. Without it, call for the ball — your teammate decides if you have earned it' },
   { keys: ['J', 'L'], label: 'Crossover', action: 'J fakes left and goes right, L fakes right and goes left' },
   { keys: ['G'], label: 'Between the Legs', action: 'Tight change of direction' },
   { keys: ['U'], label: 'Behind the Back', action: 'Wide escape dribble' },
@@ -169,6 +170,7 @@ export class InputManager {
     input.drive = this.keys.has('KeyE');
     input.steal = this.pressedThisFrame.has('KeyF');
     input.fake = this.pressedThisFrame.has('KeyR');
+    input.pass = this.pressedThisFrame.has('Tab');
     input.emote = this.takeEmote();
 
     for (const code of this.pressedThisFrame) {
@@ -248,6 +250,7 @@ export class InputManager {
     if (btn(1)) input.drive = true; // B / Circle
     if (rising(2)) input.steal = true; // X / Square
     if (rising(3)) input.fake = true; // Y / Triangle
+    if (rising(4)) input.pass = true; // LB / L1 — pass or call for it in 3v3
 
     // Right stick flicks map to dribble moves.
     const rx = dead(pad.axes[2] ?? 0);
@@ -278,6 +281,7 @@ function stickToMove(angle: number, modifier: boolean): DribbleMoveId {
 const EMOTE_KEYS = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6'];
 
 const SWALLOW = new Set([
+  'Tab',
   'Space',
   'ArrowUp',
   'ArrowDown',

@@ -1,5 +1,7 @@
 import {
   DIFFICULTIES,
+  generateSquad,
+  generateTeammates,
   type SelectableDifficulty,
   DIFFICULTY_LABEL,
   DIFFICULTY_PRESETS,
@@ -65,23 +67,61 @@ export const DIFFICULTY_BLURB: Record<SelectableDifficulty, DifficultyBlurb> = {
 let difficulty: SelectableDifficulty = 'pro';
 let parkId = 'downtown';
 
-export function renderPlay(_params: RouteParams): HTMLElement {
+/** Which game you are playing. Chosen first, before any difficulty talk. */
+type PlayMode = '1v1' | '3v3';
+
+export function renderPlay(params: RouteParams): HTMLElement {
   const player = store.player;
   const now = Date.now();
   const stats = player.stats;
+  const mode = params.mode === '3v3' ? '3v3' : params.mode === '1v1' ? '1v1' : null;
 
   const root = el('div', { class: 'wrap' });
 
+  // ------------------------------------------------------------- step 1: mode
+  // Ranked lives on its own screen and stays 1v1; this fork only governs the
+  // casual Play flow.
+  if (!mode) {
+    root.append(
+      el('h1', { class: 'page' }, 'Play'),
+      el('p', { class: 'page-sub' }, 'Pick your game first. Same half court, same rules — first to eleven, win by two.'),
+      el(
+        'div',
+        { class: 'mode-grid' },
+        modeCard(
+          '1v1',
+          'One on One',
+          'You against one defender. Make it take it, every possession a duel.',
+          ['All eleven attributes matter', 'Every mistake is yours', 'The classic'],
+        ),
+        modeCard(
+          '3v3',
+          'Three on Three',
+          'Full squads. Your two AI teammates play their positions — and so do theirs.',
+          ['TAB to pass or call for the ball', 'Real spacing, cuts and help defense', 'Bigs bang inside, snipers hunt threes'],
+        ),
+      ),
+    );
+    return root;
+  }
+
   root.append(
-    el('h1', { class: 'page' }, 'Play'),
+    el('h1', { class: 'page' }, mode === '3v3' ? 'Play 3v3' : 'Play 1v1'),
     el(
       'p',
       { class: 'page-sub' },
-      'Half court, one on one, make it take it. Twos from behind the arc and ones inside, first to eleven, win by two. Pick your opponent and go.',
+      mode === '3v3'
+        ? 'Half court, three on three, make it take it. Twos from behind the arc and ones inside, first to eleven, win by two. You run point; your squad plays its roles.'
+        : 'Half court, one on one, make it take it. Twos from behind the arc and ones inside, first to eleven, win by two. Pick your opponent and go.',
+    ),
+    el(
+      'div',
+      { class: 'row', style: 'margin:-6px 0 14px' },
+      el('button', { class: 'btn sm', onclick: () => navigate('play') }, '← Change mode'),
     ),
   );
 
-  const rerender = () => navigate('play');
+  const rerender = () => navigate('play', { mode });
 
   // Which build is walking out. Every mode runs the equipped one, so it belongs
   // in front of you before you pick an opponent, not buried two screens away.
@@ -266,7 +306,7 @@ export function renderPlay(_params: RouteParams): HTMLElement {
 
         panel(
           'Rules',
-          el('div', { class: 'kv' }, el('span', { class: 'k' }, 'Format'), el('span', { class: 'v' }, '1v1 half court')),
+          el('div', { class: 'kv' }, el('span', { class: 'k' }, 'Format'), el('span', { class: 'v' }, mode === '3v3' ? '3v3 half court' : '1v1 half court')),
           el('div', { class: 'kv' }, el('span', { class: 'k' }, 'Scoring'), el('span', { class: 'v' }, '1s and 2s')),
           el('div', { class: 'kv' }, el('span', { class: 'k' }, 'Target'), el('span', { class: 'v' }, 'First to 11, win by 2')),
           el('div', { class: 'kv' }, el('span', { class: 'k' }, 'Shot clock'), el('span', { class: 'v' }, '14 seconds')),
@@ -284,6 +324,22 @@ export function renderPlay(_params: RouteParams): HTMLElement {
     // The CPU is built near your own level so the difficulty setting, not a
     // ratings gap, is what decides how hard the game feels.
     const target = Math.max(60, Math.min(99, overall + difficultyOverallBump(difficulty)));
+    if (mode === '3v3') {
+      const squad = generateSquad(target, hashString(`squad-${difficulty}-${Date.now()}`));
+      const me = store.simConfig();
+      const mates = generateTeammates(overall, hashString(`mates-${player.id}-${Date.now()}`), {
+        primary: me.jerseyPrimary,
+        secondary: me.jerseySecondary,
+      });
+      startMatch({
+        opponent: squad[0],
+        squads: { opponents: squad.slice(1), teammates: mates },
+        difficulty,
+        parkId,
+        playlist: 'casual',
+      });
+      return;
+    }
     startMatch({
       opponent: generateOpponent(target, hashString(`ai-${difficulty}-${Date.now()}`)),
       difficulty,
@@ -344,6 +400,21 @@ function describeDifficulty(d: Difficulty): string {
   const moves = p.moveTier === 0 ? 'basic handles only' : p.moveTier === 1 ? 'advanced handles' : 'signature combos';
   const reads = p.tendencyRead > 0 ? `, adapts to your shot selection` : '';
   return `Reaction ${Math.round(p.reactionTime * 1000)}ms · on-ball distance ${p.standoff.toFixed(1)} ft · release error ±${(p.releaseError * 100).toFixed(1)}% · ${moves}, chains up to ${p.comboLength}${reads}. Build ${difficultyOverallBump(d) >= 0 ? '+' : ''}${difficultyOverallBump(d)} OVR versus yours.`;
+}
+
+function modeCard(mode: PlayMode, title: string, blurb: string, traits: string[]): HTMLElement {
+  return el(
+    'button',
+    { class: 'mode-card', onclick: () => navigate('play', { mode }) },
+    el('div', { class: 'mode-count' }, mode === '1v1' ? '1v1' : '3v3'),
+    el('div', { class: 'mode-title' }, title),
+    el('div', { class: 'mode-blurb' }, blurb),
+    el(
+      'ul',
+      { class: 'mode-traits' },
+      ...traits.map((t) => el('li', {}, t)),
+    ),
+  );
 }
 
 export { fmt };

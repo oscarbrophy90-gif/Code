@@ -1,5 +1,7 @@
 import {
   AiController,
+  SquadController,
+  createTeamMatch,
   GRADE_COLOR,
   GRADE_LABEL,
   PARK_BY_ID,
@@ -54,6 +56,12 @@ export interface MatchResult {
 
 export interface MatchOptions {
   opponent: SimPlayerConfig;
+  /**
+   * 3v3: the other two CPU opponents beside `opponent`, and your two AI
+   * teammates. Absent (or null) for every 1v1 game — and 1v1 runs exactly
+   * the code it always ran.
+   */
+  squads?: { opponents: SimPlayerConfig[]; teammates: SimPlayerConfig[] } | null;
   difficulty: Difficulty;
   parkId: string;
   config?: Partial<MatchConfig>;
@@ -85,20 +93,35 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
   const remoteSide: Side = localSide === 0 ? 1 : 0;
 
   const localCfg = store.simConfig();
-  const configs: [SimPlayerConfig, SimPlayerConfig] =
-    localSide === 0 ? [localCfg, opts.opponent] : [opts.opponent, localCfg];
+  const squads = opts.squads ?? null;
 
   const matchConfig = defaultMatchConfig({ parkId: opts.parkId, ...opts.config });
   const seed = opts.seed ?? (Math.random() * 0xffffffff) >>> 0;
-  const state = createMatch(configs[0], configs[1], matchConfig, seed);
+
+  // 3v3 always seats the human at pid 0 on team 0; 1v1 keeps the historical
+  // side choice. Either way `configs` is indexed by pid.
+  const state = squads
+    ? createTeamMatch([localCfg, ...squads.teammates], [opts.opponent, ...squads.opponents], matchConfig, seed)
+    : createMatch(
+        localSide === 0 ? localCfg : opts.opponent,
+        localSide === 0 ? opts.opponent : localCfg,
+        matchConfig,
+        seed,
+      );
+  const configs: SimPlayerConfig[] = state.players.map((p) => p.cfg);
+  const localPid = squads ? 0 : localSide;
 
   // Shooting and finishing drills have nobody guarding you, so the bot is
   // parked out of the way and never given a controller.
   const drill = opts.drill ?? null;
   const parkedBot = !!drill && (drill.mode === 'shooting' || drill.mode === 'finishing');
-  const ai = parkedBot
+  const ai = parkedBot || squads
     ? null
     : new AiController(remoteSide, opts.difficulty, seed ^ 0x5bf03, true, false, opts.aiEdge ?? 0);
+  // Team AI: one controller per side's CPU players. Your teammates play at the
+  // same difficulty you chose, so the whole floor sharpens together.
+  const oppSquad = squads ? new SquadController(1, state.teams[1], opts.difficulty, seed ^ 0x77a1) : null;
+  const mateSquad = squads ? new SquadController(0, state.teams[0].filter((pid) => pid !== localPid), opts.difficulty, seed ^ 0x18d3) : null;
   const park = PARK_BY_ID[opts.parkId] ?? PARK_BY_ID['downtown'];
 
   const cam = new Camera();
@@ -119,12 +142,12 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
       /** the last shot the local side released, so a test can aim its timing */
       lastRelease: null as { grade: string; shotType: string; made: boolean } | null,
       runway() {
-        const p = state.players[localSide];
+        const p = state.players[localPid];
         p.x = 1;
         p.z = 16;
         p.state = 'dribble';
         p.stamina = 1;
-        state.ball.owner = localSide;
+        state.ball.owner = localPid;
         state.ball.state = 'held';
         state.needsClear = false;
         state.shotClock = 14;
@@ -164,8 +187,8 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
   let cutscene = false;
   let netSwing = 0;
   let shake = 0;
-  /** last bounce index heard per side, so each bounce plays exactly once */
-  let lastBounce: [number | null, number | null] = [null, null];
+  /** last bounce index heard per player, so each bounce plays exactly once */
+  let lastBounce: (number | null)[] = state.players.map(() => null);
   /** a made shot is in the air and its net has not sounded yet */
   let swishPending = false;
   let elapsedRealSeconds = 0;
@@ -179,6 +202,8 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
   // a lie.
   const surface = opts.surface ?? null;
   const courtColor = surface ? surface.floor : courtColorFor(store.player.loadout.courtId);
+  // 3v3 scorebug names the squads after who leads them.
+  const teamLabels: [string, string] = [`${localCfg.name} ×3`, `${opts.opponent.name} ×3`];
 
   // ------------------------------------------------------------------ canvas
   let width = 0;
@@ -229,15 +254,26 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
     resizeObserver.disconnect();
     window.removeEventListener('resize', resize);
     const winner = state.winner;
+    const localTeam = state.players[localPid].side;
+    const oppTeam = localTeam === 0 ? 1 : 0;
+    // Your line is yours alone; the opposing line is the whole opposing team,
+    // summed — the number the scoreboard was actually up against.
+    const oppStats = state.teams[oppTeam]
+      .map((pid) => state.stats[pid])
+      .reduce((acc, s2) => {
+        const out = { ...acc };
+        for (const k of Object.keys(out) as (keyof PlayerMatchStats)[]) out[k] += s2[k];
+        return out;
+      });
     opts.onFinish({
-      won: winner === localSide,
-      score: [state.score[localSide], state.score[remoteSide]],
-      stats: state.stats[localSide],
-      opponentStats: state.stats[remoteSide],
+      won: winner === localTeam,
+      score: [state.score[localTeam], state.score[oppTeam]],
+      stats: state.stats[localPid],
+      opponentStats: oppStats,
       durationSeconds: elapsedRealSeconds,
       greenRate: localAttempts > 0 ? localGreens / localAttempts : 0,
       quit,
-      simBadges: state.players[localSide].cfg.badges,
+      simBadges: state.players[localPid].cfg.badges,
       drillReps,
     });
   };
@@ -313,22 +349,24 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
     // emote sits on which key — so equipment is checked here, and an emote that
     // cannot fire says why instead of silently doing nothing.
     if (localInput.emote !== null) {
-      const me = state.players[localSide];
+      const me = state.players[localPid];
       if (!store.player.loadout.emoteSlots?.[localInput.emote]) {
         toast(`Emote slot ${localInput.emote + 1} is empty — equip one in the Locker`, 'info');
         localInput.emote = null;
       } else if (me.emoteCooldown > 0) {
         toast(`Emote cooling down — ${Math.ceil(me.emoteCooldown)}s`, 'info');
         localInput.emote = null;
-      } else if (state.phase !== 'live' || state.ball.owner !== localSide) {
+      } else if (state.phase !== 'live' || state.ball.owner !== localPid) {
         toast('You can only emote with the ball, in play', 'info');
         localInput.emote = null;
       }
     }
-    const remote: PlayerInput = ai ? ai.update(state, dt) : emptyInput();
 
-    const inputs: [PlayerInput, PlayerInput] =
-      localSide === 0 ? [localInput, remote] : [remote, localInput];
+    const inputs: PlayerInput[] = state.players.map(() => emptyInput());
+    inputs[localPid] = localInput;
+    if (ai) inputs[remoteSide] = ai.update(state, dt);
+    if (oppSquad) for (const [pid, inp] of oppSquad.update(state, dt)) inputs[pid] = inp;
+    if (mateSquad) for (const [pid, inp] of mateSquad.update(state, dt)) inputs[pid] = inp;
 
     stepWorld(inputs, dt);
     if (drill) updateDrill(dt);
@@ -375,7 +413,7 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
       lastBounce = [null, null];
       return;
     }
-    for (const side of [0, 1] as Side[]) {
+    for (let side = 0; side < state.players.length; side++) {
       const index = dribbleBounceIndex(state, side);
       if (index === null) {
         lastBounce[side] = null;
@@ -387,9 +425,9 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
       // Do not fire on the first frame of a possession: the count is picked up
       // mid-bounce, so that one would land wherever the ball happens to be.
       if (first) continue;
-      const me = state.players[localSide];
+      const me = state.players[localPid];
       const them = state.players[side];
-      const distance = side === localSide ? 0 : Math.hypot(me.x - them.x, me.z - them.z);
+      const distance = side === localPid ? 0 : Math.hypot(me.x - them.x, me.z - them.z);
       // A touch of pitch drift keyed to the bounce number rather than random, so
       // it is the same match every time it is replayed.
       audio.dribble(distance, 0.95 + ((index * 37) % 11) / 100);
@@ -458,7 +496,7 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
     }
   };
 
-  const stepWorld = (inputs: [PlayerInput, PlayerInput], dt: number) => {
+  const stepWorld = (inputs: PlayerInput[], dt: number) => {
     const before = state.phase;
     stepMatch(state, inputs, dt);
     const events = drainEvents(state);
@@ -475,11 +513,11 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
       switch (e.type) {
         case 'shotRelease': {
           const dbg = (window as unknown as { __dunkDebug?: { lastRelease: unknown } }).__dunkDebug;
-          if (dbg && e.side === localSide) dbg.lastRelease = { grade: e.grade, shotType: e.shotType, made: e.made };
+          if (dbg && e.side === localPid) dbg.lastRelease = { grade: e.grade, shotType: e.shotType, made: e.made };
           const p = state.players[e.side];
           // Arm the net for this shot. A miss or a block disarms it again.
           swishPending = e.made;
-          if (e.side === localSide) {
+          if (e.side === localPid) {
             localAttempts++;
             if (e.grade === 'green') localGreens++;
             hud.flashGrade(e.grade);
@@ -487,7 +525,11 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
             const wasDrive = e.shotType === 'layup' || e.shotType === 'dunk' || e.shotType === 'contactDunk' || e.shotType === 'euroLayup';
             ai?.notifyOpponentShot(e.grade === 'green', e.value === 2, wasDrive);
           }
-          hud.push(GRADE_LABEL[e.grade], GRADE_COLOR[e.grade], p.x, p.z, e.grade === 'green');
+          // Only your own meter grades flash — a floor of six players all
+          // captioning their releases is noise, not information.
+          if (e.side === localPid || !squads) {
+            hud.push(GRADE_LABEL[e.grade], GRADE_COLOR[e.grade], p.x, p.z, e.grade === 'green');
+          }
           if (e.grade === 'green') audio.play('green');
           break;
         }
@@ -553,7 +595,7 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
           // The replay: the recorded frames of the dunk that just happened,
           // played back through the game's own renderer from a low camera.
           // The world is frozen while it plays and it is always skippable.
-          if (e.side === localSide && !settings.reducedMotion) {
+          if (e.side === localPid && !settings.reducedMotion) {
             audio.play('dunk');
             cutscene = true;
             void playLiveReplay(root, {
@@ -565,10 +607,22 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
               posterized: e.posterized,
               packageId: e.packageId,
               dunkerName: configs[e.side].name,
-              victimName: configs[e.side === 0 ? 1 : 0].name,
+              victimName: configs[e.victim >= 0 ? e.victim : e.side === 0 ? 1 : 0]?.name ?? '',
             }).then(() => {
               cutscene = false;
             });
+          }
+          break;
+        }
+        case 'pass': {
+          audio.play('ui', 0.9);
+          break;
+        }
+        case 'passCall': {
+          // Your own call flashes so you know the request registered.
+          if (e.side === localPid) {
+            const p = state.players[e.side];
+            hud.push('CALLING FOR IT', '#8fd0ff', p.x, p.z);
           }
           break;
         }
@@ -577,7 +631,7 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
           // cooldown and the ball bounce — so the caption hangs off the event
           // rather than off the keypress that asked for it.
           const p = state.players[e.side];
-          const id = e.side === localSide ? (store.player.loadout.emoteSlots?.[e.slot] ?? null) : null;
+          const id = e.side === localPid ? (store.player.loadout.emoteSlots?.[e.slot] ?? null) : null;
           const item = id ? STORE_BY_ID[id] : undefined;
           hud.showEmote(item?.name ?? 'Emote', item?.colors[0] ?? '#8a93a6', p.x, p.z);
           audio.play('ui', 1.1);
@@ -613,10 +667,14 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
     netSwing = Math.max(0, netSwing - dt * 2.2);
     shake = Math.max(0, shake - dt * 3.4);
 
-    const local = state.players[localSide];
-    const remotePlayer = state.players[remoteSide];
+    const local = state.players[localPid];
     const handler = state.ball.owner !== null ? state.players[state.ball.owner] : local;
-    const spread = Math.hypot(local.x - remotePlayer.x, local.z - remotePlayer.z);
+    // The camera frames the action: how far the floor is spread is measured
+    // from the handler to the farthest player who matters (you included).
+    let spread = Math.hypot(local.x - handler.x, local.z - handler.z);
+    for (const p of state.players) {
+      spread = Math.max(spread, Math.hypot(p.x - handler.x, p.z - handler.z) * (squads ? 0.72 : 1));
+    }
     cam.follow(handler.x, handler.z, spread, dt, settings.cameraDistance ?? 1);
     cam.update(width, height);
 
@@ -645,7 +703,7 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
 
     // Shadows first so nobody's shadow lands on a body.
     for (const p of state.players) {
-      playerRenderer.drawShadow(ctx, cam, p.x, p.z, p.y, 1.05);
+      playerRenderer.drawShadow(ctx, cam, p.x, p.z, p.y, 0.9 + (p.cfg.heightIn - 70) * 0.012);
     }
 
     // Depth sort: draw far (small z) before near (large z).
@@ -662,9 +720,9 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
             cam,
             p,
             state.time,
-            p.side === localSide,
-            state.ball.owner === p.side,
-            carried === p.side ? state.ball : null,
+            p.pid === localPid,
+            state.ball.owner === p.pid,
+            carried === p.pid ? state.ball : null,
           ),
       })),
       ...(carried === null
@@ -675,22 +733,22 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
     for (const d of drawables) d.draw();
 
     playerRenderer.drawShotTrail(ctx, cam, state);
-    if (state.ball.owner === localSide && state.ball.state === 'held') {
+    if (state.ball.owner === localPid && state.ball.state === 'held') {
       playerRenderer.drawRangeMarker(ctx, cam, local, isBeyondArc(local.x, local.z));
     }
 
     hud.drawWorldPopups(ctx, cam);
-    hud.drawShotMeter(ctx, cam, state, localSide, settings.shotMeterStyle, width, height);
+    hud.drawShotMeter(ctx, cam, state, localPid, settings.shotMeterStyle, width, height);
     ctx.restore();
 
     if (drill) {
       if (drillClock) drillClock.textContent = formatClock(drill.freeplay ? drill.durationSeconds - drillTimeLeft : drillTimeLeft);
       if (drillCount) drillCount.textContent = String(drillReps);
     } else {
-      hud.drawScoreBug(ctx, state, width, localSide);
+      hud.drawScoreBug(ctx, state, width, localSide, squads ? teamLabels : null);
     }
-    hud.drawCallouts(ctx, state, localSide, width, height);
-    drawFooter(ctx, width, height, loop.fps, null, settings.touchControls);
+    hud.drawCallouts(ctx, state, localPid, width, height);
+    drawFooter(ctx, width, height, loop.fps, null, settings.touchControls, !!squads);
 
   };
 
@@ -713,6 +771,7 @@ function drawFooter(
   fps: number,
   latency: number | null,
   touch: boolean,
+  team = false,
 ): void {
   ctx.save();
   ctx.font = '700 10px Inter, system-ui, sans-serif';
@@ -725,7 +784,13 @@ function drawFooter(
   if (!touch) {
     ctx.textAlign = 'left';
     ctx.fillStyle = 'rgba(150,162,184,0.42)';
-    ctx.fillText('SPACE shoot / contest · E drive · F steal · J L crossover · HOLD K stepback jumper · ESC pause', 16, h - 12);
+    ctx.fillText(
+      team
+        ? 'SPACE shoot · E drive · TAB pass / call for it · F steal · J L crossover · ESC pause'
+        : 'SPACE shoot / contest · E drive · F steal · J L crossover · HOLD K stepback jumper · ESC pause',
+      16,
+      h - 12,
+    );
   }
   ctx.restore();
 }

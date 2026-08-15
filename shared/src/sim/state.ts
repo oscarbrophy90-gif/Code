@@ -2,6 +2,14 @@ import type { ShotProfile, ShotType, ShotGrade } from '../shooting.ts';
 import type { Attributes, BadgeState, Position } from '../types.ts';
 import type { DribbleMoveId } from './moves.ts';
 
+/**
+ * A team. The sim was born 1v1, where "side" and "player" were the same thing;
+ * teams made them different. A `Side` is still 0 or 1 and still means "which
+ * basket you score on" — but a player is now identified by `pid`, their index
+ * in `MatchState.players`, and one side can field several of them. In 1v1 the
+ * pids are 0 and 1 and equal the sides, which is what keeps every 1v1 game
+ * (and every ranked game) exactly the sim it always was.
+ */
 export type Side = 0 | 1;
 
 /** Per-frame input. Edge-triggered fields are set for exactly one frame. */
@@ -33,6 +41,12 @@ export interface PlayerInput {
   /** edge-triggered pump fake */
   fake: boolean;
   /**
+   * Edge-triggered, context-sensitive: with the ball it throws a pass to the
+   * best-placed teammate, without it it calls for one. In 1v1 there is nobody
+   * to throw to, so it does nothing at all.
+   */
+  pass: boolean;
+  /**
    * Edge-triggered emote slot, 0-5, or null. Emotes are cosmetic but they are
    * not free: you hold the ball out on a bounce while you do it, which is why
    * the simulation has to own them rather than the renderer.
@@ -54,6 +68,7 @@ export function emptyInput(): PlayerInput {
     steal: false,
     contest: false,
     fake: false,
+    pass: false,
     emote: null,
   };
 }
@@ -110,6 +125,8 @@ export interface DunkFlight {
   hangZ: number;
   hangY: number;
   packageId: string;
+  /** pid of the defender a poster drops; -1 when nobody was in the way */
+  victim: number;
 }
 
 /**
@@ -183,7 +200,10 @@ export interface SimPlayerConfig {
 }
 
 export interface SimPlayer {
+  /** which basket this player scores on — the team */
   side: Side;
+  /** this player's index in MatchState.players. In 1v1, equal to side. */
+  pid: number;
   cfg: SimPlayerConfig;
   x: number;
   z: number;
@@ -260,7 +280,7 @@ export interface SimPlayer {
   comboTimer: number;
 }
 
-export type BallState = 'held' | 'shot' | 'loose' | 'dunking' | 'dead';
+export type BallState = 'held' | 'shot' | 'pass' | 'loose' | 'dunking' | 'dead';
 
 export interface Ball {
   x: number;
@@ -270,10 +290,14 @@ export interface Ball {
   vy: number;
   vz: number;
   state: BallState;
-  owner: Side | null;
+  /** pid of the player holding or carrying it */
+  owner: number | null;
   /** pre-resolved outcome of the shot currently in flight */
   shotWillGoIn: boolean;
-  shotBy: Side | null;
+  /** pid of the shooter of the shot in flight */
+  shotBy: number | null;
+  /** pid the pass in flight is going to */
+  passTo: number | null;
   shotValue: 1 | 2;
   shotGrade: ShotGrade | null;
   /** seconds since release, used for the arc */
@@ -366,24 +390,33 @@ export function emptyStats(): PlayerMatchStats {
   };
 }
 
+/**
+ * Events name the player they happened to by pid — `side` on an event is the
+ * actor's pid, not their team. In 1v1 the two are the same number, which is why
+ * this was never two fields; team events (`score`'s tally, `gameOver`'s winner)
+ * carry teams explicitly.
+ */
 export type SimEvent =
-  | { type: 'shotRelease'; side: Side; grade: ShotGrade; made: boolean; value: 1 | 2; timingError: number; shotType: ShotType }
-  | { type: 'score'; side: Side; value: 1 | 2; score: [number, number] }
-  | { type: 'miss'; side: Side }
-  | { type: 'rebound'; side: Side; offensive: boolean }
-  | { type: 'steal'; side: Side }
-  | { type: 'block'; side: Side; chaseDown: boolean }
-  | { type: 'ankleBreaker'; side: Side; floored: boolean }
-  | { type: 'move'; side: Side; move: DribbleMoveId }
-  | { type: 'contactDunk'; side: Side }
-  | { type: 'dunk'; side: Side }
+  | { type: 'shotRelease'; side: number; grade: ShotGrade; made: boolean; value: 1 | 2; timingError: number; shotType: ShotType }
+  | { type: 'score'; side: number; value: 1 | 2; score: [number, number] }
+  | { type: 'miss'; side: number }
+  | { type: 'rebound'; side: number; offensive: boolean }
+  | { type: 'steal'; side: number }
+  | { type: 'block'; side: number; chaseDown: boolean }
+  | { type: 'ankleBreaker'; side: number; floored: boolean }
+  | { type: 'move'; side: number; move: DribbleMoveId }
+  | { type: 'contactDunk'; side: number }
+  | { type: 'dunk'; side: number }
   /** a greened dunk worth cutting away to: the client plays the animation */
-  | { type: 'dunkHighlight'; side: Side; packageId: string; posterized: boolean; value: 1 | 2 }
-  | { type: 'turnover'; side: Side; reason: 'shotClock' | 'outOfBounds' | 'strip' }
-  | { type: 'clear'; side: Side }
-  | { type: 'emote'; side: Side; slot: number }
-  | { type: 'foul'; on: Side; by: Side; shots: number }
-  | { type: 'freeThrow'; side: Side; made: boolean; remaining: number }
+  | { type: 'dunkHighlight'; side: number; packageId: string; posterized: boolean; value: 1 | 2; victim: number }
+  | { type: 'turnover'; side: number; reason: 'shotClock' | 'outOfBounds' | 'strip' }
+  | { type: 'clear'; side: number }
+  | { type: 'emote'; side: number; slot: number }
+  | { type: 'pass'; from: number; to: number }
+  /** somebody without the ball calling for it */
+  | { type: 'passCall'; side: number }
+  | { type: 'foul'; on: number; by: number; shots: number }
+  | { type: 'freeThrow'; side: number; made: boolean; remaining: number }
   | { type: 'phase'; phase: MatchPhase }
   | { type: 'gameOver'; winner: Side; score: [number, number] };
 
@@ -393,7 +426,10 @@ export interface MatchState {
   rngState: number;
   phase: MatchPhase;
   phaseTimer: number;
-  players: [SimPlayer, SimPlayer];
+  /** every player on the floor, indexed by pid: team 0's players first */
+  players: SimPlayer[];
+  /** pids per team, in order — teams[0][0] is team 0's primary handler */
+  teams: [number[], number[]];
   ball: Ball;
   score: [number, number];
   possession: Side;
@@ -401,14 +437,17 @@ export interface MatchState {
   needsClear: boolean;
   shotClock: number;
   clock: number;
-  stats: [PlayerMatchStats, PlayerMatchStats];
-  /** set while the game is stopped at the stripe */
-  freeThrow: { side: Side; remaining: number } | null;
-  /** a side that was holding shoot when it checked in; its shoot is ignored
-   *  until released, so checking in never launches a shot */
-  checkGuard: [boolean, boolean];
-  /** the check-in ceremony: the ball is passed out and passed back */
-  check: { stage: 'wait' | 'out' | 'back'; timer: number; from: Side; to: Side } | null;
+  /** per player, indexed by pid */
+  stats: PlayerMatchStats[];
+  /** set while the game is stopped at the stripe; side is the shooter's pid */
+  freeThrow: { side: number; remaining: number } | null;
+  /** a player that was holding shoot when it checked in; its shoot is ignored
+   *  until released, so checking in never launches a shot. Indexed by pid. */
+  checkGuard: boolean[];
+  /** the check-in ceremony: the ball is passed out and passed back (pids) */
+  check: { stage: 'wait' | 'out' | 'back'; timer: number; from: number; to: number } | null;
+  /** a teammate calling for the ball; the handler's AI reads it */
+  passRequest: { pid: number; timer: number } | null;
   events: SimEvent[];
   config: MatchConfig;
   winner: Side | null;
