@@ -34,6 +34,7 @@ import {
   CRATE_BY_ID,
   openCrate as rollCrate,
   type CratePull,
+  type SocialState,
 } from '@hoops/shared';
 
 import {
@@ -171,7 +172,13 @@ function createProfile(): Profile {
     username: '',
     usernameChangedAt: 0,
     online: freshOnlineRecord(),
+    social: freshSocial(),
   };
+}
+
+/** Nobody on the friends list yet, nothing in the feed. */
+function freshSocial(): SocialState {
+  return { friends: [], outgoing: [], incoming: [], notices: [] };
 }
 
 /**
@@ -357,6 +364,11 @@ class Store {
     if (typeof rec.rp !== 'number') rec.rp = (rec.wins ?? 0) * 20;
     if (typeof rec.peakRp !== 'number') rec.peakRp = Math.max(rec.rp, (rec.peakWins ?? 0) * 20);
     if (this.profile.seasonReport === undefined) this.profile.seasonReport = null;
+    // Saves made before the Online hub have no social state.
+    if (!this.profile.social) this.profile.social = freshSocial();
+    for (const key of ['friends', 'outgoing', 'incoming', 'notices'] as const) {
+      if (!Array.isArray(this.profile.social[key])) this.profile.social[key] = [];
+    }
 
     const season = seasonForTime(now);
     if (this.profile.seasonId !== season.id) {

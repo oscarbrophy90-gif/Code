@@ -22,11 +22,15 @@ import { renderStats } from './ui/screens/stats.ts';
 import { renderRecords } from './ui/screens/records.ts';
 import { renderSettings } from './ui/screens/settings.ts';
 import { renderLeaderboard } from './ui/screens/leaderboard.ts';
+import { renderOnline } from './ui/screens/online.ts';
+import { inParty, leaveParty, LOBBY_ROUTES } from './state/party.ts';
+import { unreadCount } from './state/social.ts';
 import { grandChampLabel, onlineRank } from '@hoops/shared';
 
 export type Route =
   | 'home'
   | 'play'
+  | 'online'
   | 'practice'
   | 'controls'
   | 'username'
@@ -45,6 +49,7 @@ export type Route =
 const SCREENS: Record<Route, (params: RouteParams) => HTMLElement> = {
   home: renderHome,
   play: renderPlay,
+  online: renderOnline,
   practice: renderPractice,
   controls: renderControls,
   username: renderUsername,
@@ -67,6 +72,7 @@ const NAV: { route: Route; label: string }[] = [
   // it feeds are the loop, so they come before the wardrobe.
   { route: 'home', label: 'Home' },
   { route: 'play', label: 'Play' },
+  { route: 'online', label: 'Online' },
   { route: 'rank', label: 'Ranked' },
   { route: 'leaderboard', label: 'Leaderboard' },
   { route: 'myplayer', label: 'MyPlayer' },
@@ -94,12 +100,57 @@ shell.append(topbar, screenHost);
 app.appendChild(shell);
 
 export function navigate(route: Route, params: RouteParams = {}): void {
+  // A party narrows the game to the lobby: Store, Locker, Settings and
+  // Controls stay open, everything else — Play against the AI included —
+  // asks you to leave the lobby first, and leaving is what lets you go.
+  if (inParty() && !(LOBBY_ROUTES as readonly string[]).includes(route)) {
+    confirmLeaveLobby(route, params);
+    return;
+  }
   currentRoute = route;
   currentParams = params;
   audio.play('ui');
   renderShell();
   screenHost.scrollTop = 0;
   history.replaceState({}, '', `#${route}`);
+}
+
+/** The lobby gate's question. Leaving proceeds to where you were going. */
+function confirmLeaveLobby(route: Route, params: RouteParams): void {
+  const host = el('div', { class: 'overlay' });
+  const close = () => host.remove();
+  host.appendChild(
+    el(
+      'div',
+      { class: 'box', style: 'max-width:400px' },
+      el('h2', { style: 'margin:0 0 4px;font-size:20px;font-weight:900' }, 'Leave the lobby?'),
+      el(
+        'p',
+        { class: 'dim', style: 'margin:0 0 16px' },
+        route === 'play'
+          ? 'Leaving the lobby ends the party. After that you can play against the AI.'
+          : 'That screen is closed while you are in a party. Leaving the lobby ends the party.',
+      ),
+      el(
+        'div',
+        { style: 'display:grid;gap:8px' },
+        el(
+          'button',
+          {
+            class: 'btn primary block',
+            onclick: () => {
+              close();
+              leaveParty();
+              navigate(route, params);
+            },
+          },
+          'Leave lobby',
+        ),
+        el('button', { class: 'btn block', onclick: close }, 'Stay in the lobby'),
+      ),
+    ),
+  );
+  document.body.appendChild(host);
 }
 
 /** Takes over the whole viewport (used by the match screen). */
@@ -166,16 +217,20 @@ function renderTopbar(): void {
   const navBar = el(
     'nav',
     {},
-    NAV.map((item) =>
-      el(
+    NAV.map((item) => {
+      // Online wears a pip when something is waiting: an unanswered friend
+      // request, or an unread answer to yours.
+      const pending = item.route === 'online' ? unreadCount() : 0;
+      return el(
         'button',
         {
           class: `navbtn ${item.route === currentRoute ? 'active' : ''}`,
           onclick: () => navigate(item.route),
         },
         item.label,
-      ),
-    ),
+        pending > 0 ? el('span', { class: 'nav-pip' }, String(Math.min(9, pending))) : null,
+      );
+    }),
   );
   // With a dozen destinations the bar scrolls on most screens. Keeping the
   // active one in view means a route you just navigated to is never parked off

@@ -69,6 +69,11 @@ export interface StartMatchOptions {
    */
   aiEdge?: number;
   /**
+   * Show only the opponent's card on the walkout — online games and ranked,
+   * where you are scouting them rather than being introduced to yourself.
+   */
+  opponentOnlyWalkout?: boolean;
+  /**
    * Coin multiplier for a win, from the Emerald+ ranked streak bonus.
    *
    * Decided before the match rather than after it, off the streak you came in
@@ -102,7 +107,10 @@ export function startMatch(opts: StartMatchOptions): void {
     difficulty: opts.difficulty,
     venue: PARK_BY_ID[opts.parkId]?.name ?? 'Hoops Elite',
     subtitle: opts.eventName ?? (opts.squads ? '3v3 Squads' : labelFor(opts.playlist)),
-    hideDifficulty: Boolean(opts.ranked),
+    // Online games hide the difficulty for the same reason ranked does: you
+    // are playing a person, and naming a CPU setting would say otherwise.
+    hideDifficulty: Boolean(opts.ranked || opts.opponentOnlyWalkout),
+    opponentOnly: Boolean(opts.ranked || opts.opponentOnlyWalkout),
     identity: {
       username: store.profile.username,
       // The ladder is ranked points, the same number the Rank screen shows.

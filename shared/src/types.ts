@@ -256,6 +256,54 @@ export interface Profile {
    * tally would drift the first time a result did not arrive.
    */
   online: OnlineRecord;
+  /** friends, requests and their notifications — the Online hub's state */
+  social: SocialState;
+}
+
+// --------------------------------------------------------------------- social
+
+/**
+ * The Online hub's people. Like the leaderboard, this is the game's own world
+ * of players rather than a server of strangers: the users you search for are
+ * the same rivals on the ladder, they answer requests on their own time, and
+ * they play as their real builds when you meet them on the floor.
+ */
+export interface SocialState {
+  friends: FriendEntry[];
+  /** requests you have sent that have not been answered yet */
+  outgoing: PendingRequest[];
+  /** requests other players have sent you */
+  incoming: PendingRequest[];
+  /** the notification tab's feed, newest first */
+  notices: SocialNotice[];
+}
+
+export interface FriendEntry {
+  /** the rival's stable id on the ladder */
+  id: string;
+  name: string;
+  since: number;
+}
+
+export interface PendingRequest {
+  id: string;
+  name: string;
+  sentAt: number;
+  /**
+   * When the other player answers, decided when the request is sent. The
+   * answer materialises the first time the state is read past this moment —
+   * people reply when they reply, not when you are watching.
+   */
+  resolvesAt: number;
+}
+
+export interface SocialNotice {
+  id: string;
+  kind: 'accepted' | 'request' | 'declined';
+  /** who it is about */
+  name: string;
+  at: number;
+  read: boolean;
 }
 
 /**

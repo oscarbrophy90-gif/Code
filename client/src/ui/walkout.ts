@@ -64,6 +64,12 @@ export interface WalkoutOptions {
    * how hard the game is before you have played a possession of it.
    */
   hideDifficulty?: boolean;
+  /**
+   * Online games announce only the opposition. You know who you are — the
+   * scene is for scouting the other side, and your own build is a click away
+   * on Preview Build in the lobby.
+   */
+  opponentOnly?: boolean;
 }
 
 /** How long each beat of the cutscene runs, in milliseconds. */
@@ -132,17 +138,20 @@ export function playWalkout(opts: WalkoutOptions): Promise<void> {
       audio.play('ui', 0.8);
     });
 
+    // An online walkout ends after the opposition: your card never plays.
     const second = BEAT.intro + BEAT.card;
-    at(second, () => {
-      body.appendChild(
-        teams
-          ? teamCard(opts.playerTeam!, 'left', 'And their opponents', opts.identity)
-          : entrantCard(opts.player, 'left', 'And their opponent', opts.identity, opts.nameEffectId, opts.bannerId),
-      );
-      audio.play('ui', 1.15);
-    });
+    if (!opts.opponentOnly) {
+      at(second, () => {
+        body.appendChild(
+          teams
+            ? teamCard(opts.playerTeam!, 'left', 'And their opponents', opts.identity)
+            : entrantCard(opts.player, 'left', 'And their opponent', opts.identity, opts.nameEffectId, opts.bannerId),
+        );
+        audio.play('ui', 1.15);
+      });
+    }
 
-    const clash = second + BEAT.card;
+    const clash = opts.opponentOnly ? second : second + BEAT.card;
     at(clash, () => {
       stage.appendChild(el('div', { class: 'walkout-vs' }, 'VS'));
       audio.play('buzzer', 1.1);
@@ -177,6 +186,15 @@ function bannerBack(id: string): HTMLElement {
  * rank they hold. It only applies to you — the CPU opponent is a build, not an
  * account, so it gets a name and nothing under it.
  */
+/**
+ * The full walkout information for one build, outside the cutscene: the
+ * lobby's Preview Build shows exactly what the walkout would have — same
+ * card, same numbers — so hiding your card in the online scene costs nothing.
+ */
+export function buildPreviewCard(cfg: SimPlayerConfig, kicker = 'Build preview'): HTMLElement {
+  return entrantCard(cfg, 'left', kicker);
+}
+
 function entrantCard(
   cfg: SimPlayerConfig,
   side: 'left' | 'right',
