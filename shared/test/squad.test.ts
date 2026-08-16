@@ -10,7 +10,7 @@ import {
   stepMatch,
   SIM_DT,
 } from '../src/sim/match.ts';
-import { emptyInput, type MatchState, type PlayerInput } from '../src/sim/state.ts';
+import { emptyInput, type BallState, type MatchState, type PlayerInput } from '../src/sim/state.ts';
 import { SquadController, archetypeOf } from '../src/sim/squad.ts';
 import { generateOpponent, generateSquad, generateTeammates } from '../src/data/opponents.ts';
 import { isBeyondArc } from '../src/sim/court.ts';
@@ -36,6 +36,14 @@ function team3(seed: number): MatchState {
 
 function idle(state: MatchState): PlayerInput[] {
   return state.players.map(() => emptyInput());
+}
+
+/**
+ * The ball's state, read through a call so the compiler cannot narrow it to
+ * whatever a test assigned before stepping the sim.
+ */
+function ballState(state: MatchState): BallState {
+  return state.ball.state;
 }
 
 test('a 3v3 floor is six players on two teams, and 1v1 is still two pids', () => {
@@ -296,35 +304,155 @@ test('the big lives in the paint and the whole squad rebounds: shot diets follow
   assert.ok(bigThrees / bigShots < 0.2, `and does not live behind the arc (${((bigThrees / bigShots) * 100).toFixed(0)}% threes)`);
 });
 
-test('a pass thrown through a parked defender can be picked off', () => {
-  let picks = 0;
-  for (let seed = 0; seed < 60; seed++) {
-    const state = team3(seed + 200);
-    const p = state.players[0];
-    const mate = state.players[1];
-    p.x = 0;
-    p.z = 28;
-    p.state = 'dribble';
-    state.ball.owner = 0;
-    state.ball.state = 'held';
-    state.phase = 'live';
-    state.needsClear = false;
-    mate.x = 0;
-    mate.z = 8;
-    mate.state = 'idle';
-    // A defender standing exactly on the lane.
-    state.players[3].x = 0;
-    state.players[3].z = 18;
-    state.players[3].vx = 0;
-    state.players[3].vz = 0;
 
-    const inputs = idle(state);
-    inputs[0] = { ...emptyInput(), pass: true };
-    stepMatch(state, inputs, SIM_DT);
-    for (const e of drainEvents(state)) {
-      if (e.type === 'turnover' && e.reason === 'strip') picks++;
+/**
+ * A scripted pass down a known lane.
+ *
+ * The passer is at the top, the intended receiver straight down the middle,
+ * and the other teammate is smothered in a corner so the passer's choice is
+ * never in doubt. `blocker` decides whether a defender is standing in the
+ * lane or parked out of the play.
+ */
+function scriptedPass(seed: number, accuracy: number, blocker: boolean) {
+  const a = generateOpponent(85, seed * 991 + 7);
+  a.attrs.passAccuracy = accuracy;
+  const mates = generateTeammates(85, seed * 991, { primary: '#20304c', secondary: '#e8b23a' });
+  const opps = generateSquad(85, seed * 331 + 5);
+  const state = createTeamMatch([a, ...mates], opps, defaultMatchConfig({ manualCheck: false }), seed * 77);
+
+  const p = state.players[0];
+  p.x = 0;
+  p.z = 28;
+  p.state = 'dribble';
+  state.ball.owner = 0;
+  state.ball.state = 'held';
+  state.phase = 'live';
+  state.needsClear = false;
+
+  const target = state.players[1];
+  target.x = 0;
+  target.z = 8;
+  target.state = 'idle';
+  target.vx = target.vz = 0;
+
+  const spare = state.players[2];
+  spare.x = 21;
+  spare.z = 31;
+  spare.vx = spare.vz = 0;
+  state.players[4].x = 21.6;
+  state.players[4].z = 31;
+  state.players[5].x = -22;
+  state.players[5].z = 32;
+  state.players[3].x = blocker ? 0 : -22;
+  state.players[3].z = blocker ? 18 : 30;
+
+  const inputs = idle(state);
+  inputs[0] = { ...emptyInput(), pass: true };
+  stepMatch(state, inputs, SIM_DT);
+  const onLane = ballState(state) === 'pass' && state.ball.passTo === 1;
+
+  let tipped = false;
+  let frames = 0;
+  for (const e of drainEvents(state)) if (e.type === 'tip') tipped = true;
+  while (ballState(state) === 'pass' && frames++ < 600) {
+    for (const pl of state.players) {
+      pl.vx = 0;
+      pl.vz = 0;
     }
+    stepMatch(state, idle(state), SIM_DT);
+    for (const e of drainEvents(state)) if (e.type === 'tip') tipped = true;
   }
-  assert.ok(picks >= 8, `a body on the lane must matter (${picks}/60 picked)`);
-  assert.ok(picks <= 40, `but not every pass dies (${picks}/60 picked)`);
+
+  return {
+    onLane,
+    tipped,
+    caught: ballState(state) === 'held' && state.ball.owner === 1,
+    flight: frames * SIM_DT,
+    offTarget: Math.hypot(state.ball.x - target.x, state.ball.z - target.z),
+  };
+}
+
+test('a body in the passing lane can tip it; a body out of the lane cannot', () => {
+  let tippedWith = 0;
+  let tippedWithout = 0;
+  let lanes = 0;
+
+  for (let seed = 1; seed <= 120; seed++) {
+    const withMan = scriptedPass(seed, 55, true);
+    const without = scriptedPass(seed, 55, false);
+    if (!withMan.onLane || !without.onLane) continue;
+    lanes++;
+    if (withMan.tipped) tippedWith++;
+    if (without.tipped) tippedWithout++;
+  }
+
+  assert.ok(lanes > 100, `only ${lanes} passes went down the scripted lane`);
+  assert.equal(tippedWithout, 0, `${tippedWithout} passes were tipped with nobody in the lane`);
+  assert.ok(
+    tippedWith > lanes * 0.15,
+    `standing in the lane must matter — only ${tippedWith}/${lanes} tipped`,
+  );
+  assert.ok(
+    tippedWith < lanes * 0.75,
+    `but a lane defender is not a wall — ${tippedWith}/${lanes} tipped`,
+  );
+});
+
+test('Pass Accuracy makes the pass faster, truer, and safer to catch', () => {
+  const sample = (accuracy: number) => {
+    let flight = 0;
+    let off = 0;
+    let caught = 0;
+    let n = 0;
+    for (let seed = 1; seed <= 120; seed++) {
+      const r = scriptedPass(seed, accuracy, false);
+      if (!r.onLane) continue;
+      n++;
+      flight += r.flight;
+      off += r.offTarget;
+      if (r.caught) caught++;
+    }
+    return { flight: flight / n, off: off / n, caught: caught / n, n };
+  };
+
+  const poor = sample(25);
+  const mid = sample(60);
+  const elite = sample(99);
+  assert.ok(poor.n > 100 && elite.n > 100, 'enough scripted passes to measure');
+
+  // Faster.
+  assert.ok(elite.flight < mid.flight, `elite ${elite.flight.toFixed(3)}s vs mid ${mid.flight.toFixed(3)}s`);
+  assert.ok(mid.flight < poor.flight, `mid ${mid.flight.toFixed(3)}s vs poor ${poor.flight.toFixed(3)}s`);
+  assert.ok(elite.flight < poor.flight * 0.7, 'an elite passer is markedly quicker');
+
+  // Truer: it lands on the man rather than near him.
+  assert.ok(elite.off < mid.off, `elite ${elite.off.toFixed(2)}ft vs mid ${mid.off.toFixed(2)}ft off`);
+  assert.ok(mid.off < poor.off, `mid ${mid.off.toFixed(2)}ft vs poor ${poor.off.toFixed(2)}ft off`);
+  assert.ok(elite.off < 0.5, `an elite pass hits the target (${elite.off.toFixed(2)}ft off)`);
+
+  // Safer: fewer of them end up on the floor.
+  assert.ok(elite.caught > mid.caught, `elite caught ${(elite.caught * 100).toFixed(0)}% vs mid ${(mid.caught * 100).toFixed(0)}%`);
+  assert.ok(mid.caught > poor.caught, `mid ${(mid.caught * 100).toFixed(0)}% vs poor ${(poor.caught * 100).toFixed(0)}%`);
+  assert.ok(elite.caught > 0.95, `an elite passer barely ever has one dropped (${(elite.caught * 100).toFixed(0)}%)`);
+  assert.ok(poor.caught < 0.8, `a poor passer genuinely loses some (${(poor.caught * 100).toFixed(0)}%)`);
+});
+
+test('a better passer threads a guarded lane more often than a worse one', () => {
+  const tipRate = (accuracy: number) => {
+    let tipped = 0;
+    let n = 0;
+    for (let seed = 1; seed <= 120; seed++) {
+      const r = scriptedPass(seed, accuracy, true);
+      if (!r.onLane) continue;
+      n++;
+      if (r.tipped) tipped++;
+    }
+    return tipped / n;
+  };
+  const poor = tipRate(25);
+  const elite = tipRate(99);
+  assert.ok(
+    elite < poor * 0.6,
+    `an elite passer should be much harder to tip: ${(elite * 100).toFixed(0)}% vs ${(poor * 100).toFixed(0)}%`,
+  );
 });

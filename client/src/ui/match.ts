@@ -159,6 +159,9 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
         const ball = state.ball;
         return {
           time: state.time,
+          phase: state.phase,
+          shotClock: state.shotClock,
+          score: [state.score[0], state.score[1]],
           ball: { state: ball.state, owner: ball.owner, x: ball.x, y: ball.y, z: ball.z, settled: ball.settled },
           players: state.players.map((p) => ({
             state: p.state,
@@ -166,6 +169,10 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
             y: p.y,
             z: p.z,
             reboundLock: p.reboundLock,
+            speed: Math.hypot(p.vx, p.vz),
+            // How hard this player's legs are actually swinging, straight off
+            // the renderer — the thing that was churning for standing players.
+            stride: playerRenderer.strideOf(p.pid),
           })),
         };
       },
@@ -616,6 +623,15 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
         }
         case 'pass': {
           audio.play('ui', 0.9);
+          break;
+        }
+        case 'tip': {
+          // Knocking a pass down is a defensive play worth naming, whoever
+          // made it — you read the lane, or the CPU did.
+          const p = state.players[e.side];
+          audio.play('steal');
+          shake = Math.min(1, shake + 0.35);
+          hud.push('TIPPED', '#8fd0ff', p.x, p.z, e.side === localPid);
           break;
         }
         case 'passCall': {

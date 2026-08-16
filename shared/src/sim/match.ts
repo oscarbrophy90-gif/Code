@@ -223,6 +223,7 @@ function makeBall(): Ball {
     shotWillGoIn: false,
     shotBy: null,
     passTo: null,
+    passFrom: null,
     shotValue: 1,
     shotGrade: null,
     flightTime: 0,
@@ -350,6 +351,7 @@ function setupCheckball(state: MatchState, offense: Side): void {
   ball.settled = false;
   ball.shotBy = null;
   ball.passTo = null;
+  ball.passFrom = null;
   ball.shotGrade = null;
   ball.vx = ball.vy = ball.vz = 0;
   state.check = state.config.manualCheck
@@ -1032,60 +1034,23 @@ function tryPass(state: MatchState, from: number, rng: Rng): boolean {
   const p = state.players[from];
   const ball = state.ball;
 
-  // Pass Accuracy finally does what its card always promised: a real passer
-  // zips it — faster flight, tighter line, harder to pick.
-  const zip = clamp01((p.cfg.attrs.passAccuracy - 25) / 74);
+  // Pass Accuracy does what its card always promised. One rating, three
+  // effects, all of them things you can feel: a real passer zips it, puts it
+  // on the man rather than near him, and does not get it dropped.
+  const zip = passZip(p);
   const dist = Math.hypot(to.x - p.x, to.z - p.z);
-  const duration = (0.16 + dist * 0.016) * lerp(1.18, 0.82, zip);
-  // Lead the receiver: the pass goes where they will be when it arrives.
-  const lead = clampToCourt(to.x + to.vx * duration * 0.8, to.z + to.vz * duration * 0.8);
-  const leadX = lead.x;
-  const leadZ = lead.z;
+  const duration = passDuration(dist, zip);
 
-  // Interception check, decided at the throw: the defender closest to the
-  // midpoint of the lane, if he is basically standing in it, gets a hand up.
-  const midX = (p.x + leadX) / 2;
-  const midZ = (p.z + leadZ) / 2;
-  let laneDist = Infinity;
-  let picker: SimPlayer | null = null;
-  for (const pid of state.teams[other(p.side)]) {
-    const d = state.players[pid];
-    if (d.stagger > 0.4 || d.state === 'fallen') continue;
-    const dd = Math.hypot(d.x - midX, d.z - midZ);
-    if (dd < laneDist) {
-      laneDist = dd;
-      picker = d;
-    }
-  }
-  if (picker && laneDist < 2.6) {
-    const hands = clamp01((picker.cfg.attrs.steal - 25) / 74);
-    // Capped: even the worst pass into the worst spot is a gamble for the
-    // defender, not a guarantee — a pass system where half the passes die
-    // is a pass system nobody uses.
-    const pickChance = Math.min(0.5, (1 - laneDist / 2.6) * (0.32 + hands * 0.38) * lerp(1.25, 0.6, zip));
-    if (rng.chance(pickChance)) {
-      // Tipped. The ball squirts loose off the deflection, live at once.
-      ball.state = 'loose';
-      ball.settled = true;
-      ball.owner = null;
-      ball.shotBy = null;
-      ball.passTo = null;
-      ball.x = midX;
-      ball.z = midZ;
-      ball.y = 3.5;
-      const away = normalize(midX - picker.x + rng.range(-1, 1), midZ - picker.z + rng.range(-1, 1));
-      const power = rng.range(6, 11);
-      ball.vx = away.x * power;
-      ball.vz = away.z * power;
-      ball.vy = rng.range(2, 5);
-      state.stats[from].turnovers++;
-      state.stats[from].gradePoints -= 0.4;
-      state.stats[picker.pid].gradePoints += 0.4;
-      state.events.push({ type: 'turnover', side: from, reason: 'strip' });
-      state.passRequest = null;
-      return true;
-    }
-  }
+  // Lead the receiver: the pass goes where they will be when it arrives — and
+  // a poor passer misses that spot. The scatter is thrown across the line of
+  // the pass, which is what a wayward pass actually looks like: not short or
+  // long, but behind the cutter or out in front of him.
+  const aim = normalize(to.x - p.x, to.z - p.z);
+  const scatter = rng.range(-1, 1) * lerp(3.4, 0.25, zip);
+  const lead = clampToCourt(
+    to.x + to.vx * duration * 0.8 - aim.z * scatter,
+    to.z + to.vz * duration * 0.8 + aim.x * scatter,
+  );
 
   ball.state = 'pass';
   ball.owner = null;
@@ -1097,17 +1062,132 @@ function tryPass(state: MatchState, from: number, rng: Rng): boolean {
   ball.fromX = p.x;
   ball.fromZ = p.z;
   ball.fromY = 3.6;
-  ball.toX = leadX;
-  ball.toZ = leadZ;
+  ball.toX = lead.x;
+  ball.toZ = lead.z;
   ball.toY = 3.4;
-  ball.apex = 4.6 + dist * 0.06;
+  // A zipped pass is flat; a lobbed one floats, which is what gives a defender
+  // the extra beat to get a hand on it.
+  ball.apex = lerp(4.2, 3.7, zip) + dist * lerp(0.09, 0.03, zip);
   ball.vx = ball.vy = ball.vz = 0;
+  ball.passFrom = from;
 
   p.state = 'idle';
-  p.facing = Math.atan2(-(leadX - p.x), leadZ - p.z);
+  p.facing = Math.atan2(-(lead.x - p.x), lead.z - p.z);
   state.passRequest = null;
   state.events.push({ type: 'pass', from, to: to.pid });
   return true;
+}
+
+/** 0..1 — how good a passer this is. The one number the pass game reads. */
+function passZip(p: SimPlayer): number {
+  return clamp01((p.cfg.attrs.passAccuracy - 25) / 74);
+}
+
+/**
+ * Whether the receiver actually gathers it in.
+ *
+ * A pass that arrives badly gets dropped. Most of that is on the passer — a
+ * good one puts it in the shooting pocket and it sticks — with the receiver's
+ * hands and whoever is climbing his back doing the rest. This is the third
+ * thing Pass Accuracy buys: fewer of your passes end up on the floor.
+ */
+function catchesPass(state: MatchState, to: SimPlayer, rng: Rng): boolean {
+  const ball = state.ball;
+  const passer = ball.passFrom !== null ? state.players[ball.passFrom] : null;
+  const zip = passer ? passZip(passer) : 0.5;
+
+  // How far off the man it landed. The flight aimed at a lead point; if the
+  // receiver is not there any more, he is reaching for it.
+  const off = Math.hypot(ball.x - to.x, ball.z - to.z);
+  const hands = clamp01((to.cfg.attrs.ballHandle - 25) / 74) * 0.6 + clamp01((to.cfg.attrs.layup - 25) / 74) * 0.4;
+  const guard = nearestOpponent(state, to);
+  const pressure = clamp01(1 - Math.hypot(guard.x - to.x, guard.z - to.z) / 6);
+
+  // An elite passer hitting a set target is essentially automatic; a poor one
+  // throwing at a covered man on the move genuinely loses it sometimes.
+  const secure = clamp01(
+    0.72 +
+      zip * 0.26 +
+      hands * 0.14 -
+      clamp01(off / 4) * 0.34 -
+      pressure * 0.12 -
+      clamp01(to.stagger) * 0.2,
+  );
+  return rng.chance(secure);
+}
+
+/** Flight time for a pass of this length from a passer this good. */
+function passDuration(dist: number, zip: number): number {
+  // A 20ft pass takes 0.62s out of a poor passer and 0.31s out of an elite
+  // one — the difference between a pass a help defender can rotate onto and
+  // one that is already there.
+  return (0.13 + dist * 0.0175) * lerp(1.35, 0.68, zip);
+}
+
+/**
+ * A pass in flight, checked against every defender, every frame.
+ *
+ * This is what makes standing in a passing lane a thing you *do* rather than
+ * a dice roll settled the moment the ball left the passer's hands. Get your
+ * body between the two of them and the ball comes past you at a height you
+ * can reach, and you have a real chance to knock it down — the same chance
+ * whether you are the CPU rotating over or the human who read the play.
+ */
+function tryTipPass(state: MatchState, dt: number, rng: Rng): boolean {
+  const ball = state.ball;
+  if (ball.passTo === null) return false;
+  const receiver = state.players[ball.passTo];
+  const passer = ball.passFrom !== null ? state.players[ball.passFrom] : null;
+  const zip = passer ? passZip(passer) : 0.5;
+
+  for (const pid of state.teams[other(receiver.side)]) {
+    const d = state.players[pid];
+    if (d.state === 'fallen' || d.stagger > 0.4) continue;
+
+    // In the way, in three dimensions: near the ball on the floor, and able
+    // to get a hand to the height it is passing at.
+    const flat = Math.hypot(ball.x - d.x, ball.z - d.z);
+    const armSpan = 2.1 + (d.cfg.wingspanIn - d.cfg.heightIn) / 12;
+    if (flat > armSpan) continue;
+    const reach = reachHeight(d) + 0.4;
+    if (ball.y > reach) continue;
+
+    // Closer to the ball's line is a better play on it, and a jumping
+    // defender is going up for it rather than watching it go by.
+    const closeness = 1 - flat / armSpan;
+    const hands = clamp01((d.cfg.attrs.steal - 25) / 74) * 0.6 + clamp01((d.cfg.attrs.perimeterDefense - 25) / 74) * 0.4;
+    const airborne = d.y > 0.3 || d.state === 'contesting' ? 1.35 : 1;
+    // Per second, converted to this frame. Tuned so that reading the play and
+    // putting your body on the line is worth doing: a defender dead in the
+    // lane knocks down about a third of a careless passer's attempts and about
+    // one in ten from an elite one, and going up for it helps.
+    const perSecond = closeness * (2.2 + hands * 4.4) * airborne * lerp(1.9, 0.55, zip);
+    if (!rng.chance(clamp01(perSecond * dt))) continue;
+
+    // Knocked down. It squirts away off the deflection and is live at once.
+    ball.state = 'loose';
+    ball.settled = true;
+    ball.owner = null;
+    ball.shotBy = null;
+    ball.passTo = null;
+    ball.passFrom = null;
+    const away = normalize(ball.x - d.x + rng.range(-1, 1), ball.z - d.z + rng.range(-1, 1));
+    const power = rng.range(5, 10);
+    ball.vx = away.x * power;
+    ball.vz = away.z * power;
+    ball.vy = rng.range(2, 5);
+    ball.y = Math.max(1.2, Math.min(ball.y, reach));
+
+    if (passer) {
+      state.stats[passer.pid].turnovers++;
+      state.stats[passer.pid].gradePoints -= 0.4;
+      state.events.push({ type: 'turnover', side: passer.pid, reason: 'strip' });
+    }
+    state.stats[d.pid].gradePoints += 0.4;
+    state.events.push({ type: 'tip', side: d.pid });
+    return true;
+  }
+  return false;
 }
 
 /** Body-up: the defender slows and redirects a driving handler. */
@@ -1561,6 +1641,7 @@ function launchBall(
   ball.owner = null;
   ball.shotBy = side;
   ball.passTo = null;
+  ball.passFrom = null;
   ball.shotWillGoIn = made;
   ball.shotValue = value;
   ball.settled = false;
@@ -1925,6 +2006,7 @@ function changePossession(state: MatchState, to: Side, reason: 'miss' | 'block' 
   state.ball.owner = null;
   state.ball.shotBy = null;
   state.ball.passTo = null;
+  state.ball.passFrom = null;
   state.ball.shotGrade = null;
   state.phase = 'deadball';
   state.phaseTimer = 0.85;
@@ -2038,23 +2120,50 @@ function updateBall(state: MatchState, dt: number, rng: Rng): void {
     ball.z = lerp(ball.fromZ, ball.toZ, t);
     const arc = 4 * (ball.apex - (ball.fromY + ball.toY) / 2) * t * (1 - t);
     ball.y = lerp(ball.fromY, ball.toY, t) + arc;
+    // Velocity along the line, so a tipped ball keeps the pass's momentum and
+    // the renderer has something to lean the figures on.
+    if (ball.flightDuration > 0) {
+      ball.vx = (ball.toX - ball.fromX) / ball.flightDuration;
+      ball.vz = (ball.toZ - ball.fromZ) / ball.flightDuration;
+      ball.vy = 0;
+    }
+
+    // Anyone standing in the lane gets a play on it, every frame it is in
+    // the air — this is the whole reason to cut off a passing lane.
+    if (tryTipPass(state, dt, rng)) return;
 
     if (t >= 1) {
       const to = ball.passTo !== null ? state.players[ball.passTo] : null;
-      if (to && to.state !== 'fallen' && to.state !== 'staggered') {
+      const catchable = to && to.state !== 'fallen' && to.state !== 'staggered' && to.reboundLock <= 0;
+      if (to && catchable && catchesPass(state, to, rng)) {
         ball.state = 'held';
         ball.owner = to.pid;
         ball.passTo = null;
+        ball.passFrom = null;
         ball.vx = ball.vy = ball.vz = 0;
         if (to.state === 'idle') to.state = 'dribble';
       } else {
+        // Fumbled, or thrown to somebody who could not take it. It bounces
+        // away off the hands and is live immediately.
+        const passer = ball.passFrom;
         ball.state = 'loose';
         ball.settled = true;
         ball.owner = null;
         ball.passTo = null;
-        ball.vx = (ball.toX - ball.fromX) / Math.max(0.1, ball.flightDuration) * 0.4;
-        ball.vz = (ball.toZ - ball.fromZ) / Math.max(0.1, ball.flightDuration) * 0.4;
-        ball.vy = 0;
+        ball.passFrom = null;
+        const spill = normalize(ball.vx + rng.range(-3, 3), ball.vz + rng.range(-3, 3));
+        const power = rng.range(4, 8);
+        ball.vx = spill.x * power;
+        ball.vz = spill.z * power;
+        ball.vy = rng.range(1.5, 4);
+        ball.y = Math.max(1, ball.y);
+        if (to) {
+          state.stats[to.pid].gradePoints -= 0.3;
+          if (passer !== null) {
+            state.stats[passer].turnovers++;
+            state.events.push({ type: 'turnover', side: passer, reason: 'strip' });
+          }
+        }
       }
     }
     return;
@@ -2345,6 +2454,7 @@ function tryCollect(state: MatchState, rng: Rng): void {
   ball.owner = winner;
   ball.shotBy = null;
   ball.passTo = null;
+  ball.passFrom = null;
   ball.shotGrade = null;
 
   state.stats[winner].rebounds++;
@@ -2448,6 +2558,7 @@ function setupFreeThrowPositions(state: MatchState): void {
   ball.owner = shooterSide;
   ball.shotBy = null;
   ball.passTo = null;
+  ball.passFrom = null;
   ball.shotGrade = null;
   // A trip to the line is also a breather.
   for (const p of state.players) p.stamina = clamp01(p.stamina + (p.pid === shooterSide ? 0.14 : 0.1));
@@ -2657,6 +2768,7 @@ function returnBallTo(state: MatchState, side: number): void {
   ball.owner = side;
   ball.shotBy = null;
   ball.passTo = null;
+  ball.passFrom = null;
   ball.shotGrade = null;
   ball.shotWillGoIn = false;
   ball.settled = false;

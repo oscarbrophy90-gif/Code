@@ -298,6 +298,8 @@ export interface Ball {
   shotBy: number | null;
   /** pid the pass in flight is going to */
   passTo: number | null;
+  /** pid who threw the pass in flight — a tip is charged to them */
+  passFrom: number | null;
   shotValue: 1 | 2;
   shotGrade: ShotGrade | null;
   /** seconds since release, used for the arc */
@@ -413,6 +415,8 @@ export type SimEvent =
   | { type: 'clear'; side: number }
   | { type: 'emote'; side: number; slot: number }
   | { type: 'pass'; from: number; to: number }
+  /** a defender knocked a pass down by being in the lane */
+  | { type: 'tip'; side: number }
   /** somebody without the ball calling for it */
   | { type: 'passCall'; side: number }
   | { type: 'foul'; on: number; by: number; shots: number }

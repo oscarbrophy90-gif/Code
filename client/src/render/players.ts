@@ -15,40 +15,79 @@ interface Gait {
   amplitude: number;
 }
 
+/** A player's stride state between frames. */
+export interface GaitSample extends Gait {
+  at: number;
+  x: number;
+  z: number;
+}
+
+/**
+ * One frame of the walk cycle.
+ *
+ * Pure, so it can be tested without a canvas — which matters, because the
+ * subtlest thing here is that `prev` must be *this same player's* last frame.
+ * Feeding it somebody else's makes `moved` the distance between two different
+ * bodies, which is enormous, which pins the stride at full amplitude and walks
+ * a player who is standing perfectly still.
+ */
+export function stepGait(
+  prev: GaitSample | undefined,
+  x: number,
+  z: number,
+  time: number,
+  speed: number,
+  seedPhase: number,
+): GaitSample {
+  const dt = prev ? Math.max(0, Math.min(0.1, time - prev.at)) : 0;
+
+  // Stride off the ground actually covered, not off the velocity. A stepback
+  // is a displacement rather than a shove on the velocity, so a player who is
+  // genuinely moving four feet backwards has vx/vz near zero — read the
+  // velocity and he slides back with his legs still. Capped so a teleport
+  // (inbound, possession reset) does not spin the legs.
+  const moved = prev && dt > 0 ? Math.hypot(x - prev.x, z - prev.z) / dt : speed;
+  const groundSpeed = Math.min(26, Math.max(speed, moved));
+
+  // A real stride is roughly 5.5 ft, so steps per second is speed / 5.5, and
+  // a full cycle is two steps. Plus a slow idle shuffle so a standing player
+  // is not frozen solid.
+  const stepsPerSecond = groundSpeed / 5.5;
+  const frequency = (1.1 + stepsPerSecond) * Math.PI;
+  const target = Math.min(1, groundSpeed / 7);
+
+  const phase = (prev ? prev.phase : seedPhase) + frequency * dt;
+  // Ease the amplitude so starting and stopping does not snap the legs.
+  const amplitude = prev ? prev.amplitude + (target - prev.amplitude) * Math.min(1, dt * 9) : target;
+
+  return { phase: phase % (Math.PI * 2), amplitude, at: time, x, z };
+}
+
 export class PlayerRenderer {
-  /** Per-player stride state, so the walk cycle is continuous across frames. */
-  private gaits = new Map<number, Gait & { at: number; x: number; z: number }>();
+  /**
+   * Per-player stride state, so the walk cycle is continuous across frames.
+   *
+   * Keyed by pid, not by side. In 1v1 those are the same number and nobody
+   * noticed; in 3v3 a side key gave all three teammates one shared entry, so
+   * each frame every one of them measured his "stride" as the gap to whichever
+   * teammate wrote the entry last — tens of feet in a sixtieth of a second.
+   * That is why the whole squad jogged on the spot.
+   */
+  private gaits = new Map<number, GaitSample>();
 
   /**
    * Advances the walk cycle. Frequency rises with speed but the *phase* only
    * ever moves forward by frequency × dt, so changing speed bends the cycle
    * instead of teleporting it.
    */
+  /** Read-only stride amplitude for a player, for tests and the debug rig. */
+  strideOf(pid: number): number {
+    return this.gaits.get(pid)?.amplitude ?? 0;
+  }
+
   private gait(p: SimPlayer, time: number, speed: number): Gait {
-    const prev = this.gaits.get(p.side);
-    const dt = prev ? Math.max(0, Math.min(0.1, time - prev.at)) : 0;
-
-    // Stride off the ground actually covered, not off the velocity. A stepback
-    // is a displacement rather than a shove on the velocity, so a player who is
-    // genuinely moving four feet backwards has vx/vz near zero — read the
-    // velocity and he slides back with his legs still. Capped so a teleport
-    // (inbound, possession reset) does not spin the legs.
-    const moved = prev && dt > 0 ? Math.hypot(p.x - prev.x, p.z - prev.z) / dt : speed;
-    const groundSpeed = Math.min(26, Math.max(speed, moved));
-
-    // A real stride is roughly 5.5 ft, so steps per second is speed / 5.5, and
-    // a full cycle is two steps. Plus a slow idle shuffle so a standing player
-    // is not frozen solid.
-    const stepsPerSecond = groundSpeed / 5.5;
-    const frequency = (1.1 + stepsPerSecond) * Math.PI;
-    const target = Math.min(1, groundSpeed / 7);
-
-    const phase = (prev ? prev.phase : p.side * 2) + frequency * dt;
-    // Ease the amplitude so starting and stopping does not snap the legs.
-    const amplitude = prev ? prev.amplitude + (target - prev.amplitude) * Math.min(1, dt * 9) : target;
-
-    const next = { phase: phase % (Math.PI * 2), amplitude, at: time, x: p.x, z: p.z };
-    this.gaits.set(p.side, next);
+    const next = stepGait(this.gaits.get(p.pid), p.x, p.z, time, speed, p.pid * 2);
+    this.gaits.set(p.pid, next);
     return next;
   }
 
