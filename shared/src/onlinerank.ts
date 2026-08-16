@@ -79,11 +79,16 @@ export interface OnlineRank {
 }
 
 /**
- * Your rank, from your online wins alone.
+ * Your rank, from your ranked points alone.
  *
- * Pure and total: the same win count always gives the same rank, on the client
- * and on the server, with no stored state to drift. A rank that is computed
- * cannot disagree with the record it is supposed to describe.
+ * Points, not wins — a division is a hundred of them, and a win is worth what
+ * the ladder says it is worth at your level. Passing a win *count* in here
+ * type-checks perfectly and is always wrong: three ranked wins reads as three
+ * points, which is Bronze 3 for everybody. The walkout did exactly that.
+ *
+ * Pure and total: the same points always give the same rank, on the client and
+ * on the server, with no stored state to drift. A rank that is computed cannot
+ * disagree with the record it is supposed to describe.
  */
 export function onlineRank(points: number): OnlineRank {
   const safe = Math.max(0, Math.floor(points));

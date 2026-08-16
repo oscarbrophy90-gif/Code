@@ -93,7 +93,7 @@ export function renderRankPath(): HTMLElement {
 }
 
 /** Total wins needed to first set foot in a tier. */
-function winsToReach(index: number): number {
+function pointsToReach(index: number): number {
   return index * DIVISIONS_PER_TIER * POINTS_PER_DIVISION;
 }
 
@@ -101,7 +101,7 @@ function tierCard(tier: RankRewardTier, index: number, peakIndex: number, owned:
   const reached = index <= peakIndex;
   const badge = el('canvas', { class: 'rank-badge', style: 'width:56px;height:62px' }) as HTMLCanvasElement;
   // Drawn at the bottom of the tier, which is the rank that unlocks it.
-  requestAnimationFrame(() => drawRankBadge(badge, winsToReach(index), index === ONLINE_TIERS.length - 1 ? 1 : null));
+  requestAnimationFrame(() => drawRankBadge(badge, pointsToReach(index), index === ONLINE_TIERS.length - 1 ? 1 : null));
 
   return el(
     'section',
@@ -118,7 +118,7 @@ function tierCard(tier: RankRewardTier, index: number, peakIndex: number, owned:
         el(
           'div',
           { class: 'hint', style: 'margin:2px 0 0' },
-          index === 0 ? 'Where every season starts' : `${winsToReach(index)} RP`,
+          index === 0 ? 'Where every season starts' : `${pointsToReach(index)} RP`,
         ),
       ),
       el(

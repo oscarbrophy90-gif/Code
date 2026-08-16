@@ -145,7 +145,7 @@ function drawFrame(
 
   // A scratch canvas per badge, because drawRankBadge sizes itself off a
   // canvas's layout box and this one is being transformed under it.
-  const plate = (wins: number, scale: number, alpha: number, spin: number) => {
+  const plate = (points: number, scale: number, alpha: number, spin: number) => {
     if (alpha <= 0.01 || scale <= 0.01) return;
     const off = document.createElement('canvas');
     off.width = Math.max(2, Math.floor(badgeW));
@@ -155,7 +155,7 @@ function drawFrame(
     // fallback path in drawRankBadge is what sizes it — give it the numbers.
     Object.defineProperty(off, 'clientWidth', { value: badgeW });
     Object.defineProperty(off, 'clientHeight', { value: badgeH });
-    drawRankBadge(off, wins, placement);
+    drawRankBadge(off, points, placement);
 
     ctx.save();
     ctx.globalAlpha = alpha;

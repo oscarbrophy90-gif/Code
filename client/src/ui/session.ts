@@ -105,6 +105,8 @@ export function startMatch(opts: StartMatchOptions): void {
     hideDifficulty: Boolean(opts.ranked),
     identity: {
       username: store.profile.username,
+      // The ladder is ranked points, the same number the Rank screen shows.
+      points: store.profile.online.rp,
       wins: store.profile.online.wins,
       losses: store.profile.online.losses,
       placement: store.position(),
@@ -134,7 +136,7 @@ function launchMatch(opts: StartMatchOptions): void {
     surface: opts.surface ?? null,
     onFinish: (result) => {
       dismissFullscreen();
-      const rankBefore = opts.ranked ? store.profile.online.wins : null;
+      const rankBefore = opts.ranked ? store.profile.online.rp : null;
       if (opts.drill) {
         showDrillResults(result, opts.drill);
         refresh();
@@ -160,7 +162,7 @@ function launchMatch(opts: StartMatchOptions): void {
       // screen you see after every game is a screen you skip after the second
       // one, so it is kept for the moment that earned it.
       if (summary.rankMove && summary.rankMove !== 'none' && rankBefore !== null) {
-        void playRankChange(document.body, rankBefore, store.profile.online.wins, store.accountId).then(() => {
+        void playRankChange(document.body, rankBefore, store.profile.online.rp, store.accountId).then(() => {
           showResults(result, summary, opts);
         });
         return;

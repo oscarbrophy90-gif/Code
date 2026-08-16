@@ -16,6 +16,24 @@ import { audio } from '../engine/audio.ts';
 import { drawRankBadge } from './rankbadge.ts';
 import { captureSceneKeys, el } from './dom.ts';
 
+/**
+ * The account behind a build: the name on the ladder and the standing it
+ * holds.
+ *
+ * `points` is the ladder — ranked points, the same number the Rank screen and
+ * the Locker read. `wins`/`losses` are match counts and nothing more. Keeping
+ * them apart matters: the walkout used to derive the rank from the win count,
+ * so a Gold player with three ranked wins walked out as Bronze 3.
+ */
+export interface WalkoutIdentity {
+  username: string;
+  /** ranked points — the ladder itself */
+  points: number;
+  wins: number;
+  losses: number;
+  placement: number | null;
+}
+
 export interface WalkoutOptions {
   player: SimPlayerConfig;
   opponent: SimPlayerConfig;
@@ -35,7 +53,7 @@ export interface WalkoutOptions {
    * The account behind your build: the username on the ladder and the record its
    * rank comes from. Only yours — the opponent is a build, not an account.
    */
-  identity?: { username: string; wins: number; losses: number; placement: number | null };
+  identity?: WalkoutIdentity;
   /** ranked spoils worn on the walkout: an effect on your name, a banner behind you */
   nameEffectId?: string | null;
   bannerId?: string | null;
@@ -163,7 +181,7 @@ function entrantCard(
   cfg: SimPlayerConfig,
   side: 'left' | 'right',
   kicker: string,
-  identity?: { username: string; wins: number; losses: number; placement: number | null },
+  identity?: WalkoutIdentity,
   nameEffectId?: string | null,
   bannerId?: string | null,
 ): HTMLElement {
@@ -240,7 +258,7 @@ function teamCard(
   team: SimPlayerConfig[],
   side: 'left' | 'right',
   kicker: string,
-  identity?: { username: string; wins: number; losses: number; placement: number | null },
+  identity?: WalkoutIdentity,
 ): HTMLElement {
   const lead = team[0];
   const base = window.innerWidth < 720 ? 118 : 190;
@@ -295,18 +313,21 @@ function teamCard(
  * Sized off the same number the figure uses so the two always match, whatever
  * the viewport does.
  */
-function rankPillar(identity: { username: string; wins: number; losses: number; placement: number | null }): HTMLElement {
+function rankPillar(identity: WalkoutIdentity): HTMLElement {
   const size = window.innerWidth < 720 ? 132 : 210;
   const played = identity.wins + identity.losses > 0;
   const placement = identity.placement;
-  const rank = onlineRank(identity.wins);
+  // The ladder is points. Reading the win count here is what made every
+  // walkout say Bronze 3 — three ranked wins is three "points" on a scale
+  // where a division is a hundred of them.
+  const rank = onlineRank(identity.points);
   const label = rank.grandChamp ? grandChampLabel(placement) : rank.label;
 
   const badge = el('canvas', {
     class: 'walkout-badge',
     style: `width:${Math.round(size * 0.62)}px;height:${size}px`,
   }) as HTMLCanvasElement;
-  requestAnimationFrame(() => drawRankBadge(badge, identity.wins, placement));
+  requestAnimationFrame(() => drawRankBadge(badge, identity.points, placement));
 
   return el(
     'div',

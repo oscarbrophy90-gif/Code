@@ -18,7 +18,7 @@ import { boardSize } from '../state/board.ts';
  * appears next to MyPlayer, a bordered div with a number in it reads as a form
  * field rather than a rank.
  */
-export function drawRankBadge(canvas: HTMLCanvasElement, wins: number, placement: number | null): void {
+export function drawRankBadge(canvas: HTMLCanvasElement, points: number, placement: number | null): void {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -31,7 +31,7 @@ export function drawRankBadge(canvas: HTMLCanvasElement, wins: number, placement
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
 
-  const rank = onlineRank(wins);
+  const rank = onlineRank(points);
   const { color, shade } = rank.tier;
   const cx = w / 2;
 
