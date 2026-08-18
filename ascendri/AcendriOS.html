@@ -1012,6 +1012,8 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 16px 0; }
       });
     });
     tt.settled = true;
+    var snap = snapshotWeek(tt);
+    if (snap) s.lastWeekPlan = snap;   // offered as "keep the same as last week"
     if (!total) return;
     var ratio = done / total;
     var xp = done * 4 + (ratio >= 0.8 ? 30 : 0);
@@ -1050,68 +1052,109 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 16px 0; }
   }
 
   // Automatic timetable: fits open tasks around fixed commitments for the next 7 days.
-  function generateTimetable(s) {
-    s = s || state;
+  var WEEK_DAYS = 7;
+
+  function dayOfWeek(iso) {
+    var p = iso.split('-');
+    return new Date(+p[0], +p[1] - 1, +p[2]).getDay();
+  }
+
+  function bounds(s) {
     var wake = minutes(s.settings.wake), sleep = minutes(s.settings.sleep);
     if (sleep <= wake) sleep = wake + 8 * 60;
-    var days = {}, freeMap = {}, isoList = [];
-    var t0 = todayISO();
-    var nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+    return { wake: wake, sleep: sleep };
+  }
 
-    for (var i = 0; i < 7; i++) {
-      var iso = addDaysISO(t0, i);
-      isoList.push(iso);
-      days[iso] = [];
-      var p = iso.split('-');
-      var dow = new Date(+p[0], +p[1] - 1, +p[2]).getDay();
-      var blocks = [];
-      s.commitments.forEach(function (c) {
-        if (c.days.indexOf(dow) === -1) return;
-        var st = minutes(c.start), en = minutes(c.end);
-        if (en <= st) return;
-        blocks.push({ id: uid(), refId: c.id, title: c.title, type: 'commitment', accent: c.accent || 'indigo', startMin: st, endMin: en, start: hhmm(st), end: hhmm(en) });
-      });
-      blocks.sort(function (a, b) { return a.startMin - b.startMin; });
-      days[iso] = blocks;
-      // free intervals
-      var free = []; var cur = (i === 0 ? Math.max(wake, Math.ceil(nowMin / 30) * 30) : wake);
-      blocks.forEach(function (b) {
-        if (b.startMin > cur) free.push([cur, Math.min(b.startMin, sleep)]);
-        cur = Math.max(cur, b.endMin);
-      });
-      if (cur < sleep) free.push([cur, sleep]);
-      freeMap[iso] = free.filter(function (f) { return f[1] - f[0] >= 20; });
+  function planWindow(s) {
+    var start = (s.timetable && s.timetable.weekStart) || todayISO();
+    var list = [];
+    for (var i = 0; i < WEEK_DAYS; i++) list.push(addDaysISO(start, i));
+    return list;
+  }
+
+  // Open stretches of a day that new work can go into — never in the past,
+  // never overlapping what is already on the grid.
+  function freeGapsFor(s, iso, blocks) {
+    var t = todayISO();
+    if (iso < t) return [];
+    var b = bounds(s);
+    var cur = b.wake;
+    if (iso === t) {
+      var nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+      cur = Math.max(b.wake, Math.ceil(nowMin / 30) * 30);
+    }
+    var free = [];
+    blocks.slice().sort(function (x, y) { return x.startMin - y.startMin; }).forEach(function (blk) {
+      if (blk.startMin > cur) free.push([cur, Math.min(blk.startMin, b.sleep)]);
+      cur = Math.max(cur, blk.endMin);
+    });
+    if (cur < b.sleep) free.push([cur, b.sleep]);
+    return free.filter(function (f) { return f[1] - f[0] >= 20; });
+  }
+
+  function taskBlock(task, startMin, endMin) {
+    return {
+      id: uid(), refId: task.id, title: task.title, type: 'task',
+      accent: task.priority === 3 ? 'red' : task.priority === 2 ? 'orange' : 'cyan',
+      startMin: startMin, endMin: endMin, start: hhmm(startMin), end: hhmm(endMin)
+    };
+  }
+
+  // Fits tasks into the free space of `days`. `prefer` optionally maps a task id
+  // to { dow, startMin } — the slot it held last week, tried before anything else.
+  function placeTasks(s, days, isoList, tasks, prefer) {
+    var freeMap = {};
+    isoList.forEach(function (iso) { freeMap[iso] = freeGapsFor(s, iso, days[iso] || []); });
+
+    function consume(iso, gapIx, startMin, endMin) {
+      var gaps = freeMap[iso], gap = gaps[gapIx];
+      var rest = [];
+      if (startMin - gap[0] >= 20) rest.push([gap[0], startMin]);
+      if (gap[1] - endMin - 10 >= 20) rest.push([endMin + 10, gap[1]]);
+      gaps.splice.apply(gaps, [gapIx, 1].concat(rest));
     }
 
-    var open = s.tasks.filter(function (t) { return !t.done; }).slice();
-    open.sort(function (a, b) {
+    var sorted = tasks.slice().sort(function (a, b) {
       var da = a.due || '9999-12-31', db = b.due || '9999-12-31';
       if (da !== db) return da < db ? -1 : 1;
-      if (a.priority !== b.priority) return b.priority - a.priority;
-      return a.createdAt - b.createdAt;
+      if ((a.priority || 1) !== (b.priority || 1)) return (b.priority || 1) - (a.priority || 1);
+      return (a.createdAt || 0) - (b.createdAt || 0);
     });
 
     var unplaced = [];
-    open.forEach(function (task) {
+    sorted.forEach(function (task) {
       var dur = Math.max(20, task.duration || 45);
       var placed = false;
-      var lastIdx = isoList.length - 1;
-      if (task.due) {
-        var di = isoList.indexOf(task.due);
-        if (di >= 0) lastIdx = di;
+
+      // 1. the slot this activity held last week, if it is still free
+      var want = prefer && prefer[task.id];
+      if (want) {
+        for (var w = 0; w < isoList.length && !placed; w++) {
+          var wIso = isoList[w];
+          if (dayOfWeek(wIso) !== want.dow) continue;
+          var wGaps = freeMap[wIso];
+          for (var g = 0; g < wGaps.length; g++) {
+            if (want.startMin >= wGaps[g][0] && want.startMin + dur <= wGaps[g][1]) {
+              days[wIso].push(taskBlock(task, want.startMin, want.startMin + dur));
+              consume(wIso, g, want.startMin, want.startMin + dur);
+              placed = true; break;
+            }
+          }
+        }
       }
+
+      // 2. earliest gap before the due date, then anywhere in the window
+      var lastIdx = isoList.length - 1;
+      if (task.due && isoList.indexOf(task.due) >= 0) lastIdx = isoList.indexOf(task.due);
       for (var round = 0; round < 2 && !placed; round++) {
-        var maxI = round === 0 ? lastIdx : isoList.length - 1; // try before due first, then anywhere
-        for (var i2 = 0; i2 <= maxI && !placed; i2++) {
-          var iso2 = isoList[i2];
-          var free2 = freeMap[iso2];
-          for (var f2 = 0; f2 < free2.length; f2++) {
-            var gap = free2[f2];
-            if (gap[1] - gap[0] >= dur) {
-              var st2 = gap[0], en2 = st2 + dur;
-              days[iso2].push({ id: uid(), refId: task.id, title: task.title, type: 'task', accent: task.priority === 3 ? 'red' : task.priority === 2 ? 'orange' : 'cyan', startMin: st2, endMin: en2, start: hhmm(st2), end: hhmm(en2) });
-              if (gap[1] - en2 - 10 >= 20) free2[f2] = [en2 + 10, gap[1]];
-              else free2.splice(f2, 1);
+        var maxI = round === 0 ? lastIdx : isoList.length - 1;
+        for (var i = 0; i <= maxI && !placed; i++) {
+          var iso = isoList[i], gaps = freeMap[iso];
+          for (var f = 0; f < gaps.length; f++) {
+            if (gaps[f][1] - gaps[f][0] >= dur) {
+              var st = gaps[f][0];
+              days[iso].push(taskBlock(task, st, st + dur));
+              consume(iso, f, st, st + dur);
               placed = true; break;
             }
           }
@@ -1120,9 +1163,107 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 16px 0; }
       if (!placed) unplaced.push(task.title);
     });
 
-    isoList.forEach(function (iso3) { days[iso3].sort(function (a, b) { return a.startMin - b.startMin; }); });
-    s.timetable = { generatedAt: Date.now(), days: days, unplaced: unplaced };
+    isoList.forEach(function (iso) {
+      (days[iso] || []).sort(function (a, b) { return a.startMin - b.startMin; });
+    });
+    return unplaced;
+  }
+
+  function commitmentDays(s, isoList) {
+    var days = {};
+    isoList.forEach(function (iso) {
+      var dow = dayOfWeek(iso);
+      var blocks = [];
+      (s.commitments || []).forEach(function (c) {
+        if ((c.days || []).indexOf(dow) === -1) return;
+        var st = minutes(c.start), en = minutes(c.end);
+        if (en <= st) return;
+        blocks.push({ id: uid(), refId: c.id, title: c.title, type: 'commitment', accent: c.accent || 'indigo', startMin: st, endMin: en, start: hhmm(st), end: hhmm(en) });
+      });
+      blocks.sort(function (a, b) { return a.startMin - b.startMin; });
+      days[iso] = blocks;
+    });
+    return days;
+  }
+
+  // A fresh plan for the week starting today. Locks for WEEK_DAYS days.
+  function generateTimetable(s, prefer) {
+    s = s || state;
+    var t0 = todayISO();
+    var isoList = [];
+    for (var i = 0; i < WEEK_DAYS; i++) isoList.push(addDaysISO(t0, i));
+    var days = commitmentDays(s, isoList);
+    var open = (s.tasks || []).filter(function (t) { return !t.done; });
+    var unplaced = placeTasks(s, days, isoList, open, prefer);
+    s.timetable = {
+      generatedAt: Date.now(), weekStart: t0, lockedUntil: addDaysISO(t0, WEEK_DAYS),
+      settled: false, days: days, unplaced: unplaced
+    };
     return s.timetable;
+  }
+
+  // Slots extra tasks into the plan already on the grid, leaving it otherwise intact.
+  function addTasksToTimetable(s, taskIds) {
+    s = s || state;
+    var tt = s.timetable;
+    if (!tt || !tt.days) return { placed: 0, unplaced: [] };
+    var wanted = {};
+    (taskIds || []).forEach(function (id) { wanted[id] = true; });
+    var tasks = (s.tasks || []).filter(function (t) { return !t.done && wanted[t.id]; });
+    var isoList = planWindow(s);
+    isoList.forEach(function (iso) { if (!tt.days[iso]) tt.days[iso] = []; });
+    var unplaced = placeTasks(s, tt.days, isoList, tasks);
+    tt.unplaced = (tt.unplaced || []).concat(unplaced);
+    tt.generatedAt = Date.now();
+    return { placed: tasks.length - unplaced.length, unplaced: unplaced };
+  }
+
+  // Is this week's plan settled in? A locked plan cannot be regenerated over.
+  function weekLock(s) {
+    s = s || state;
+    var tt = s.timetable;
+    if (!tt || !tt.lockedUntil) return { locked: false, unlocksOn: null, daysLeft: 0 };
+    var t = todayISO();
+    if (t >= tt.lockedUntil) return { locked: false, unlocksOn: tt.lockedUntil, daysLeft: 0 };
+    var days = 0, cur = t;
+    while (cur < tt.lockedUntil && days < 60) { cur = addDaysISO(cur, 1); days++; }
+    return { locked: true, unlocksOn: tt.lockedUntil, daysLeft: days };
+  }
+
+  // The shape of a finished week, kept so the next one can repeat it.
+  function snapshotWeek(tt) {
+    var items = [];
+    Object.keys(tt.days || {}).forEach(function (iso) {
+      tt.days[iso].forEach(function (b) {
+        if (b.type !== 'task') return;
+        items.push({
+          title: String(b.title || '').replace(/\s*\(\d+\/\d+\)\s*$/, ''),
+          dow: dayOfWeek(iso), startMin: b.startMin,
+          duration: Math.max(20, b.endMin - b.startMin), accent: b.accent || 'cyan'
+        });
+      });
+    });
+    return items.length ? { weekStart: tt.weekStart || null, savedAt: Date.now(), items: items } : null;
+  }
+
+  // Rebuild this week from the shape of the last one — same activities, same slots.
+  function repeatLastWeek(s) {
+    s = s || state;
+    var lw = s.lastWeekPlan;
+    if (!lw || !lw.items || !lw.items.length) return null;
+    var now = Date.now();
+    var t0 = todayISO();
+    var prefer = {};
+    lw.items.forEach(function (item, ix) {
+      var id = uid();
+      var offset = (item.dow - dayOfWeek(t0) + 7) % 7;
+      s.tasks.push({
+        id: id, title: item.title, priority: 2, due: addDaysISO(t0, offset),
+        duration: item.duration, done: false, createdAt: now + ix
+      });
+      prefer[id] = { dow: item.dow, startMin: item.startMin };
+    });
+    return generateTimetable(s, prefer);
   }
 
   // "What matters most right now?" — ranked focus items for dashboard + assistant.
@@ -1234,6 +1375,8 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 16px 0; }
       s.profile.xp = Math.max(s.profile.xp, 430);
       logActivity('Demo data loaded — explore every screen', '🧪');
       generateTimetable(s);
+      // a plan you didn't make shouldn't lock you out of planning — demo weeks stay open
+      s.timetable.lockedUntil = todayISO();
     });
     toast('Demo data loaded — Acendri is alive!', '🧪');
   }
@@ -1492,6 +1635,11 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 16px 0; }
 
   var ENGINE = {
     generateTimetable: generateTimetable,
+    addTasksToTimetable: addTasksToTimetable,
+    repeatLastWeek: repeatLastWeek,
+    weekLock: weekLock,
+    planWindow: planWindow,
+    WEEK_DAYS: WEEK_DAYS,
     focusSuggestions: focusSuggestions,
     financeSummary: financeSummary,
     habitStreak: habitStreak,
@@ -2193,6 +2341,8 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 16px 0; }
     var Aw = window.Ascendri;
     var created = 0;
     var newIds = {};
+    // A week already on the grid is added to, never rebuilt from under the user.
+    var hadPlan = !!Aw.S.get().timetable;
     Aw.S.update(function (s) {
       s.tasks = s.tasks || [];
       var today = Aw.ui.todayISO();
@@ -2211,7 +2361,8 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 16px 0; }
           created++;
         }
       });
-      Aw.engine.generateTimetable(s);
+      if (hadPlan && Aw.engine.addTasksToTimetable) Aw.engine.addTasksToTimetable(s, Object.keys(newIds));
+      else Aw.engine.generateTimetable(s);
     }, { silent: true });
     var st = Aw.S.get();
     var placed = 0;
@@ -4657,17 +4808,97 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 16px 0; }
     }
   }
 
-  function generateWeek() {
+  /* ---------------- planning the week ---------------- */
+
+  // The Generate button only opens this — planning is always an explicit choice,
+  // never a silent rebuild of the week you just cleared.
+  function openPlanChooser() {
+    var esc = A.ui.esc;
+    var s = A.S.get();
+    var openTasks = (s.tasks || []).filter(function (t) { return !t.done; }).length;
+    var commitments = (s.commitments || []).length;
+    var lw = s.lastWeekPlan;
+    var lock = A.engine.weekLock(s);
+
+    if (lock.locked) { explainLock(); return; }
+
+    var opts = [];
+    if (lw && lw.items && lw.items.length) {
+      opts.push({
+        key: 'repeat', accent: 'green', emoji: '♻️',
+        title: 'Keep the same as last week',
+        sub: lw.items.length + ' session' + (lw.items.length === 1 ? '' : 's') + ' — same days, same times'
+      });
+    }
+    opts.push({
+      key: 'ask', accent: 'cyan', emoji: '🤖',
+      title: 'Tell Acendri about your week',
+      sub: 'Describe it in plain words and Acendri builds it'
+    });
+    if (openTasks || commitments) {
+      opts.push({
+        key: 'auto', accent: 'purple', emoji: '⚡',
+        title: 'Auto-plan from what I already have',
+        sub: openTasks + ' open task' + (openTasks === 1 ? '' : 's') +
+          (commitments ? ' around ' + commitments + ' commitment' + (commitments === 1 ? '' : 's') : '')
+      });
+    }
+
+    A.ui.modal({
+      title: '📅 Plan your week',
+      accent: 'purple',
+      wide: true,
+      body:
+        '<p class="muted small" style="margin-bottom:12px">Once your week is planned it stays put for ' +
+        A.engine.WEEK_DAYS + ' days — use 🤖 Ask Acendri to add to it, and plan afresh when the new week opens.</p>' +
+        '<div class="list">' +
+        opts.map(function (o) {
+          return '<div class="list-item acc-' + o.accent + '" data-choice="' + o.key + '" style="cursor:pointer">' +
+            '<span class="icon-tile">' + o.emoji + '</span>' +
+            '<div class="li-main"><div class="li-title">' + esc(o.title) + '</div>' +
+            '<div class="li-sub">' + esc(o.sub) + '</div></div>' +
+            A.ui.icon('arrow', 'sm') +
+            '</div>';
+        }).join('') +
+        '</div>' +
+        (!openTasks && !commitments && !(lw && lw.items && lw.items.length)
+          ? '<p class="dim small" style="margin-top:10px">Nothing on file yet — Acendri can create the tasks for you from a sentence or two.</p>'
+          : ''),
+      actions: [{ label: 'Cancel', cls: 'btn-ghost' }],
+      onOpen: function (m, close) {
+        m.querySelectorAll('[data-choice]').forEach(function (row) {
+          row.addEventListener('click', function () {
+            var k = row.getAttribute('data-choice');
+            close();
+            if (k === 'repeat') keepSameAsLastWeek();
+            else if (k === 'ask') openAskModal('');
+            else autoPlanFromTasks();
+          });
+        });
+      }
+    });
+  }
+
+  function explainLock() {
+    var lock = A.engine.weekLock(A.S.get());
+    A.ui.modal({
+      title: '🔒 This week is planned',
+      accent: 'purple',
+      body:
+        '<p class="muted">Your plan is locked in until <strong>' + A.ui.esc(A.ui.fmtDate(lock.unlocksOn)) + '</strong>' +
+        (lock.daysLeft ? ' — ' + lock.daysLeft + ' day' + (lock.daysLeft === 1 ? '' : 's') + ' to go' : '') +
+        '. Sticking to one plan is what makes it work.</p>' +
+        '<p class="muted small" style="margin-top:10px">Something new came up? Use <strong>🤖 Ask Acendri</strong> to slot it into the week you already have. Want to start over completely? <strong>Clear plan</strong> below the grid wipes it.</p>',
+      actions: [
+        { label: 'Got it', cls: 'btn-ghost' },
+        { label: '🤖 Add something', cls: 'btn-acc', onClick: function () { openAskModal(''); } }
+      ]
+    });
+  }
+
+  function autoPlanFromTasks() {
     var pre = A.S.get();
     var openTasks = (pre.tasks || []).filter(function (t) { return !t.done; }).length;
-    var hasCommitments = (pre.commitments || []).length > 0;
-
-    if (!openTasks && !hasCommitments) {
-      // Nothing to build a week from — an empty grid would just look broken.
-      A.ui.toast('Nothing to plan yet — tell Acendri about your week', '🌱');
-      openAskModal('');
-      return;
-    }
 
     // No XP for planning — core settles the week when it ends and pays per completed block.
     A.S.update(function (s) { A.engine.generateTimetable(s); });
@@ -4683,11 +4914,29 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 16px 0; }
     unplacedToast(tt);
   }
 
+  function keepSameAsLastWeek() {
+    var built = null;
+    A.S.update(function (s) { built = A.engine.repeatLastWeek(s); });
+    if (!built) { A.ui.toast('No previous week to copy — planning fresh instead', '🤔'); openPlanChooser(); return; }
+    var after = A.S.get();
+    var n = taskBlockProgress(after, after.timetable).total;
+    A.ui.toast('Same shape as last week — ' + n + ' block' + (n === 1 ? '' : 's') + ' back on the grid', '♻️');
+    unplacedToast(after.timetable);
+    A.S.log('Repeated last week’s plan', '♻️');
+  }
+
   function clearPlan() {
-    A.ui.confirm('Clear the generated plan? Your tasks and commitments stay — only this week’s layout goes.', function () {
-      A.S.update(function (s) { s.timetable = null; });
-      A.ui.toast('Plan cleared — generate again any time', '🧹');
-    }, { title: 'Clear plan', yesLabel: 'Clear plan' });
+    A.ui.confirm(
+      'Clear this week’s plan? Your tasks and commitments stay, but the layout and the memory of it go — the next plan starts from a blank page.',
+      function () {
+        A.S.update(function (s) {
+          s.timetable = null;
+          s.lastWeekPlan = null;   // a cleared week is not offered back as "same as last week"
+        });
+        A.ui.toast('Cleared — your next plan starts fresh', '🧹');
+      },
+      { title: 'Clear plan', yesLabel: 'Clear it all' }
+    );
   }
 
   function deleteCommitment(id) {
@@ -4777,14 +5026,19 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 16px 0; }
       return true; // close this modal, the confirm view takes over
     }
 
+    var hasPlan = !!A.S.get().timetable;
     A.ui.modal({
-      title: '🤖 Tell Acendri about your week',
+      title: hasPlan ? '🤖 Add to your week' : '🤖 Tell Acendri about your week',
       accent: 'cyan',
       wide: true,
       body:
-        '<div class="field"><label>What’s on this week?</label>' +
+        '<div class="field"><label>' + (hasPlan ? 'What else needs a slot?' : 'What’s on this week?') + '</label>' +
         '<textarea class="textarea" id="ask-text" rows="4" placeholder="Basketball training 3 times this week, one hour each. Study for my science test on Thursday. Keep Sunday free.">' + esc(prefill || '') + '</textarea></div>' +
-        '<p class="muted small">Plain words are fine — Acendri picks out the activities, how often and how long, then plans them around your commitments. Tap an example to start:</p>' +
+        '<p class="muted small">' +
+        (hasPlan
+          ? 'Acendri fits these into the gaps around the week you already have — nothing already on the grid moves. Tap an example to start:'
+          : 'Plain words are fine — Acendri picks out the activities, how often and how long, then plans them around your commitments. Tap an example to start:') +
+        '</p>' +
         '<div class="chips">' +
         ASK_EXAMPLES.map(function (ex, i) {
           return '<button type="button" class="chip" data-ex="' + i + '">' + esc(ex) + '</button>';
@@ -4792,7 +5046,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 16px 0; }
         '</div>',
       actions: [
         { label: 'Cancel', cls: 'btn-ghost' },
-        { label: '⚡ Plan my week', cls: 'btn-primary', onClick: function (m) { return submit(m); } }
+        { label: hasPlan ? '➕ Add to my week' : '⚡ Plan my week', cls: 'btn-primary', onClick: function (m) { return submit(m); } }
       ],
       onOpen: function (m) {
         var field = m.querySelector('#ask-text');
@@ -4820,6 +5074,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 16px 0; }
       };
     });
     var totalTasks = sessions.reduce(function (a, se) { return a + se.count; }, 0);
+    var hasPlan = !!A.S.get().timetable;
 
     A.ui.modal({
       title: '🤖 Here’s what Acendri heard',
@@ -4838,40 +5093,65 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 16px 0; }
         }).join('') +
         '</div>' +
         '<p class="dim small" style="margin-top:10px">' + totalTasks + ' task' + (totalTasks === 1 ? '' : 's') +
-        ' will be added, spread over the next 6 days, then the week regenerates around your commitments.</p>',
+        (hasPlan
+          ? ' will be slotted into the free gaps of your existing week — nothing already planned moves.'
+          : ' will be added, spread over the coming days, then the week is planned around your commitments.') +
+        '</p>',
       actions: [
         { label: '← Edit', cls: 'btn-ghost', onClick: function () { openAskModal(text); } },
-        { label: 'Add & generate', cls: 'btn-primary', onClick: function () { addSessionsAndGenerate(sessions); } }
+        { label: hasPlan ? '➕ Add to my week' : '⚡ Build my week', cls: 'btn-primary', onClick: function () { addSessions(sessions); } }
       ]
     });
   }
 
-  function addSessionsAndGenerate(sessions) {
+  // Adds the sessions to the week that already exists; builds one if there is none.
+  function addSessions(sessions) {
     var now = Date.now();
     var t0 = A.ui.todayISO();
+    var hadPlan = !!A.S.get().timetable;
+    var newIds = [];
+    var result = null;
+
     A.S.update(function (s) {
       if (!s.tasks) s.tasks = [];
+      // days still ahead inside the current plan (or the coming week when planning fresh)
+      var window = hadPlan ? A.engine.planWindow(s).filter(function (iso) { return iso >= t0; }) : null;
+      if (!window || !window.length) window = [t0, A.ui.addDaysISO(t0, 1), A.ui.addDaysISO(t0, 2), A.ui.addDaysISO(t0, 3), A.ui.addDaysISO(t0, 4), A.ui.addDaysISO(t0, 5), A.ui.addDaysISO(t0, 6)];
+
       sessions.forEach(function (se, si) {
         for (var i = 0; i < se.count; i++) {
+          var id = A.ui.uid();
+          newIds.push(id);
+          var slot = window.length === 1 ? 0 : Math.min(window.length - 1, Math.round(i * (window.length - 1) / Math.max(1, se.count - 1)));
           s.tasks.push({
-            id: A.ui.uid(),
+            id: id,
             title: se.title + (se.count > 1 ? ' (' + (i + 1) + '/' + se.count + ')' : ''),
             priority: 2,
-            due: A.ui.addDaysISO(t0, 1 + Math.floor(i * 6 / se.count)),
+            due: window[slot],
             duration: se.duration,
             done: false,
             createdAt: now + si * 10 + i
           });
         }
       });
-      A.engine.generateTimetable(s);
+
+      if (hadPlan) result = A.engine.addTasksToTimetable(s, newIds);
+      else A.engine.generateTimetable(s);
     });
+
     var after = A.S.get();
     var tt = after.timetable;
-    var placed = taskBlockProgress(after, tt).total;
-    A.ui.toast('Acendri placed ' + placed + ' block' + (placed === 1 ? '' : 's') + ' into your week', '🤖');
+    if (hadPlan) {
+      var placed = result ? result.placed : 0;
+      A.ui.toast(placed
+        ? 'Added ' + placed + ' block' + (placed === 1 ? '' : 's') + ' to your week — nothing else moved'
+        : 'Your week is full — the new tasks are waiting on your task list', '🤖');
+    } else {
+      var n = taskBlockProgress(after, tt).total;
+      A.ui.toast('Acendri placed ' + n + ' block' + (n === 1 ? '' : 's') + ' into your week', '🤖');
+    }
     unplacedToast(tt);
-    A.S.log('Acendri planned the week from a description', '🤖');
+    A.S.log(hadPlan ? 'Acendri added to the week' : 'Acendri planned the week from a description', '🤖');
   }
 
   /* ---------------- commitment modal ---------------- */
@@ -5080,8 +5360,7 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 16px 0; }
     var ws = wakeSleep(s);
     var colH = Math.round((ws.sleep - ws.wake) * PX_PER_MIN);
     var t0 = A.ui.todayISO();
-    var isoList = [];
-    for (var i = 0; i < 7; i++) isoList.push(A.ui.addDaysISO(t0, i));
+    var isoList = A.engine.planWindow(s);   // the week this plan covers, not a rolling 7 days
 
     var html = '<div class="tt-scroll section-gap"><div class="tt-grid">';
 
@@ -5136,10 +5415,14 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 16px 0; }
       ' planned block' + (prog.total === 1 ? '' : 's') + ' done — XP settles when the week ends</div>' +
       '</div>';
 
-    // stale note + clear
+    // where this plan is up to + how to change it
+    var lock = A.engine.weekLock(s);
     html += '<div class="row wrap" style="margin-top:10px">' +
-      '<span class="muted small">Generated ' + A.ui.timeAgo(s.timetable.generatedAt) +
-      '. Life changed? Regenerate any time — Acendri replans around what’s left.</span>' +
+      '<span class="muted small">Planned ' + A.ui.timeAgo(s.timetable.generatedAt) + '. ' +
+      (lock.locked
+        ? 'This week is locked in until ' + esc(A.ui.fmtDate(lock.unlocksOn)) + ' — use 🤖 Ask Acendri to add to it.'
+        : 'A new week is open — plan it fresh or keep the same shape as last week.') +
+      '</span>' +
       '<button type="button" class="btn btn-ghost btn-sm" data-clear-plan>Clear plan</button>' +
       '</div>';
 
@@ -5159,9 +5442,12 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 16px 0; }
         '<button type="button" class="btn" data-add-commitment>＋ Add a commitment</button>' +
         '</div></div>';
     }
+    var lw = s.lastWeekPlan;
     return '<div class="empty section-gap">' +
       '<div class="e-emoji">📅</div>' +
-      '<p>One click and Acendri builds your week around your commitments, priorities and due dates.</p>' +
+      '<p>' + (lw && lw.items && lw.items.length
+        ? 'A new week is open. Repeat last week’s shape, describe what’s changed, or let Acendri plan around your commitments.'
+        : 'One click and Acendri builds your week around your commitments, priorities and due dates.') + '</p>' +
       '<div class="row wrap" style="justify-content:center">' +
       '<button type="button" class="btn btn-primary" data-generate>⚡ Generate my week</button>' +
       '<button type="button" class="btn btn-acc acc-cyan" data-ask-acendri>🤖 Ask Acendri</button>' +
@@ -5181,12 +5467,21 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 16px 0; }
       var s = ctx.S.get();
       var tt = s.timetable;
 
+      var lock = A.engine.weekLock(s);
+
       var html =
         '<div class="screen-head"><div class="spread wrap">' +
-        '<div><h1>Timetable</h1><div class="sub">Tell Acendri your commitments — it plans your tasks around them.</div></div>' +
+        '<div><h1>Timetable</h1><div class="sub">' +
+        (lock.locked
+          ? 'Your week is set — Ask Acendri to add to it, and plan again when it opens.'
+          : 'Tell Acendri your commitments — it plans your tasks around them.') +
+        '</div></div>' +
         '<div class="row wrap">' +
         '<button type="button" class="btn btn-acc acc-cyan" data-ask-acendri>🤖 Ask Acendri</button>' +
-        '<button type="button" class="btn btn-primary" data-generate>⚡ Generate my week</button>' +
+        (lock.locked
+          ? '<button type="button" class="btn btn-ghost acc-purple" data-explain-lock title="Why can’t I regenerate?">🔒 Locked ' +
+            lock.daysLeft + ' more day' + (lock.daysLeft === 1 ? '' : 's') + '</button>'
+          : '<button type="button" class="btn btn-primary" data-generate>⚡ Generate my week</button>') +
         '<button type="button" class="btn" data-add-commitment>＋ Commitment</button>' +
         '</div>' +
         '</div></div>';
@@ -5200,7 +5495,10 @@ hr.sep { border: none; border-top: 1px solid var(--line); margin: 16px 0; }
       /* ---- wiring ---- */
 
       el.querySelectorAll('[data-generate]').forEach(function (b) {
-        b.addEventListener('click', generateWeek);
+        b.addEventListener('click', openPlanChooser);
+      });
+      el.querySelectorAll('[data-explain-lock]').forEach(function (b) {
+        b.addEventListener('click', explainLock);
       });
       el.querySelectorAll('[data-ask-acendri]').forEach(function (b) {
         b.addEventListener('click', function () { openAskModal(''); });

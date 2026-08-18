@@ -401,6 +401,8 @@
       });
     });
     tt.settled = true;
+    var snap = snapshotWeek(tt);
+    if (snap) s.lastWeekPlan = snap;   // offered as "keep the same as last week"
     if (!total) return;
     var ratio = done / total;
     var xp = done * 4 + (ratio >= 0.8 ? 30 : 0);
@@ -439,68 +441,109 @@
   }
 
   // Automatic timetable: fits open tasks around fixed commitments for the next 7 days.
-  function generateTimetable(s) {
-    s = s || state;
+  var WEEK_DAYS = 7;
+
+  function dayOfWeek(iso) {
+    var p = iso.split('-');
+    return new Date(+p[0], +p[1] - 1, +p[2]).getDay();
+  }
+
+  function bounds(s) {
     var wake = minutes(s.settings.wake), sleep = minutes(s.settings.sleep);
     if (sleep <= wake) sleep = wake + 8 * 60;
-    var days = {}, freeMap = {}, isoList = [];
-    var t0 = todayISO();
-    var nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+    return { wake: wake, sleep: sleep };
+  }
 
-    for (var i = 0; i < 7; i++) {
-      var iso = addDaysISO(t0, i);
-      isoList.push(iso);
-      days[iso] = [];
-      var p = iso.split('-');
-      var dow = new Date(+p[0], +p[1] - 1, +p[2]).getDay();
-      var blocks = [];
-      s.commitments.forEach(function (c) {
-        if (c.days.indexOf(dow) === -1) return;
-        var st = minutes(c.start), en = minutes(c.end);
-        if (en <= st) return;
-        blocks.push({ id: uid(), refId: c.id, title: c.title, type: 'commitment', accent: c.accent || 'indigo', startMin: st, endMin: en, start: hhmm(st), end: hhmm(en) });
-      });
-      blocks.sort(function (a, b) { return a.startMin - b.startMin; });
-      days[iso] = blocks;
-      // free intervals
-      var free = []; var cur = (i === 0 ? Math.max(wake, Math.ceil(nowMin / 30) * 30) : wake);
-      blocks.forEach(function (b) {
-        if (b.startMin > cur) free.push([cur, Math.min(b.startMin, sleep)]);
-        cur = Math.max(cur, b.endMin);
-      });
-      if (cur < sleep) free.push([cur, sleep]);
-      freeMap[iso] = free.filter(function (f) { return f[1] - f[0] >= 20; });
+  function planWindow(s) {
+    var start = (s.timetable && s.timetable.weekStart) || todayISO();
+    var list = [];
+    for (var i = 0; i < WEEK_DAYS; i++) list.push(addDaysISO(start, i));
+    return list;
+  }
+
+  // Open stretches of a day that new work can go into — never in the past,
+  // never overlapping what is already on the grid.
+  function freeGapsFor(s, iso, blocks) {
+    var t = todayISO();
+    if (iso < t) return [];
+    var b = bounds(s);
+    var cur = b.wake;
+    if (iso === t) {
+      var nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+      cur = Math.max(b.wake, Math.ceil(nowMin / 30) * 30);
+    }
+    var free = [];
+    blocks.slice().sort(function (x, y) { return x.startMin - y.startMin; }).forEach(function (blk) {
+      if (blk.startMin > cur) free.push([cur, Math.min(blk.startMin, b.sleep)]);
+      cur = Math.max(cur, blk.endMin);
+    });
+    if (cur < b.sleep) free.push([cur, b.sleep]);
+    return free.filter(function (f) { return f[1] - f[0] >= 20; });
+  }
+
+  function taskBlock(task, startMin, endMin) {
+    return {
+      id: uid(), refId: task.id, title: task.title, type: 'task',
+      accent: task.priority === 3 ? 'red' : task.priority === 2 ? 'orange' : 'cyan',
+      startMin: startMin, endMin: endMin, start: hhmm(startMin), end: hhmm(endMin)
+    };
+  }
+
+  // Fits tasks into the free space of `days`. `prefer` optionally maps a task id
+  // to { dow, startMin } — the slot it held last week, tried before anything else.
+  function placeTasks(s, days, isoList, tasks, prefer) {
+    var freeMap = {};
+    isoList.forEach(function (iso) { freeMap[iso] = freeGapsFor(s, iso, days[iso] || []); });
+
+    function consume(iso, gapIx, startMin, endMin) {
+      var gaps = freeMap[iso], gap = gaps[gapIx];
+      var rest = [];
+      if (startMin - gap[0] >= 20) rest.push([gap[0], startMin]);
+      if (gap[1] - endMin - 10 >= 20) rest.push([endMin + 10, gap[1]]);
+      gaps.splice.apply(gaps, [gapIx, 1].concat(rest));
     }
 
-    var open = s.tasks.filter(function (t) { return !t.done; }).slice();
-    open.sort(function (a, b) {
+    var sorted = tasks.slice().sort(function (a, b) {
       var da = a.due || '9999-12-31', db = b.due || '9999-12-31';
       if (da !== db) return da < db ? -1 : 1;
-      if (a.priority !== b.priority) return b.priority - a.priority;
-      return a.createdAt - b.createdAt;
+      if ((a.priority || 1) !== (b.priority || 1)) return (b.priority || 1) - (a.priority || 1);
+      return (a.createdAt || 0) - (b.createdAt || 0);
     });
 
     var unplaced = [];
-    open.forEach(function (task) {
+    sorted.forEach(function (task) {
       var dur = Math.max(20, task.duration || 45);
       var placed = false;
-      var lastIdx = isoList.length - 1;
-      if (task.due) {
-        var di = isoList.indexOf(task.due);
-        if (di >= 0) lastIdx = di;
+
+      // 1. the slot this activity held last week, if it is still free
+      var want = prefer && prefer[task.id];
+      if (want) {
+        for (var w = 0; w < isoList.length && !placed; w++) {
+          var wIso = isoList[w];
+          if (dayOfWeek(wIso) !== want.dow) continue;
+          var wGaps = freeMap[wIso];
+          for (var g = 0; g < wGaps.length; g++) {
+            if (want.startMin >= wGaps[g][0] && want.startMin + dur <= wGaps[g][1]) {
+              days[wIso].push(taskBlock(task, want.startMin, want.startMin + dur));
+              consume(wIso, g, want.startMin, want.startMin + dur);
+              placed = true; break;
+            }
+          }
+        }
       }
+
+      // 2. earliest gap before the due date, then anywhere in the window
+      var lastIdx = isoList.length - 1;
+      if (task.due && isoList.indexOf(task.due) >= 0) lastIdx = isoList.indexOf(task.due);
       for (var round = 0; round < 2 && !placed; round++) {
-        var maxI = round === 0 ? lastIdx : isoList.length - 1; // try before due first, then anywhere
-        for (var i2 = 0; i2 <= maxI && !placed; i2++) {
-          var iso2 = isoList[i2];
-          var free2 = freeMap[iso2];
-          for (var f2 = 0; f2 < free2.length; f2++) {
-            var gap = free2[f2];
-            if (gap[1] - gap[0] >= dur) {
-              var st2 = gap[0], en2 = st2 + dur;
-              days[iso2].push({ id: uid(), refId: task.id, title: task.title, type: 'task', accent: task.priority === 3 ? 'red' : task.priority === 2 ? 'orange' : 'cyan', startMin: st2, endMin: en2, start: hhmm(st2), end: hhmm(en2) });
-              if (gap[1] - en2 - 10 >= 20) free2[f2] = [en2 + 10, gap[1]];
-              else free2.splice(f2, 1);
+        var maxI = round === 0 ? lastIdx : isoList.length - 1;
+        for (var i = 0; i <= maxI && !placed; i++) {
+          var iso = isoList[i], gaps = freeMap[iso];
+          for (var f = 0; f < gaps.length; f++) {
+            if (gaps[f][1] - gaps[f][0] >= dur) {
+              var st = gaps[f][0];
+              days[iso].push(taskBlock(task, st, st + dur));
+              consume(iso, f, st, st + dur);
               placed = true; break;
             }
           }
@@ -509,9 +552,107 @@
       if (!placed) unplaced.push(task.title);
     });
 
-    isoList.forEach(function (iso3) { days[iso3].sort(function (a, b) { return a.startMin - b.startMin; }); });
-    s.timetable = { generatedAt: Date.now(), days: days, unplaced: unplaced };
+    isoList.forEach(function (iso) {
+      (days[iso] || []).sort(function (a, b) { return a.startMin - b.startMin; });
+    });
+    return unplaced;
+  }
+
+  function commitmentDays(s, isoList) {
+    var days = {};
+    isoList.forEach(function (iso) {
+      var dow = dayOfWeek(iso);
+      var blocks = [];
+      (s.commitments || []).forEach(function (c) {
+        if ((c.days || []).indexOf(dow) === -1) return;
+        var st = minutes(c.start), en = minutes(c.end);
+        if (en <= st) return;
+        blocks.push({ id: uid(), refId: c.id, title: c.title, type: 'commitment', accent: c.accent || 'indigo', startMin: st, endMin: en, start: hhmm(st), end: hhmm(en) });
+      });
+      blocks.sort(function (a, b) { return a.startMin - b.startMin; });
+      days[iso] = blocks;
+    });
+    return days;
+  }
+
+  // A fresh plan for the week starting today. Locks for WEEK_DAYS days.
+  function generateTimetable(s, prefer) {
+    s = s || state;
+    var t0 = todayISO();
+    var isoList = [];
+    for (var i = 0; i < WEEK_DAYS; i++) isoList.push(addDaysISO(t0, i));
+    var days = commitmentDays(s, isoList);
+    var open = (s.tasks || []).filter(function (t) { return !t.done; });
+    var unplaced = placeTasks(s, days, isoList, open, prefer);
+    s.timetable = {
+      generatedAt: Date.now(), weekStart: t0, lockedUntil: addDaysISO(t0, WEEK_DAYS),
+      settled: false, days: days, unplaced: unplaced
+    };
     return s.timetable;
+  }
+
+  // Slots extra tasks into the plan already on the grid, leaving it otherwise intact.
+  function addTasksToTimetable(s, taskIds) {
+    s = s || state;
+    var tt = s.timetable;
+    if (!tt || !tt.days) return { placed: 0, unplaced: [] };
+    var wanted = {};
+    (taskIds || []).forEach(function (id) { wanted[id] = true; });
+    var tasks = (s.tasks || []).filter(function (t) { return !t.done && wanted[t.id]; });
+    var isoList = planWindow(s);
+    isoList.forEach(function (iso) { if (!tt.days[iso]) tt.days[iso] = []; });
+    var unplaced = placeTasks(s, tt.days, isoList, tasks);
+    tt.unplaced = (tt.unplaced || []).concat(unplaced);
+    tt.generatedAt = Date.now();
+    return { placed: tasks.length - unplaced.length, unplaced: unplaced };
+  }
+
+  // Is this week's plan settled in? A locked plan cannot be regenerated over.
+  function weekLock(s) {
+    s = s || state;
+    var tt = s.timetable;
+    if (!tt || !tt.lockedUntil) return { locked: false, unlocksOn: null, daysLeft: 0 };
+    var t = todayISO();
+    if (t >= tt.lockedUntil) return { locked: false, unlocksOn: tt.lockedUntil, daysLeft: 0 };
+    var days = 0, cur = t;
+    while (cur < tt.lockedUntil && days < 60) { cur = addDaysISO(cur, 1); days++; }
+    return { locked: true, unlocksOn: tt.lockedUntil, daysLeft: days };
+  }
+
+  // The shape of a finished week, kept so the next one can repeat it.
+  function snapshotWeek(tt) {
+    var items = [];
+    Object.keys(tt.days || {}).forEach(function (iso) {
+      tt.days[iso].forEach(function (b) {
+        if (b.type !== 'task') return;
+        items.push({
+          title: String(b.title || '').replace(/\s*\(\d+\/\d+\)\s*$/, ''),
+          dow: dayOfWeek(iso), startMin: b.startMin,
+          duration: Math.max(20, b.endMin - b.startMin), accent: b.accent || 'cyan'
+        });
+      });
+    });
+    return items.length ? { weekStart: tt.weekStart || null, savedAt: Date.now(), items: items } : null;
+  }
+
+  // Rebuild this week from the shape of the last one — same activities, same slots.
+  function repeatLastWeek(s) {
+    s = s || state;
+    var lw = s.lastWeekPlan;
+    if (!lw || !lw.items || !lw.items.length) return null;
+    var now = Date.now();
+    var t0 = todayISO();
+    var prefer = {};
+    lw.items.forEach(function (item, ix) {
+      var id = uid();
+      var offset = (item.dow - dayOfWeek(t0) + 7) % 7;
+      s.tasks.push({
+        id: id, title: item.title, priority: 2, due: addDaysISO(t0, offset),
+        duration: item.duration, done: false, createdAt: now + ix
+      });
+      prefer[id] = { dow: item.dow, startMin: item.startMin };
+    });
+    return generateTimetable(s, prefer);
   }
 
   // "What matters most right now?" — ranked focus items for dashboard + assistant.
@@ -623,6 +764,8 @@
       s.profile.xp = Math.max(s.profile.xp, 430);
       logActivity('Demo data loaded — explore every screen', '🧪');
       generateTimetable(s);
+      // a plan you didn't make shouldn't lock you out of planning — demo weeks stay open
+      s.timetable.lockedUntil = todayISO();
     });
     toast('Demo data loaded — Acendri is alive!', '🧪');
   }
@@ -881,6 +1024,11 @@
 
   var ENGINE = {
     generateTimetable: generateTimetable,
+    addTasksToTimetable: addTasksToTimetable,
+    repeatLastWeek: repeatLastWeek,
+    weekLock: weekLock,
+    planWindow: planWindow,
+    WEEK_DAYS: WEEK_DAYS,
     focusSuggestions: focusSuggestions,
     financeSummary: financeSummary,
     habitStreak: habitStreak,

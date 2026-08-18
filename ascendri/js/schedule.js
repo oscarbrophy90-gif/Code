@@ -64,17 +64,97 @@
     }
   }
 
-  function generateWeek() {
+  /* ---------------- planning the week ---------------- */
+
+  // The Generate button only opens this — planning is always an explicit choice,
+  // never a silent rebuild of the week you just cleared.
+  function openPlanChooser() {
+    var esc = A.ui.esc;
+    var s = A.S.get();
+    var openTasks = (s.tasks || []).filter(function (t) { return !t.done; }).length;
+    var commitments = (s.commitments || []).length;
+    var lw = s.lastWeekPlan;
+    var lock = A.engine.weekLock(s);
+
+    if (lock.locked) { explainLock(); return; }
+
+    var opts = [];
+    if (lw && lw.items && lw.items.length) {
+      opts.push({
+        key: 'repeat', accent: 'green', emoji: '♻️',
+        title: 'Keep the same as last week',
+        sub: lw.items.length + ' session' + (lw.items.length === 1 ? '' : 's') + ' — same days, same times'
+      });
+    }
+    opts.push({
+      key: 'ask', accent: 'cyan', emoji: '🤖',
+      title: 'Tell Acendri about your week',
+      sub: 'Describe it in plain words and Acendri builds it'
+    });
+    if (openTasks || commitments) {
+      opts.push({
+        key: 'auto', accent: 'purple', emoji: '⚡',
+        title: 'Auto-plan from what I already have',
+        sub: openTasks + ' open task' + (openTasks === 1 ? '' : 's') +
+          (commitments ? ' around ' + commitments + ' commitment' + (commitments === 1 ? '' : 's') : '')
+      });
+    }
+
+    A.ui.modal({
+      title: '📅 Plan your week',
+      accent: 'purple',
+      wide: true,
+      body:
+        '<p class="muted small" style="margin-bottom:12px">Once your week is planned it stays put for ' +
+        A.engine.WEEK_DAYS + ' days — use 🤖 Ask Acendri to add to it, and plan afresh when the new week opens.</p>' +
+        '<div class="list">' +
+        opts.map(function (o) {
+          return '<div class="list-item acc-' + o.accent + '" data-choice="' + o.key + '" style="cursor:pointer">' +
+            '<span class="icon-tile">' + o.emoji + '</span>' +
+            '<div class="li-main"><div class="li-title">' + esc(o.title) + '</div>' +
+            '<div class="li-sub">' + esc(o.sub) + '</div></div>' +
+            A.ui.icon('arrow', 'sm') +
+            '</div>';
+        }).join('') +
+        '</div>' +
+        (!openTasks && !commitments && !(lw && lw.items && lw.items.length)
+          ? '<p class="dim small" style="margin-top:10px">Nothing on file yet — Acendri can create the tasks for you from a sentence or two.</p>'
+          : ''),
+      actions: [{ label: 'Cancel', cls: 'btn-ghost' }],
+      onOpen: function (m, close) {
+        m.querySelectorAll('[data-choice]').forEach(function (row) {
+          row.addEventListener('click', function () {
+            var k = row.getAttribute('data-choice');
+            close();
+            if (k === 'repeat') keepSameAsLastWeek();
+            else if (k === 'ask') openAskModal('');
+            else autoPlanFromTasks();
+          });
+        });
+      }
+    });
+  }
+
+  function explainLock() {
+    var lock = A.engine.weekLock(A.S.get());
+    A.ui.modal({
+      title: '🔒 This week is planned',
+      accent: 'purple',
+      body:
+        '<p class="muted">Your plan is locked in until <strong>' + A.ui.esc(A.ui.fmtDate(lock.unlocksOn)) + '</strong>' +
+        (lock.daysLeft ? ' — ' + lock.daysLeft + ' day' + (lock.daysLeft === 1 ? '' : 's') + ' to go' : '') +
+        '. Sticking to one plan is what makes it work.</p>' +
+        '<p class="muted small" style="margin-top:10px">Something new came up? Use <strong>🤖 Ask Acendri</strong> to slot it into the week you already have. Want to start over completely? <strong>Clear plan</strong> below the grid wipes it.</p>',
+      actions: [
+        { label: 'Got it', cls: 'btn-ghost' },
+        { label: '🤖 Add something', cls: 'btn-acc', onClick: function () { openAskModal(''); } }
+      ]
+    });
+  }
+
+  function autoPlanFromTasks() {
     var pre = A.S.get();
     var openTasks = (pre.tasks || []).filter(function (t) { return !t.done; }).length;
-    var hasCommitments = (pre.commitments || []).length > 0;
-
-    if (!openTasks && !hasCommitments) {
-      // Nothing to build a week from — an empty grid would just look broken.
-      A.ui.toast('Nothing to plan yet — tell Acendri about your week', '🌱');
-      openAskModal('');
-      return;
-    }
 
     // No XP for planning — core settles the week when it ends and pays per completed block.
     A.S.update(function (s) { A.engine.generateTimetable(s); });
@@ -90,11 +170,29 @@
     unplacedToast(tt);
   }
 
+  function keepSameAsLastWeek() {
+    var built = null;
+    A.S.update(function (s) { built = A.engine.repeatLastWeek(s); });
+    if (!built) { A.ui.toast('No previous week to copy — planning fresh instead', '🤔'); openPlanChooser(); return; }
+    var after = A.S.get();
+    var n = taskBlockProgress(after, after.timetable).total;
+    A.ui.toast('Same shape as last week — ' + n + ' block' + (n === 1 ? '' : 's') + ' back on the grid', '♻️');
+    unplacedToast(after.timetable);
+    A.S.log('Repeated last week’s plan', '♻️');
+  }
+
   function clearPlan() {
-    A.ui.confirm('Clear the generated plan? Your tasks and commitments stay — only this week’s layout goes.', function () {
-      A.S.update(function (s) { s.timetable = null; });
-      A.ui.toast('Plan cleared — generate again any time', '🧹');
-    }, { title: 'Clear plan', yesLabel: 'Clear plan' });
+    A.ui.confirm(
+      'Clear this week’s plan? Your tasks and commitments stay, but the layout and the memory of it go — the next plan starts from a blank page.',
+      function () {
+        A.S.update(function (s) {
+          s.timetable = null;
+          s.lastWeekPlan = null;   // a cleared week is not offered back as "same as last week"
+        });
+        A.ui.toast('Cleared — your next plan starts fresh', '🧹');
+      },
+      { title: 'Clear plan', yesLabel: 'Clear it all' }
+    );
   }
 
   function deleteCommitment(id) {
@@ -184,14 +282,19 @@
       return true; // close this modal, the confirm view takes over
     }
 
+    var hasPlan = !!A.S.get().timetable;
     A.ui.modal({
-      title: '🤖 Tell Acendri about your week',
+      title: hasPlan ? '🤖 Add to your week' : '🤖 Tell Acendri about your week',
       accent: 'cyan',
       wide: true,
       body:
-        '<div class="field"><label>What’s on this week?</label>' +
+        '<div class="field"><label>' + (hasPlan ? 'What else needs a slot?' : 'What’s on this week?') + '</label>' +
         '<textarea class="textarea" id="ask-text" rows="4" placeholder="Basketball training 3 times this week, one hour each. Study for my science test on Thursday. Keep Sunday free.">' + esc(prefill || '') + '</textarea></div>' +
-        '<p class="muted small">Plain words are fine — Acendri picks out the activities, how often and how long, then plans them around your commitments. Tap an example to start:</p>' +
+        '<p class="muted small">' +
+        (hasPlan
+          ? 'Acendri fits these into the gaps around the week you already have — nothing already on the grid moves. Tap an example to start:'
+          : 'Plain words are fine — Acendri picks out the activities, how often and how long, then plans them around your commitments. Tap an example to start:') +
+        '</p>' +
         '<div class="chips">' +
         ASK_EXAMPLES.map(function (ex, i) {
           return '<button type="button" class="chip" data-ex="' + i + '">' + esc(ex) + '</button>';
@@ -199,7 +302,7 @@
         '</div>',
       actions: [
         { label: 'Cancel', cls: 'btn-ghost' },
-        { label: '⚡ Plan my week', cls: 'btn-primary', onClick: function (m) { return submit(m); } }
+        { label: hasPlan ? '➕ Add to my week' : '⚡ Plan my week', cls: 'btn-primary', onClick: function (m) { return submit(m); } }
       ],
       onOpen: function (m) {
         var field = m.querySelector('#ask-text');
@@ -227,6 +330,7 @@
       };
     });
     var totalTasks = sessions.reduce(function (a, se) { return a + se.count; }, 0);
+    var hasPlan = !!A.S.get().timetable;
 
     A.ui.modal({
       title: '🤖 Here’s what Acendri heard',
@@ -245,40 +349,65 @@
         }).join('') +
         '</div>' +
         '<p class="dim small" style="margin-top:10px">' + totalTasks + ' task' + (totalTasks === 1 ? '' : 's') +
-        ' will be added, spread over the next 6 days, then the week regenerates around your commitments.</p>',
+        (hasPlan
+          ? ' will be slotted into the free gaps of your existing week — nothing already planned moves.'
+          : ' will be added, spread over the coming days, then the week is planned around your commitments.') +
+        '</p>',
       actions: [
         { label: '← Edit', cls: 'btn-ghost', onClick: function () { openAskModal(text); } },
-        { label: 'Add & generate', cls: 'btn-primary', onClick: function () { addSessionsAndGenerate(sessions); } }
+        { label: hasPlan ? '➕ Add to my week' : '⚡ Build my week', cls: 'btn-primary', onClick: function () { addSessions(sessions); } }
       ]
     });
   }
 
-  function addSessionsAndGenerate(sessions) {
+  // Adds the sessions to the week that already exists; builds one if there is none.
+  function addSessions(sessions) {
     var now = Date.now();
     var t0 = A.ui.todayISO();
+    var hadPlan = !!A.S.get().timetable;
+    var newIds = [];
+    var result = null;
+
     A.S.update(function (s) {
       if (!s.tasks) s.tasks = [];
+      // days still ahead inside the current plan (or the coming week when planning fresh)
+      var window = hadPlan ? A.engine.planWindow(s).filter(function (iso) { return iso >= t0; }) : null;
+      if (!window || !window.length) window = [t0, A.ui.addDaysISO(t0, 1), A.ui.addDaysISO(t0, 2), A.ui.addDaysISO(t0, 3), A.ui.addDaysISO(t0, 4), A.ui.addDaysISO(t0, 5), A.ui.addDaysISO(t0, 6)];
+
       sessions.forEach(function (se, si) {
         for (var i = 0; i < se.count; i++) {
+          var id = A.ui.uid();
+          newIds.push(id);
+          var slot = window.length === 1 ? 0 : Math.min(window.length - 1, Math.round(i * (window.length - 1) / Math.max(1, se.count - 1)));
           s.tasks.push({
-            id: A.ui.uid(),
+            id: id,
             title: se.title + (se.count > 1 ? ' (' + (i + 1) + '/' + se.count + ')' : ''),
             priority: 2,
-            due: A.ui.addDaysISO(t0, 1 + Math.floor(i * 6 / se.count)),
+            due: window[slot],
             duration: se.duration,
             done: false,
             createdAt: now + si * 10 + i
           });
         }
       });
-      A.engine.generateTimetable(s);
+
+      if (hadPlan) result = A.engine.addTasksToTimetable(s, newIds);
+      else A.engine.generateTimetable(s);
     });
+
     var after = A.S.get();
     var tt = after.timetable;
-    var placed = taskBlockProgress(after, tt).total;
-    A.ui.toast('Acendri placed ' + placed + ' block' + (placed === 1 ? '' : 's') + ' into your week', '🤖');
+    if (hadPlan) {
+      var placed = result ? result.placed : 0;
+      A.ui.toast(placed
+        ? 'Added ' + placed + ' block' + (placed === 1 ? '' : 's') + ' to your week — nothing else moved'
+        : 'Your week is full — the new tasks are waiting on your task list', '🤖');
+    } else {
+      var n = taskBlockProgress(after, tt).total;
+      A.ui.toast('Acendri placed ' + n + ' block' + (n === 1 ? '' : 's') + ' into your week', '🤖');
+    }
     unplacedToast(tt);
-    A.S.log('Acendri planned the week from a description', '🤖');
+    A.S.log(hadPlan ? 'Acendri added to the week' : 'Acendri planned the week from a description', '🤖');
   }
 
   /* ---------------- commitment modal ---------------- */
@@ -487,8 +616,7 @@
     var ws = wakeSleep(s);
     var colH = Math.round((ws.sleep - ws.wake) * PX_PER_MIN);
     var t0 = A.ui.todayISO();
-    var isoList = [];
-    for (var i = 0; i < 7; i++) isoList.push(A.ui.addDaysISO(t0, i));
+    var isoList = A.engine.planWindow(s);   // the week this plan covers, not a rolling 7 days
 
     var html = '<div class="tt-scroll section-gap"><div class="tt-grid">';
 
@@ -543,10 +671,14 @@
       ' planned block' + (prog.total === 1 ? '' : 's') + ' done — XP settles when the week ends</div>' +
       '</div>';
 
-    // stale note + clear
+    // where this plan is up to + how to change it
+    var lock = A.engine.weekLock(s);
     html += '<div class="row wrap" style="margin-top:10px">' +
-      '<span class="muted small">Generated ' + A.ui.timeAgo(s.timetable.generatedAt) +
-      '. Life changed? Regenerate any time — Acendri replans around what’s left.</span>' +
+      '<span class="muted small">Planned ' + A.ui.timeAgo(s.timetable.generatedAt) + '. ' +
+      (lock.locked
+        ? 'This week is locked in until ' + esc(A.ui.fmtDate(lock.unlocksOn)) + ' — use 🤖 Ask Acendri to add to it.'
+        : 'A new week is open — plan it fresh or keep the same shape as last week.') +
+      '</span>' +
       '<button type="button" class="btn btn-ghost btn-sm" data-clear-plan>Clear plan</button>' +
       '</div>';
 
@@ -566,9 +698,12 @@
         '<button type="button" class="btn" data-add-commitment>＋ Add a commitment</button>' +
         '</div></div>';
     }
+    var lw = s.lastWeekPlan;
     return '<div class="empty section-gap">' +
       '<div class="e-emoji">📅</div>' +
-      '<p>One click and Acendri builds your week around your commitments, priorities and due dates.</p>' +
+      '<p>' + (lw && lw.items && lw.items.length
+        ? 'A new week is open. Repeat last week’s shape, describe what’s changed, or let Acendri plan around your commitments.'
+        : 'One click and Acendri builds your week around your commitments, priorities and due dates.') + '</p>' +
       '<div class="row wrap" style="justify-content:center">' +
       '<button type="button" class="btn btn-primary" data-generate>⚡ Generate my week</button>' +
       '<button type="button" class="btn btn-acc acc-cyan" data-ask-acendri>🤖 Ask Acendri</button>' +
@@ -588,12 +723,21 @@
       var s = ctx.S.get();
       var tt = s.timetable;
 
+      var lock = A.engine.weekLock(s);
+
       var html =
         '<div class="screen-head"><div class="spread wrap">' +
-        '<div><h1>Timetable</h1><div class="sub">Tell Acendri your commitments — it plans your tasks around them.</div></div>' +
+        '<div><h1>Timetable</h1><div class="sub">' +
+        (lock.locked
+          ? 'Your week is set — Ask Acendri to add to it, and plan again when it opens.'
+          : 'Tell Acendri your commitments — it plans your tasks around them.') +
+        '</div></div>' +
         '<div class="row wrap">' +
         '<button type="button" class="btn btn-acc acc-cyan" data-ask-acendri>🤖 Ask Acendri</button>' +
-        '<button type="button" class="btn btn-primary" data-generate>⚡ Generate my week</button>' +
+        (lock.locked
+          ? '<button type="button" class="btn btn-ghost acc-purple" data-explain-lock title="Why can’t I regenerate?">🔒 Locked ' +
+            lock.daysLeft + ' more day' + (lock.daysLeft === 1 ? '' : 's') + '</button>'
+          : '<button type="button" class="btn btn-primary" data-generate>⚡ Generate my week</button>') +
         '<button type="button" class="btn" data-add-commitment>＋ Commitment</button>' +
         '</div>' +
         '</div></div>';
@@ -607,7 +751,10 @@
       /* ---- wiring ---- */
 
       el.querySelectorAll('[data-generate]').forEach(function (b) {
-        b.addEventListener('click', generateWeek);
+        b.addEventListener('click', openPlanChooser);
+      });
+      el.querySelectorAll('[data-explain-lock]').forEach(function (b) {
+        b.addEventListener('click', explainLock);
       });
       el.querySelectorAll('[data-ask-acendri]').forEach(function (b) {
         b.addEventListener('click', function () { openAskModal(''); });

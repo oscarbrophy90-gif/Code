@@ -669,6 +669,8 @@
     var Aw = window.Ascendri;
     var created = 0;
     var newIds = {};
+    // A week already on the grid is added to, never rebuilt from under the user.
+    var hadPlan = !!Aw.S.get().timetable;
     Aw.S.update(function (s) {
       s.tasks = s.tasks || [];
       var today = Aw.ui.todayISO();
@@ -687,7 +689,8 @@
           created++;
         }
       });
-      Aw.engine.generateTimetable(s);
+      if (hadPlan && Aw.engine.addTasksToTimetable) Aw.engine.addTasksToTimetable(s, Object.keys(newIds));
+      else Aw.engine.generateTimetable(s);
     }, { silent: true });
     var st = Aw.S.get();
     var placed = 0;

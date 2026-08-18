@@ -145,3 +145,18 @@ Engine additions: `A.engine.daysSinceLastTick(h)`, `A.engine.HABIT_FADE_DAYS`.
   e.g. "basketball training 3x plus study" -> basketball session x3 + study session x2. Never empty.
 - `A.brain.respond(text)` -> { text, actions:[{label, screen}] } — full assistant reply; it MAY
   perform its own A.S.update effects (create reminder, generate timetable, etc.) before returning.
+
+## Round 3 — timetable week lifecycle
+
+- `timetable.weekStart` / `timetable.lockedUntil` / `timetable.settled` — a generated plan
+  covers `weekStart .. weekStart+6` and is LOCKED until `lockedUntil` (weekStart + 7).
+  While locked, screens must not offer regeneration — only adding.
+- `lastWeekPlan: { weekStart, savedAt, items:[{title,dow,startMin,duration,accent}] } | null`
+  — snapshot core saves when a week settles, powering "keep the same as last week".
+  Clearing the plan wipes it too (a cleared week starts from a blank page).
+- Engine: `weekLock(s)` -> {locked, unlocksOn, daysLeft}; `planWindow(s)` -> the plan's 7 ISO days;
+  `addTasksToTimetable(s, taskIds)` -> {placed, unplaced} fits tasks into free gaps WITHOUT
+  moving existing blocks; `repeatLastWeek(s)` rebuilds this week from `lastWeekPlan`;
+  `generateTimetable(s, prefer?)` where prefer maps taskId -> {dow, startMin}.
+- Anything that schedules (screens or brain) must ADD to an existing plan via
+  `addTasksToTimetable`, and only call `generateTimetable` when there is no plan.
