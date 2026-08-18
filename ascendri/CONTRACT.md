@@ -115,3 +115,33 @@ Onboarding: `.onb .onb-card .onb-dots>span(.on) .focus-opt(.sel)`
    app/social, app/achievements, app/assistant, app/settings.
 7. After `A.S.update` your render runs again — don't hold references to old DOM.
 8. Delete/destructive actions go through `A.ui.confirm`.
+
+## Round 2 additions
+
+State additions:
+- `reminders: [{id, text, due:'YYYY-MM-DD'|null, done, doneAt?, createdAt}]` — shown in the
+  topbar bell and focus engine. Create via A.S.update push.
+- `habits[i].archived` / `archivedAt` — habits untouched for `A.engine.HABIT_FADE_DAYS` (14)
+  days fade to the archive automatically (core does this). ALL screens must filter
+  `!h.archived` for active lists; the habits screen shows an archive section with restore.
+- `timetable.settled` — set by core when a planned week ends; XP for a week is awarded by
+  core at settlement based on completed task blocks (4 XP/block, +30 bonus at >=80%).
+  Do NOT award XP for merely generating a timetable.
+
+Engine additions: `A.engine.daysSinceLastTick(h)`, `A.engine.HABIT_FADE_DAYS`.
+
+## The brain — `A.brain` (js/brain.js)
+
+- `A.brain.classify(text)` -> { intent, score, slots } — one of 20 intents:
+  goal_management, schedule_management, productivity_support, habit_management,
+  finance_management, study_management, training_management, wellbeing_support,
+  personal_development, progress_tracking, social_management, general_assistant,
+  reminder_management, life_planning, career_planning, event_planning,
+  purchase_budgeting, app_navigation, troubleshooting, general_conversation.
+  slots: { topic (e.g. 'basketball'), when ('today'|'tomorrow'|'week'|null), amount (number|null) }.
+- `A.brain.goalFromText(text)` -> draft { title, category, accent, why, milestones:[str] } — never null.
+- `A.brain.tasksFromText(text)` -> [{ title, priority, due, duration }] (2-6 tasks, never empty).
+- `A.brain.planFromText(text)` -> { sessions: [{ title, count, duration, accent }], summary } —
+  e.g. "basketball training 3x plus study" -> basketball session x3 + study session x2. Never empty.
+- `A.brain.respond(text)` -> { text, actions:[{label, screen}] } — full assistant reply; it MAY
+  perform its own A.S.update effects (create reminder, generate timetable, etc.) before returning.

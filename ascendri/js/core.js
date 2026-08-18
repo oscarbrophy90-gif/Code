@@ -188,6 +188,7 @@
       finance: { transactions: [], budgets: {}, savingsGoals: [] },
       timetable: null,
       achievements: {},          // id -> unlocked at (ts)
+      reminders: [],             // { id, text, due:'YYYY-MM-DD'|null, done, createdAt }
       activityLog: [],           // { ts, text, emoji, xp }
       assistant: { history: [] },
       social: seedSocial(),
@@ -205,7 +206,14 @@
       var raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         var s = JSON.parse(raw);
-        if (s && s.version === 1) { state = s; return; }
+        if (s && s.version === 1) {
+          if (!s.reminders) s.reminders = [];   // saved before reminders existed
+          state = s;
+          maintainHabits(state);
+          settleTimetableWeek(state);
+          save();
+          return;
+        }
       }
     } catch (e) { /* corrupted -> fresh */ }
     state = initialState();
@@ -233,6 +241,7 @@
   function update(fn, opts) {
     fn(state);
     syncTimetableDone(state);
+    settleTimetableWeek(state);
     checkAchievements();
     save();
     if (!(opts && opts.silent)) scheduleRender();
@@ -347,6 +356,62 @@
     var n = 0; var day = todayISO();
     for (var i = 0; i < 7; i++) { if (h.log[day]) n++; day = addDaysISO(day, -1); }
     return n;
+  }
+
+  function daysSinceLastTick(h) {
+    var dates = Object.keys(h.log || {});
+    var last = null;
+    dates.forEach(function (d) { if (h.log[d] && (!last || d > last)) last = d; });
+    if (!last) {
+      var created = dateISO(new Date(h.createdAt || Date.now()));
+      last = created;
+    }
+    var t = todayISO(); var days = 0; var cur = last;
+    while (cur < t && days < 999) { cur = addDaysISO(cur, 1); days++; }
+    return days;
+  }
+
+  var HABIT_FADE_DAYS = 14;   // untouched this long -> habit fades to the archive
+
+  function maintainHabits(s) {
+    s.habits.forEach(function (h) {
+      if (h.archived) return;
+      if (daysSinceLastTick(h) >= HABIT_FADE_DAYS) {
+        h.archived = true;
+        h.archivedAt = Date.now();
+        logActivity('Habit faded away after ' + HABIT_FADE_DAYS + ' quiet days: ' + h.title, '🍂');
+        pendingToasts.push({ msg: '"' + h.title + '" faded to the archive — restore it any time', emoji: '🍂' });
+      }
+    });
+  }
+
+  // XP for a planned week is earned by DOING it: when the week ends, award
+  // XP for the task blocks that were completed. Nothing for planning alone.
+  function settleTimetableWeek(s) {
+    var tt = s.timetable;
+    if (!tt || tt.settled || !tt.days) return;
+    var isoList = Object.keys(tt.days).sort();
+    if (!isoList.length || todayISO() <= isoList[isoList.length - 1]) return; // week still running
+    var total = 0, done = 0;
+    isoList.forEach(function (iso) {
+      tt.days[iso].forEach(function (b) {
+        if (b.type !== 'task') return;
+        total++;
+        if (b.done) done++;
+      });
+    });
+    tt.settled = true;
+    if (!total) return;
+    var ratio = done / total;
+    var xp = done * 4 + (ratio >= 0.8 ? 30 : 0);
+    if (xp > 0) {
+      s.profile.xp += xp;
+      logActivity('Week complete: ' + done + '/' + total + ' planned blocks done', '🗓️');
+      pendingToasts.push({ msg: 'Week wrapped: ' + done + '/' + total + ' blocks done — +' + xp + ' XP' + (ratio >= 0.8 ? ' (consistency bonus!)' : ''), emoji: '🗓️' });
+    } else {
+      logActivity('Week ended with no planned blocks completed', '🗓️');
+      pendingToasts.push({ msg: 'Last week’s plan went unfinished — regenerate and try a lighter one', emoji: '🌱' });
+    }
   }
 
   function goalProgress(g) {
@@ -464,10 +529,18 @@
       var next = state.timetable.days[t].filter(function (b) { return b.endMin > nowMin && !b.done; })[0];
       if (next) out.push({ score: 74, emoji: '🗓️', accent: 'purple', screen: 'app/schedule', text: (next.startMin <= nowMin ? 'Now on your timetable: ' : 'Next up at ' + fmtTime(next.start) + ': ') + next.title });
     }
+    (state.reminders || []).forEach(function (r) {
+      if (r.done) return;
+      if (r.due && r.due < t) out.push({ score: 95, emoji: '⏰', accent: 'red', screen: 'app/dashboard', text: 'Reminder overdue: ' + r.text });
+      else if (r.due === t) out.push({ score: 85, emoji: '⏰', accent: 'yellow', screen: 'app/dashboard', text: 'Reminder for today: ' + r.text });
+    });
     state.habits.forEach(function (h) {
-      if (h.log[t]) return;
+      if (h.archived || h.log[t]) return;
       var st = habitStreak(h);
-      if (st >= 3) out.push({ score: 70 + Math.min(st, 20), emoji: '🔥', accent: 'orange', screen: 'app/habits', text: 'Don’t break your ' + st + '-day "' + h.title + '" streak — tick it today.' });
+      if (st >= 3) { out.push({ score: 70 + Math.min(st, 20), emoji: '🔥', accent: 'orange', screen: 'app/habits', text: 'Don’t break your ' + st + '-day "' + h.title + '" streak — tick it today.' }); return; }
+      var missed = daysSinceLastTick(h);
+      if (missed >= HABIT_FADE_DAYS - 4) out.push({ score: 72, emoji: '🍂', accent: 'red', screen: 'app/habits', text: '"' + h.title + '" has been quiet for ' + missed + ' days — it fades away at ' + HABIT_FADE_DAYS + '. One tick saves it.' });
+      else if (missed >= 2) out.push({ score: 58 + missed, emoji: '⏰', accent: 'yellow', screen: 'app/habits', text: 'You’ve missed "' + h.title + '" ' + missed + ' days running — get back on it today.' });
     });
     var fin = financeSummary();
     fin.overBudget.forEach(function (o) {
@@ -734,14 +807,47 @@
   }
 
   function showActivity() {
-    var items = state.activityLog.slice(0, 10);
-    modal({
-      title: '🔔 Recent activity', accent: 'purple',
-      body: items.length
-        ? '<div class="list">' + items.map(function (a) {
-            return '<div class="list-item"><span style="font-size:1.1rem">' + esc(a.emoji) + '</span><div class="li-main"><div class="li-title" style="font-weight:500;font-size:.88rem">' + esc(a.text) + '</div><div class="li-sub">' + timeAgo(a.ts) + (a.xp ? ' · +' + a.xp + ' XP' : '') + '</div></div></div>';
-          }).join('') + '</div>'
-        : '<div class="empty"><div class="e-emoji">🌙</div><p>Nothing yet — everything you do in Acendri shows up here.</p></div>'
+    var t = todayISO();
+    var pending = (state.reminders || []).filter(function (r) { return !r.done; });
+    var nudges = state.habits.filter(function (h) {
+      return !h.archived && !h.log[t] && daysSinceLastTick(h) >= 2;
+    });
+    var html = '';
+    if (pending.length || nudges.length) {
+      html += '<div class="list" style="margin-bottom:14px">' +
+        pending.map(function (r) {
+          var dueTxt = r.due ? (r.due < t ? '<span class="neg">Overdue · ' + esc(fmtDate(r.due)) + '</span>' : esc(fmtDate(r.due))) : 'Any time';
+          return '<div class="list-item acc-yellow"><span style="font-size:1.1rem">⏰</span>' +
+            '<div class="li-main"><div class="li-title" style="font-size:.9rem">' + esc(r.text) + '</div>' +
+            '<div class="li-sub">' + dueTxt + '</div></div>' +
+            '<button class="btn btn-sm btn-acc acc-green" data-rdone="' + esc(r.id) + '">Done</button></div>';
+        }).join('') +
+        nudges.map(function (h) {
+          var missed = daysSinceLastTick(h);
+          var fading = missed >= HABIT_FADE_DAYS - 4;
+          return '<div class="list-item ' + (fading ? 'acc-red' : 'acc-orange') + '"><span style="font-size:1.1rem">' + (fading ? '🍂' : '⏰') + '</span>' +
+            '<div class="li-main"><div class="li-title" style="font-size:.9rem">' + esc(h.emoji + ' ' + h.title) + ' — missed ' + missed + ' days</div>' +
+            '<div class="li-sub">' + (fading ? 'Fades away at ' + HABIT_FADE_DAYS + ' quiet days — one tick saves it' : 'Tick it today to restart your streak') + '</div></div></div>';
+        }).join('') +
+        '</div><hr class="sep">';
+    }
+    var items = state.activityLog.slice(0, 8);
+    html += items.length
+      ? '<div class="list">' + items.map(function (a) {
+          return '<div class="list-item"><span style="font-size:1.1rem">' + esc(a.emoji) + '</span><div class="li-main"><div class="li-title" style="font-weight:500;font-size:.88rem">' + esc(a.text) + '</div><div class="li-sub">' + timeAgo(a.ts) + (a.xp ? ' · +' + a.xp + ' XP' : '') + '</div></div></div>';
+        }).join('') + '</div>'
+      : '<div class="empty"><div class="e-emoji">🌙</div><p>Nothing yet — everything you do in Acendri shows up here.</p></div>';
+    var m = modal({ title: '🔔 Reminders & activity', accent: 'purple', body: html });
+    m.el.querySelectorAll('[data-rdone]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var id = b.getAttribute('data-rdone');
+        update(function (s) {
+          s.reminders.forEach(function (r) { if (r.id === id) { r.done = true; r.doneAt = Date.now(); } });
+          logActivity('Reminder done', '⏰');
+        });
+        toast('Reminder ticked off', '⏰');
+        m.close();
+      });
     });
   }
 
@@ -779,6 +885,8 @@
     financeSummary: financeSummary,
     habitStreak: habitStreak,
     habitWeekCount: habitWeekCount,
+    daysSinceLastTick: daysSinceLastTick,
+    HABIT_FADE_DAYS: HABIT_FADE_DAYS,
     goalProgress: goalProgress,
     ACHIEVEMENTS: ACHIEVEMENTS
   };
@@ -797,6 +905,7 @@
         if (e.key === 'Escape' && openModals.length) openModals[openModals.length - 1].close();
       });
       render();
+      flushToasts();   // week settlement / habit-fade notices queued during load
     }
   };
 })();

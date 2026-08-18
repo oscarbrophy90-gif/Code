@@ -41,6 +41,7 @@
     var lp = A.ui.levelProgress((s.profile && s.profile.xp) || 0);
     var best = 0;
     (s.habits || []).forEach(function (h) {
+      if (h.archived) return;
       var st = A.engine.habitStreak(h);
       if (st > best) best = st;
     });
@@ -178,7 +179,7 @@
   function habitsCard(s) {
     var esc = A.ui.esc;
     var t = A.ui.todayISO();
-    var habits = s.habits || [];
+    var habits = (s.habits || []).filter(function (h) { return !h.archived; });
     var inner, foot;
     if (!habits.length) {
       inner = emptyBlock('🌱', 'Small daily actions compound — add your first habit.', 'app/habits', 'Add a habit');
