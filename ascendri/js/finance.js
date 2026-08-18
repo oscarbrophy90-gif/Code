@@ -14,6 +14,7 @@
 
   var selMonth = A.ui.monthISO();   // 'YYYY-MM' being viewed
   var catFilter = 'all';            // transactions table category filter
+  var showAllTx = false;            // table shows 12 rows until expanded
 
   /* ---------------- helpers ---------------- */
 
@@ -283,8 +284,18 @@
 
   /* ---------------- HTML builders ---------------- */
 
+  // The view can go forward past the current month when future-dated
+  // transactions exist there (e.g. a pre-logged payment).
+  function maxMonth() {
+    var max = A.ui.monthISO();
+    A.S.get().finance.transactions.forEach(function (t) {
+      if (t.date && t.date.slice(0, 7) > max) max = t.date.slice(0, 7);
+    });
+    return max;
+  }
+
   function headHTML() {
-    var atCurrent = selMonth >= A.ui.monthISO();
+    var atCurrent = selMonth >= maxMonth();
     return '<div class="screen-head"><div class="spread wrap">' +
       '<div><h1>Finance</h1>' +
       '<div class="sub">Know where your money goes — and where you want it to go.</div></div>' +
@@ -355,7 +366,7 @@
         '<p>No ' + esc(catFilter) + ' transactions in ' + ymLabel(selMonth) + '.</p>' +
         '<button class="btn btn-acc acc-cyan" data-clearfilter="1">Show all categories</button></div>';
     } else {
-      var shown = filtered.slice(0, 12);
+      var shown = showAllTx ? filtered : filtered.slice(0, 12);
       var rows = shown.map(function (t) {
         var isInc = t.type === 'income';
         return '<tr>' +
@@ -370,7 +381,10 @@
       body = '<div class="scroll-x"><table class="tbl">' +
         '<thead><tr><th>Date</th><th>Note</th><th>Category</th><th>Amount</th><th></th></tr></thead>' +
         '<tbody>' + rows + '</tbody></table></div>' +
-        (filtered.length > 12 ? '<div class="small muted" style="margin-top:8px">and ' + (filtered.length - 12) + ' more…</div>' : '');
+        (filtered.length > 12
+          ? '<div style="margin-top:8px"><button class="btn btn-ghost btn-sm" data-txmore="1">' +
+            (showAllTx ? 'Show fewer' : 'Show all ' + filtered.length) + '</button></div>'
+          : '');
     }
 
     var filterSel = '';
@@ -492,7 +506,7 @@
     });
 
     el.querySelector('[data-mnext]').addEventListener('click', function () {
-      if (selMonth >= A.ui.monthISO()) return; // disabled at current month
+      if (selMonth >= maxMonth()) return; // disabled at the last month that has anything to show
       selMonth = ymAdd(selMonth, 1);
       renderFinance(el, ctx);
     });
@@ -511,6 +525,13 @@
     el.querySelectorAll('[data-clearfilter]').forEach(function (b) {
       b.addEventListener('click', function () {
         catFilter = 'all';
+        renderFinance(el, ctx);
+      });
+    });
+
+    el.querySelectorAll('[data-txmore]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        showAllTx = !showAllTx;
         renderFinance(el, ctx);
       });
     });

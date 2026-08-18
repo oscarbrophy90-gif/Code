@@ -217,8 +217,22 @@
 
   var pendingToasts = [];
 
+  // Keep timetable blocks in lock-step with their tasks, wherever the task
+  // was completed or re-opened from (tasks screen, dashboard, schedule).
+  function syncTimetableDone(s) {
+    if (!s.timetable || !s.timetable.days) return;
+    var byId = {};
+    s.tasks.forEach(function (t) { byId[t.id] = t; });
+    Object.keys(s.timetable.days).forEach(function (iso) {
+      s.timetable.days[iso].forEach(function (b) {
+        if (b.type === 'task' && byId[b.refId]) b.done = !!byId[b.refId].done;
+      });
+    });
+  }
+
   function update(fn, opts) {
     fn(state);
+    syncTimetableDone(state);
     checkAchievements();
     save();
     if (!(opts && opts.silent)) scheduleRender();
@@ -474,18 +488,21 @@
 
   /* ---------------- demo data ---------------- */
 
+  // Demo data is ADDITIVE: it never replaces anything the user already created.
   function loadDemo() {
+    if (state.demoLoaded) { toast('Demo data is already loaded', '🧪'); return; }
     var t = todayISO();
     update(function (s) {
+      s.demoLoaded = true;
       var g1m = ['Research training programs', 'Book weekly coaching sessions', 'Enter a local tournament', 'Film and review my technique', 'Reach top 4 in club ladder'].map(function (x, i) { return { id: uid(), title: x, done: i < 2 }; });
       var g2m = ['Set up a savings account', 'Auto-transfer $50 each week', 'Reach $500', 'Reach $1,000', 'Reach $2,000'].map(function (x, i) { return { id: uid(), title: x, done: i < 3 }; });
       var g3m = ['Pick study technique per subject', 'Weekly practice paper', 'Study group every Wednesday', 'Finish revision notes'].map(function (x, i) { return { id: uid(), title: x, done: i < 1 }; });
-      s.goals = [
+      s.goals = s.goals.concat([
         { id: uid(), title: 'Make the state tennis team', category: 'Sport', accent: 'green', why: 'I want to compete at the highest level I can.', targetDate: addDaysISO(t, 120), milestones: g1m, status: 'active', createdAt: Date.now() - 21 * 86400000 },
         { id: uid(), title: 'Save $2,000 emergency fund', category: 'Finance', accent: 'yellow', why: 'Freedom to handle surprises without stress.', targetDate: addDaysISO(t, 180), milestones: g2m, status: 'active', createdAt: Date.now() - 40 * 86400000 },
         { id: uid(), title: 'Get an A in Mathematics', category: 'Study', accent: 'blue', why: 'Keep my options open for university.', targetDate: addDaysISO(t, 90), milestones: g3m, status: 'active', createdAt: Date.now() - 10 * 86400000 }
-      ];
-      s.tasks = [
+      ]);
+      s.tasks = s.tasks.concat([
         { id: uid(), title: 'Maths practice paper #4', priority: 3, due: t, duration: 60, done: false, createdAt: Date.now() - 3 * 86400000 },
         { id: uid(), title: 'Restring racquet', priority: 1, due: addDaysISO(t, 2), duration: 30, done: false, createdAt: Date.now() - 2 * 86400000 },
         { id: uid(), title: 'English essay draft', priority: 2, due: addDaysISO(t, 1), duration: 90, done: false, createdAt: Date.now() - 86400000 },
@@ -494,25 +511,24 @@
         { id: uid(), title: 'Science homework Ch. 7', priority: 3, due: addDaysISO(t, 2), duration: 45, done: false, createdAt: Date.now() },
         { id: uid(), title: 'Pack gym bag for tomorrow', priority: 1, due: t, duration: 20, done: true, doneAt: Date.now() - 3600000, createdAt: Date.now() - 86400000 },
         { id: uid(), title: 'Flashcards: French vocab', priority: 1, due: addDaysISO(t, 5), duration: 30, done: true, doneAt: Date.now() - 26 * 3600000, createdAt: Date.now() - 2 * 86400000 }
-      ];
-      s.commitments = [
+      ]);
+      s.commitments = s.commitments.concat([
         { id: uid(), title: 'School', days: [1, 2, 3, 4, 5], start: '08:30', end: '15:10', accent: 'indigo' },
         { id: uid(), title: 'Tennis training', days: [2, 4], start: '16:30', end: '18:30', accent: 'green' },
         { id: uid(), title: 'Gym session', days: [1, 6], start: '07:00', end: '08:00', accent: 'orange' },
         { id: uid(), title: 'Family dinner', days: [0], start: '18:00', end: '19:30', accent: 'pink' }
-      ];
+      ]);
       var mkLog = function (rate, days) { var log = {}; for (var i = 1; i <= days; i++) { if (Math.random() < rate) log[addDaysISO(t, -i)] = true; } return log; };
       var solid = function (days) { var log = {}; for (var i = 1; i <= days; i++) log[addDaysISO(t, -i)] = true; return log; };
-      s.habits = [
+      s.habits = s.habits.concat([
         { id: uid(), title: 'Study 1 hour', emoji: '📚', accent: 'blue', targetPerWeek: 6, log: solid(9), createdAt: Date.now() - 30 * 86400000 },
         { id: uid(), title: 'Morning stretch', emoji: '🤸', accent: 'orange', targetPerWeek: 7, log: solid(4), createdAt: Date.now() - 20 * 86400000 },
         { id: uid(), title: 'Read 20 pages', emoji: '📖', accent: 'purple', targetPerWeek: 5, log: mkLog(0.6, 28), createdAt: Date.now() - 28 * 86400000 },
         { id: uid(), title: 'No sugary drinks', emoji: '🥤', accent: 'teal', targetPerWeek: 7, log: mkLog(0.8, 28), createdAt: Date.now() - 28 * 86400000 }
-      ];
+      ]);
       var ym = t.slice(0, 7);
       var lastMonth = addDaysISO(t, -32).slice(0, 7);
-      s.finance = {
-        transactions: [
+      s.finance.transactions = s.finance.transactions.concat([
           { id: uid(), type: 'income', amount: 220, category: 'Job', note: 'Part-time wages', date: addDaysISO(t, -2) },
           { id: uid(), type: 'income', amount: 40, category: 'Other', note: 'Sold old headset', date: addDaysISO(t, -5) },
           { id: uid(), type: 'expense', amount: 18.5, category: 'Food', note: 'Lunch out', date: addDaysISO(t, -1) },
@@ -522,13 +538,15 @@
           { id: uid(), type: 'expense', amount: 26, category: 'Fun', note: 'Movies with friends', date: addDaysISO(t, -9) },
           { id: uid(), type: 'income', amount: 220, category: 'Job', note: 'Part-time wages', date: lastMonth + '-15' },
           { id: uid(), type: 'expense', amount: 60, category: 'Food', note: 'Groceries', date: lastMonth + '-18' }
-        ],
-        budgets: { Food: 120, Fun: 60, Subscriptions: 20, Sport: 80, Transport: 60 },
-        savingsGoals: [
-          { id: uid(), title: 'Emergency fund', emoji: '🛟', target: 2000, saved: 620, accent: 'yellow' },
-          { id: uid(), title: 'New racquet', emoji: '🎾', target: 350, saved: 180, accent: 'green' }
-        ]
-      };
+        ]);
+      var demoBudgets = { Food: 120, Fun: 60, Subscriptions: 20, Sport: 80, Transport: 60 };
+      Object.keys(demoBudgets).forEach(function (cat) {
+        if (!(cat in s.finance.budgets)) s.finance.budgets[cat] = demoBudgets[cat];
+      });
+      s.finance.savingsGoals = s.finance.savingsGoals.concat([
+        { id: uid(), title: 'Emergency fund', emoji: '🛟', target: 2000, saved: 620, accent: 'yellow' },
+        { id: uid(), title: 'New racquet', emoji: '🎾', target: 350, saved: 180, accent: 'green' }
+      ]);
       s.profile.xp = Math.max(s.profile.xp, 430);
       logActivity('Demo data loaded — explore every screen', '🧪');
       generateTimetable(s);

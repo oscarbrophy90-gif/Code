@@ -71,7 +71,10 @@
             '<input id="tk-due" class="input" type="date" value="' + esc(vDue) + '"></div>' +
           '<div class="field"><label>Duration</label>' +
             '<select id="tk-dur" class="select">' +
-              DURATIONS.map(function (d) {
+              (DURATIONS.indexOf(vDur) === -1
+                ? DURATIONS.concat([vDur]).sort(function (a, b) { return a - b; })
+                : DURATIONS
+              ).map(function (d) {
                 return '<option value="' + d + '"' + (d === vDur ? ' selected' : '') + '>' + d + ' min</option>';
               }).join('') +
             '</select></div>' +
