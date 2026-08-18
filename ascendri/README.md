@@ -9,9 +9,18 @@ Journey** button. Every button works.
 
 ### Just open it
 
-Open **`ascendri/index.html`** in any browser. No install, no build, no server —
-plain HTML/CSS/JS. All of your data is stored in your browser (localStorage);
+Open **`ascendri/AcendriOS.html`** in any browser. It is a single self-contained
+file — the whole platform in one HTML document, so you can email it, put it on a
+USB stick or drop it in a folder and it still works. No install, no build, no
+server, no internet. All of your data is stored in your browser (localStorage);
 nothing is uploaded anywhere.
+
+`ascendri/index.html` is the same app served from its separate source files —
+use that one while editing. Rebuild the single-file version with:
+
+```
+node ascendri/build-standalone.mjs
+```
 
 Tip: during onboarding tick **"Load demo data"** to see the whole OS alive on
 first open.
