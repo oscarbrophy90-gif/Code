@@ -141,11 +141,15 @@
   /* ---------------- HTML builders ---------------- */
 
   function headHTML() {
+    var fade = A.engine.HABIT_FADE_DAYS || 14;
     return '<div class="screen-head"><div class="spread wrap">' +
       '<div><h1>Habits</h1>' +
       '<div class="sub">Repeated actions beat one-time heroics. Build your streaks.</div></div>' +
       '<button class="btn btn-primary" data-new="1">+ New habit</button>' +
-      '</div></div>';
+      '</div>' +
+      '<div class="muted small" style="margin-top:6px">Miss a habit and Acendri reminds you (check the 🔔 bell). ' +
+      'Quiet for ' + fade + ' days and it fades to the archive.</div>' +
+      '</div>';
   }
 
   function statsHTML(habits, t) {
@@ -178,6 +182,22 @@
     var pct = Math.min(100, Math.round(100 * weekCount / target));
     var hit = weekCount >= target;
 
+    // Reminder / fade warning — clears naturally once today is ticked.
+    var warnHTML = '';
+    var tickedToday = !!(h.log && h.log[t]);
+    var missed = A.engine.daysSinceLastTick(h);
+    if (!tickedToday && missed >= 2) {
+      if (missed >= 10) {
+        var fade = A.engine.HABIT_FADE_DAYS || 14;
+        var left = Math.max(1, fade - missed);
+        warnHTML = '<div style="margin-top:10px"><span class="pill acc-red">🍂 fades in ' +
+          left + (left === 1 ? ' day' : ' days') + '</span></div>';
+      } else {
+        warnHTML = '<div style="margin-top:10px"><span class="tag acc-yellow">⏰ missed ' +
+          missed + ' days</span></div>';
+      }
+    }
+
     var daysHTML = last7(t).map(function (iso) {
       var isToday = iso === t;
       var on = !!(h.log && h.log[iso]);
@@ -202,6 +222,7 @@
           '<button class="icon-btn danger" data-del="' + esc(h.id) + '" title="Delete habit" aria-label="Delete habit">' + A.ui.icon('trash', 'sm') + '</button>' +
         '</div>' +
       '</div>' +
+      warnHTML +
       '<div class="small muted" style="margin:12px 0 6px">Last 7 days</div>' +
       '<div class="habit-days">' + daysHTML + '</div>' +
       '<div class="spread" style="margin-top:14px">' +
@@ -218,11 +239,37 @@
       '<button class="btn btn-acc acc-orange" data-new="1">+ New habit</button></div>';
   }
 
+  function archiveHTML(archived) {
+    var esc = A.ui.esc;
+    if (!archived.length) return '';
+    return '<div class="section-gap">' +
+      '<div class="card-title">🍂 Faded away</div>' +
+      '<div class="list">' +
+      archived.map(function (h) {
+        var acc = safeAccent(h.accent);
+        return '<div class="list-item done">' +
+          '<span class="avatar sm">' + esc(h.emoji || '🌱') + '</span>' +
+          '<div class="li-main">' +
+            '<div class="li-title">' + esc(h.title) + '</div>' +
+            '<div class="li-sub">faded ' + esc(A.ui.timeAgo(h.archivedAt || h.createdAt || Date.now())) +
+              ' · best data kept</div>' +
+          '</div>' +
+          '<button class="btn btn-sm btn-acc acc-' + acc + '" data-revive="' + esc(h.id) + '" ' +
+            'title="Bring this habit back">Revive</button>' +
+          '<button class="icon-btn danger" data-del="' + esc(h.id) + '" title="Delete forever" aria-label="Delete habit">' +
+            A.ui.icon('trash', 'sm') + '</button>' +
+        '</div>';
+      }).join('') +
+      '</div></div>';
+  }
+
   /* ---------------- screen ---------------- */
 
   function renderHabits(el, ctx) {
     var s = A.S.get();
-    var habits = s.habits || [];
+    var all = s.habits || [];
+    var habits = all.filter(function (h) { return !h.archived; });   // active only
+    var archived = all.filter(function (h) { return !!h.archived; });
     var t = A.ui.todayISO();
 
     var body;
@@ -234,7 +281,7 @@
         '</div>';
     }
 
-    el.innerHTML = headHTML() + statsHTML(habits, t) + body;
+    el.innerHTML = headHTML() + statsHTML(habits, t) + body + archiveHTML(archived);
 
     /* ---- listeners ---- */
 
@@ -271,6 +318,24 @@
           A.S.addXp(5, 'Habit: ' + title);   // streak achievements fire from core
           if (justHitTarget) A.ui.toast('Weekly target hit for "' + title + '"!', '🎉');
         }
+      });
+    });
+
+    el.querySelectorAll('[data-revive]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var id = b.getAttribute('data-revive');
+        A.S.update(function (st) {
+          for (var i = 0; i < st.habits.length; i++) {
+            var h = st.habits[i];
+            if (h.id !== id) continue;
+            h.archived = false;
+            delete h.archivedAt;
+            if (!h.log) h.log = {};
+            h.log[t] = true;   // tick today so it does not instantly re-fade
+            break;
+          }
+        });
+        A.ui.toast('Back from the ashes — streak restarts today 🔥');
       });
     });
 

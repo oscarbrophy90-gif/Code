@@ -134,13 +134,151 @@
     });
   }
 
+  /* ---------------- Ask Acendri (brain) flow ---------------- */
+
+  function brainOrToast() {
+    var B = window.Ascendri.brain;
+    if (!B || typeof B.tasksFromText !== 'function') {
+      A.ui.toast('Acendri’s brain isn’t loaded yet — use + New task for now', '🤖');
+      return null;
+    }
+    return B;
+  }
+
+  /* normalise whatever the brain returns into a safe task draft */
+  function cleanDraft(d) {
+    d = d || {};
+    var p = +d.priority;
+    if (p !== 1 && p !== 2 && p !== 3) p = 2;
+    return {
+      title: String(d.title || 'Untitled task').slice(0, 90),
+      priority: p,
+      due: (typeof d.due === 'string' && d.due) ? d.due : null,
+      duration: +d.duration || 45
+    };
+  }
+
+  function openAskModal(prefill) {
+    var esc = A.ui.esc;
+    A.ui.modal({
+      title: '🤖 What do you need to get done?',
+      accent: 'cyan',
+      wide: true,
+      body:
+        '<div class="field"><label>Tell Acendri in your own words</label>' +
+          '<textarea id="ask-text" class="textarea" rows="4" maxlength="400" ' +
+            'placeholder="I have a maths exam Friday and basketball training twice this week, plus I need to fix my bike">' +
+            esc(prefill || '') + '</textarea></div>' +
+        '<div class="small muted">💡 Acendri will split this into bite-size tasks spread over the week — ' +
+          'and the timetable engine plans them around your weekly commitments.</div>',
+      actions: [
+        { label: 'Cancel', cls: 'btn-ghost' },
+        {
+          label: '✨ Generate tasks',
+          cls: 'btn-acc',
+          onClick: function (m) {
+            var text = m.querySelector('#ask-text').value.trim();
+            if (!text) { A.ui.toast('Tell Acendri what’s on your plate first', '✍️'); return false; }
+            var B = brainOrToast();
+            if (!B) return false;
+            var drafts;
+            try { drafts = (B.tasksFromText(text) || []).map(cleanDraft); }
+            catch (e) { drafts = []; }
+            if (!drafts.length) {
+              A.ui.toast('Couldn’t draft tasks from that — try adding a bit more detail', '🤖');
+              return false;
+            }
+            openPreviewModal(text, drafts);
+          }
+        }
+      ]
+    });
+  }
+
+  function openPreviewModal(text, drafts) {
+    var esc = A.ui.esc;
+    var rowsHTML = drafts.map(function (d, i) {
+      var meta = 'P' + d.priority + ' · ' + d.duration + ' min · ' +
+        (d.due ? esc(A.ui.fmtDate(d.due)) : 'No due date');
+      return '<div class="list-item">' +
+        '<label class="checkbox" title="Include this task">' +
+          '<input type="checkbox" data-keep="' + i + '" checked aria-label="Include this task"></label>' +
+        '<div class="li-main">' +
+          '<input class="input" data-dtitle="' + i + '" maxlength="90" value="' + esc(d.title) + '" aria-label="Task title">' +
+          '<div class="li-sub" style="margin-top:4px">' + meta + '</div>' +
+        '</div>' +
+        '</div>';
+    }).join('');
+
+    A.ui.modal({
+      title: '🤖 Here’s your plan',
+      accent: 'cyan',
+      wide: true,
+      body:
+        '<div class="small muted" style="margin-bottom:10px">Untick anything you don’t need and tweak the titles — then add them to your list.</div>' +
+        '<div class="list">' + rowsHTML + '</div>',
+      actions: [
+        {
+          label: '🔁 Rewrite',
+          cls: 'btn-ghost',
+          onClick: function () { openAskModal(text); }
+        },
+        {
+          label: '📋 Add ' + drafts.length + ' task' + (drafts.length === 1 ? '' : 's'),
+          cls: 'btn-acc',
+          onClick: function (m) {
+            var picked = [], missingTitle = false;
+            drafts.forEach(function (d, i) {
+              var cb = m.querySelector('input[data-keep="' + i + '"]');
+              if (!cb || !cb.checked) return;
+              var inp = m.querySelector('input[data-dtitle="' + i + '"]');
+              var title = (inp ? inp.value : d.title).trim();
+              if (!title) { missingTitle = true; return; }
+              picked.push({ title: title, priority: d.priority, due: d.due, duration: d.duration });
+            });
+            if (missingTitle) { A.ui.toast('Give every ticked task a title — or untick it', '✍️'); return false; }
+            if (!picked.length) { A.ui.toast('Tick at least one task to add', '☑️'); return false; }
+            var now = Date.now();
+            A.S.update(function (st) {
+              st.tasks = st.tasks || [];
+              picked.forEach(function (p) {
+                st.tasks.push({
+                  id: A.ui.uid(), title: p.title, priority: p.priority, due: p.due,
+                  duration: p.duration, done: false, createdAt: now
+                });
+              });
+            });
+            A.S.log('Acendri drafted ' + picked.length + ' task' + (picked.length === 1 ? '' : 's') + ' from your brief', '🤖');
+            A.ui.toast(picked.length + ' task' + (picked.length === 1 ? '' : 's') +
+              ' added — generate your week to slot them in', '🤖');
+          }
+        }
+      ],
+      onOpen: function (m) {
+        var acts = m.querySelectorAll('.modal-actions [data-act]');
+        var addBtn = acts[acts.length - 1];
+        function syncLabel() {
+          var n = m.querySelectorAll('input[data-keep]:checked').length;
+          if (addBtn) addBtn.textContent = '📋 Add ' + n + ' task' + (n === 1 ? '' : 's');
+        }
+        m.querySelectorAll('input[data-keep]').forEach(function (cb) {
+          cb.addEventListener('change', syncLabel);
+        });
+        syncLabel();
+      }
+    });
+  }
+
   /* ---------------- HTML builders ---------------- */
 
   function headHTML() {
     return '<div class="screen-head"><div class="spread wrap">' +
       '<div><h1>Tasks</h1>' +
       '<div class="sub">Small actions, ticked off. This is where goals become real.</div></div>' +
-      '<button class="btn btn-primary" data-new="1">+ New task</button>' +
+      '<div class="row wrap">' +
+        '<button class="btn btn-acc acc-cyan" data-ask="1">🤖 Ask Acendri</button>' +
+        '<button class="btn btn-primary" data-new="1">+ New task</button>' +
+      '</div>' +
       '</div></div>';
   }
 
@@ -202,8 +340,11 @@
         '<button class="btn btn-acc acc-green" data-new="1">+ New task</button></div>';
     }
     return '<div class="empty section-gap"><div class="e-emoji">📝</div>' +
-      '<p>No tasks yet — add your first small action and Acendri will fit it into your week.</p>' +
-      '<button class="btn btn-acc acc-green" data-new="1">+ New task</button></div>';
+      '<p>No tasks yet — describe your week to Acendri, or add your first small action yourself.</p>' +
+      '<div class="row wrap" style="justify-content:center">' +
+        '<button class="btn btn-acc acc-cyan" data-ask="1">🤖 Ask Acendri</button>' +
+        '<button class="btn btn-acc acc-green" data-new="1">+ New task</button>' +
+      '</div></div>';
   }
 
   function taskItemHTML(task, goalById) {
@@ -292,6 +433,13 @@
 
     el.querySelectorAll('[data-new]').forEach(function (b) {
       b.addEventListener('click', function () { openTaskModal(null); });
+    });
+
+    el.querySelectorAll('[data-ask]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        if (!brainOrToast()) return; // no brain module -> graceful toast, no dead modal
+        openAskModal('');
+      });
     });
 
     el.querySelectorAll('[data-filter]').forEach(function (b) {

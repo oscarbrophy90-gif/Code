@@ -41,26 +41,53 @@
     return d.map(function (i) { return A.ui.DAY_NAMES[i]; }).join(' ') || '—';
   }
 
-  function taskBlockCount(tt) {
-    var n = 0;
-    Object.keys(tt.days || {}).forEach(function (iso) {
-      tt.days[iso].forEach(function (b) { if (b.type === 'task') n++; });
-    });
-    return n;
+  function taskBlockProgress(s, tt) {
+    var total = 0, done = 0;
+    if (tt && tt.days) {
+      Object.keys(tt.days).forEach(function (iso) {
+        tt.days[iso].forEach(function (b) {
+          if (b.type !== 'task') return;
+          total++;
+          var t = findTask(s, b.refId);
+          if (b.done || (t && t.done)) done++;
+        });
+      });
+    }
+    return { total: total, done: done };
   }
 
   /* ---------------- actions ---------------- */
 
-  function generateWeek() {
-    A.S.update(function (s) { A.engine.generateTimetable(s); });
-    A.S.addXp(5, 'Planned the week');
-    var tt = A.S.get().timetable;
-    if (!tt) return;
-    var n = taskBlockCount(tt);
-    A.ui.toast('Planned ' + n + ' task block' + (n === 1 ? '' : 's') + ' this week', '🗓️');
-    if (tt.unplaced && tt.unplaced.length) {
+  function unplacedToast(tt) {
+    if (tt && tt.unplaced && tt.unplaced.length) {
       A.ui.toast('Couldn’t fit ' + tt.unplaced.length + ' task' + (tt.unplaced.length === 1 ? '' : 's') + ' — see the note below', '⚠️');
     }
+  }
+
+  function generateWeek() {
+    var pre = A.S.get();
+    var openTasks = (pre.tasks || []).filter(function (t) { return !t.done; }).length;
+    var hasCommitments = (pre.commitments || []).length > 0;
+
+    if (!openTasks && !hasCommitments) {
+      // Nothing to build a week from — an empty grid would just look broken.
+      A.ui.toast('Nothing to plan yet — tell Acendri about your week', '🌱');
+      openAskModal('');
+      return;
+    }
+
+    // No XP for planning — core settles the week when it ends and pays per completed block.
+    A.S.update(function (s) { A.engine.generateTimetable(s); });
+    var after = A.S.get();
+    var tt = after.timetable;
+    if (!tt) return;
+    if (!openTasks) {
+      A.ui.toast('Planned your commitments — add tasks for Acendri to slot in around them', '🗓️');
+    } else {
+      var n = taskBlockProgress(after, tt).total;
+      A.ui.toast('Planned ' + n + ' task block' + (n === 1 ? '' : 's') + ' this week', '🗓️');
+    }
+    unplacedToast(tt);
   }
 
   function clearPlan() {
@@ -124,6 +151,134 @@
     if (!found) return;
     if (xp) A.S.addXp(xp, 'Task done: ' + title);
     else A.ui.toast(already ? '“' + title + '” was already done — block ticked off' : 'Block ticked off', '✅');
+  }
+
+  /* ---------------- Ask Acendri (plan from plain words) ---------------- */
+
+  var ASK_EXAMPLES = [
+    'Basketball training 3 times this week, one hour each',
+    'Study for my science test on Thursday',
+    'Gym twice and one long run on Saturday',
+    'Practise guitar 4 times, 30 minutes each'
+  ];
+
+  function openAskModal(prefill) {
+    var esc = A.ui.esc;
+    if (!window.Ascendri.brain) {
+      A.ui.toast('Acendri’s brain isn’t loaded — add tasks and commitments by hand instead', '🤖');
+      return;
+    }
+
+    function submit(m) {
+      var B = window.Ascendri.brain;
+      var field = m.querySelector('#ask-text');
+      var text = field ? field.value.trim() : '';
+      if (!text) { A.ui.toast('Tell Acendri at least one thing about your week', '✍️'); return false; }
+      if (!B) { A.ui.toast('Acendri’s brain isn’t loaded — add tasks and commitments by hand instead', '🤖'); return true; }
+      var plan = B.planFromText(text);
+      if (!plan || !plan.sessions || !plan.sessions.length) {
+        A.ui.toast('Acendri couldn’t find anything to plan in that — try naming an activity', '🤔');
+        return false;
+      }
+      openPlanConfirmModal(text, plan);
+      return true; // close this modal, the confirm view takes over
+    }
+
+    A.ui.modal({
+      title: '🤖 Tell Acendri about your week',
+      accent: 'cyan',
+      wide: true,
+      body:
+        '<div class="field"><label>What’s on this week?</label>' +
+        '<textarea class="textarea" id="ask-text" rows="4" placeholder="Basketball training 3 times this week, one hour each. Study for my science test on Thursday. Keep Sunday free.">' + esc(prefill || '') + '</textarea></div>' +
+        '<p class="muted small">Plain words are fine — Acendri picks out the activities, how often and how long, then plans them around your commitments. Tap an example to start:</p>' +
+        '<div class="chips">' +
+        ASK_EXAMPLES.map(function (ex, i) {
+          return '<button type="button" class="chip" data-ex="' + i + '">' + esc(ex) + '</button>';
+        }).join('') +
+        '</div>',
+      actions: [
+        { label: 'Cancel', cls: 'btn-ghost' },
+        { label: '⚡ Plan my week', cls: 'btn-primary', onClick: function (m) { return submit(m); } }
+      ],
+      onOpen: function (m) {
+        var field = m.querySelector('#ask-text');
+        m.querySelectorAll('[data-ex]').forEach(function (btn) {
+          btn.addEventListener('click', function () {
+            var ex = ASK_EXAMPLES[+btn.getAttribute('data-ex')] || '';
+            var cur = field.value.trim();
+            field.value = cur ? cur.replace(/[.\s]*$/, '') + '. ' + ex : ex;
+            field.focus();
+          });
+        });
+        if (field) field.focus();
+      }
+    });
+  }
+
+  function openPlanConfirmModal(text, plan) {
+    var esc = A.ui.esc;
+    var sessions = (plan.sessions || []).map(function (se) {
+      return {
+        title: String(se.title || 'Session'),
+        count: Math.max(1, Math.min(7, Math.round(se.count) || 1)),
+        duration: Math.max(15, Math.min(240, Math.round(se.duration) || 45)),
+        accent: safeAccent(se.accent, 'cyan')
+      };
+    });
+    var totalTasks = sessions.reduce(function (a, se) { return a + se.count; }, 0);
+
+    A.ui.modal({
+      title: '🤖 Here’s what Acendri heard',
+      accent: 'cyan',
+      wide: true,
+      body:
+        (plan.summary ? '<p class="muted small" style="margin-bottom:10px">' + esc(plan.summary) + '</p>' : '') +
+        '<div class="list">' +
+        sessions.map(function (se) {
+          return '<div class="list-item">' +
+            '<span class="badge-dot acc-' + se.accent + '"></span>' +
+            '<div class="li-main">' +
+            '<div class="li-title">' + esc(se.title) + ' ×' + se.count + '</div>' +
+            '<div class="li-sub">' + se.duration + ' min each</div>' +
+            '</div></div>';
+        }).join('') +
+        '</div>' +
+        '<p class="dim small" style="margin-top:10px">' + totalTasks + ' task' + (totalTasks === 1 ? '' : 's') +
+        ' will be added, spread over the next 6 days, then the week regenerates around your commitments.</p>',
+      actions: [
+        { label: '← Edit', cls: 'btn-ghost', onClick: function () { openAskModal(text); } },
+        { label: 'Add & generate', cls: 'btn-primary', onClick: function () { addSessionsAndGenerate(sessions); } }
+      ]
+    });
+  }
+
+  function addSessionsAndGenerate(sessions) {
+    var now = Date.now();
+    var t0 = A.ui.todayISO();
+    A.S.update(function (s) {
+      if (!s.tasks) s.tasks = [];
+      sessions.forEach(function (se, si) {
+        for (var i = 0; i < se.count; i++) {
+          s.tasks.push({
+            id: A.ui.uid(),
+            title: se.title + (se.count > 1 ? ' (' + (i + 1) + '/' + se.count + ')' : ''),
+            priority: 2,
+            due: A.ui.addDaysISO(t0, 1 + Math.floor(i * 6 / se.count)),
+            duration: se.duration,
+            done: false,
+            createdAt: now + si * 10 + i
+          });
+        }
+      });
+      A.engine.generateTimetable(s);
+    });
+    var after = A.S.get();
+    var tt = after.timetable;
+    var placed = taskBlockProgress(after, tt).total;
+    A.ui.toast('Acendri placed ' + placed + ' block' + (placed === 1 ? '' : 's') + ' into your week', '🤖');
+    unplacedToast(tt);
+    A.S.log('Acendri planned the week from a description', '🤖');
   }
 
   /* ---------------- commitment modal ---------------- */
@@ -379,6 +534,15 @@
 
     html += '</div></div>';
 
+    // week progress — core settles the XP when the week ends (4/block +30 at 80%)
+    var prog = taskBlockProgress(s, s.timetable);
+    var pct = prog.total ? Math.round(100 * prog.done / prog.total) : 0;
+    html += '<div class="acc-purple" style="margin-top:12px">' +
+      '<div class="bar"><div class="bar-fill" style="width:' + pct + '%"></div></div>' +
+      '<div class="muted small" style="margin-top:6px">' + prog.done + ' of ' + prog.total +
+      ' planned block' + (prog.total === 1 ? '' : 's') + ' done — XP settles when the week ends</div>' +
+      '</div>';
+
     // stale note + clear
     html += '<div class="row wrap" style="margin-top:10px">' +
       '<span class="muted small">Generated ' + A.ui.timeAgo(s.timetable.generatedAt) +
@@ -395,17 +559,20 @@
     if (!openTasks && !commitments) {
       return '<div class="empty section-gap">' +
         '<div class="e-emoji">🌱</div>' +
-        '<p>Nothing to plan yet — add a few tasks and your fixed commitments, then Acendri will build your week around them.</p>' +
+        '<p>Nothing to plan yet — tell Acendri about your week in plain words and it will build the tasks and the timetable for you.</p>' +
         '<div class="row wrap" style="justify-content:center">' +
-        '<button type="button" class="btn btn-primary" data-goto-tasks>📋 Add some tasks</button>' +
+        '<button type="button" class="btn btn-acc acc-cyan" data-ask-acendri>🤖 Ask Acendri</button>' +
+        '<button type="button" class="btn" data-goto-tasks>📋 Add tasks myself</button>' +
         '<button type="button" class="btn" data-add-commitment>＋ Add a commitment</button>' +
         '</div></div>';
     }
     return '<div class="empty section-gap">' +
       '<div class="e-emoji">📅</div>' +
       '<p>One click and Acendri builds your week around your commitments, priorities and due dates.</p>' +
+      '<div class="row wrap" style="justify-content:center">' +
       '<button type="button" class="btn btn-primary" data-generate>⚡ Generate my week</button>' +
-      '</div>';
+      '<button type="button" class="btn btn-acc acc-cyan" data-ask-acendri>🤖 Ask Acendri</button>' +
+      '</div></div>';
   }
 
   /* ---------------- screen ---------------- */
@@ -425,6 +592,7 @@
         '<div class="screen-head"><div class="spread wrap">' +
         '<div><h1>Timetable</h1><div class="sub">Tell Acendri your commitments — it plans your tasks around them.</div></div>' +
         '<div class="row wrap">' +
+        '<button type="button" class="btn btn-acc acc-cyan" data-ask-acendri>🤖 Ask Acendri</button>' +
         '<button type="button" class="btn btn-primary" data-generate>⚡ Generate my week</button>' +
         '<button type="button" class="btn" data-add-commitment>＋ Commitment</button>' +
         '</div>' +
@@ -440,6 +608,9 @@
 
       el.querySelectorAll('[data-generate]').forEach(function (b) {
         b.addEventListener('click', generateWeek);
+      });
+      el.querySelectorAll('[data-ask-acendri]').forEach(function (b) {
+        b.addEventListener('click', function () { openAskModal(''); });
       });
       el.querySelectorAll('[data-add-commitment]').forEach(function (b) {
         b.addEventListener('click', function () { openCommitmentModal(null); });

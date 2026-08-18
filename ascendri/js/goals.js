@@ -362,6 +362,175 @@
     });
   }
 
+  /* ---------------- Ask Acendri (brain) modal ---------------- */
+
+  var ASK_EXAMPLES = [
+    'Become a professional tennis player',
+    'Save $2,000 for a car',
+    'Get an A in maths this term'
+  ];
+
+  function openAskModal() {
+    var esc = A.ui.esc;
+    var B = window.Ascendri.brain;
+    if (!B || typeof B.goalFromText !== 'function') {
+      A.ui.toast('Acendri’s brain isn’t available right now — try + New goal instead', '🤖');
+      return;
+    }
+
+    var notes = '';
+    var draft = null; // { title, category, accent, why, milestones:[str] }
+    var closeFn = null;
+
+    function syncNotes(m) {
+      var t = m.querySelector('#ga-notes');
+      if (t) notes = t.value;
+    }
+
+    function syncPreview(m) {
+      var f = m.querySelector('#ga-title');
+      if (f) draft.title = f.value;
+      m.querySelectorAll('[data-ga-ms]').forEach(function (inp) {
+        var i = +inp.getAttribute('data-ga-ms');
+        if (i >= 0 && i < draft.milestones.length) draft.milestones[i] = inp.value;
+      });
+    }
+
+    function renderNotes(m) {
+      var body = m.querySelector('#ga-wrap');
+      body.innerHTML =
+        '<div class="field"><label>Your goal, in your own words</label>' +
+        '<textarea class="textarea" id="ga-notes" rows="4" maxlength="500" ' +
+        'placeholder="I want to make the state basketball team by next season. I can train after school and my jump shot needs the most work.">' +
+        esc(notes) + '</textarea></div>' +
+        '<div class="muted small">Mention what you’re aiming for, by when, and what needs the most work — Acendri drafts the goal and its steps for you.</div>' +
+        '<div class="chips">' +
+        ASK_EXAMPLES.map(function (x, i) {
+          return '<button type="button" class="chip" data-ga-ex="' + i + '">' + esc(x) + '</button>';
+        }).join('') +
+        '</div>' +
+        '<div class="modal-actions">' +
+        '<button type="button" class="btn btn-ghost" data-ga-cancel>Cancel</button>' +
+        '<button type="button" class="btn btn-acc" data-ga-gen>✨ Generate my goal</button>' +
+        '</div>';
+
+      body.querySelectorAll('[data-ga-ex]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var t = m.querySelector('#ga-notes');
+          if (!t) return;
+          t.value = ASK_EXAMPLES[+btn.getAttribute('data-ga-ex')] || '';
+          notes = t.value;
+          t.focus();
+        });
+      });
+      body.querySelector('[data-ga-cancel]').addEventListener('click', function () {
+        if (closeFn) closeFn();
+      });
+      body.querySelector('[data-ga-gen]').addEventListener('click', function () {
+        syncNotes(m);
+        var text = notes.trim();
+        if (!text) { A.ui.toast('Tell Acendri a little about your goal first', '✍️'); return; }
+        var d = null;
+        try { d = B.goalFromText(text); } catch (e) { d = null; }
+        if (!d) { A.ui.toast('Acendri couldn’t draft that one — try + New goal instead', '🤖'); return; }
+        draft = {
+          title: String(d.title || '').trim() || text.slice(0, 90),
+          category: String(d.category || '').trim() || 'Personal',
+          accent: A.ui.ACCENT_NAMES.indexOf(d.accent) >= 0 ? d.accent : 'cyan',
+          why: String(d.why || '').trim(),
+          milestones: (d.milestones || []).map(function (x) {
+            return String(x == null ? '' : x).trim();
+          }).filter(function (x) { return !!x; })
+        };
+        renderPreview(m);
+      });
+      var ta = m.querySelector('#ga-notes');
+      if (ta) setTimeout(function () { ta.focus(); }, 60);
+    }
+
+    function renderPreview(m) {
+      var body = m.querySelector('#ga-wrap');
+      var accCol = (A.ui.ACCENTS[draft.accent] || A.ui.ACCENTS.cyan).c;
+      var stepsHTML = draft.milestones.length
+        ? draft.milestones.map(function (t, i) {
+            return '<div class="row">' +
+              '<input class="input" data-ga-ms="' + i + '" maxlength="90" placeholder="Step ' + (i + 1) + '" value="' + esc(t) + '">' +
+              '<button type="button" class="icon-btn danger" data-ga-del="' + i + '" title="Remove step">' + A.ui.icon('x', 'sm') + '</button>' +
+              '</div>';
+          }).join('')
+        : '<div class="dim small">No steps yet — add at least one so the goal has a first move.</div>';
+
+      body.innerHTML =
+        '<div class="muted small" style="margin-bottom:10px">Here’s Acendri’s draft — tweak anything, then create it.</div>' +
+        '<div class="field"><label>Goal title</label>' +
+        '<input class="input" id="ga-title" maxlength="90" placeholder="Goal title" value="' + esc(draft.title) + '"></div>' +
+        '<div class="row wrap" style="gap:8px;margin-bottom:10px">' +
+        '<span class="tag">' + esc(draft.category) + '</span>' +
+        '<span class="tag" style="color:' + accCol + ';border-color:' + accCol + '">● ' + esc(draft.accent) + '</span>' +
+        '</div>' +
+        (draft.why ? '<div class="muted small" style="margin-bottom:10px">💡 ' + esc(draft.why) + '</div>' : '') +
+        '<div class="field"><label>Steps (milestones)</label>' +
+        '<div class="col">' + stepsHTML + '</div>' +
+        '<div class="row" style="margin-top:8px">' +
+        '<button type="button" class="btn btn-sm" data-ga-add>+ Add step</button>' +
+        '</div></div>' +
+        '<div class="modal-actions">' +
+        '<button type="button" class="btn btn-ghost" data-ga-back>🔁 Rewrite</button>' +
+        '<button type="button" class="btn btn-primary" data-ga-create>🎯 Create goal</button>' +
+        '</div>';
+
+      body.querySelectorAll('[data-ga-del]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          syncPreview(m);
+          draft.milestones.splice(+btn.getAttribute('data-ga-del'), 1);
+          renderPreview(m);
+        });
+      });
+      body.querySelector('[data-ga-add]').addEventListener('click', function () {
+        syncPreview(m);
+        draft.milestones.push('');
+        renderPreview(m);
+        var lines = m.querySelectorAll('[data-ga-ms]');
+        if (lines.length) lines[lines.length - 1].focus();
+      });
+      body.querySelector('[data-ga-back]').addEventListener('click', function () {
+        renderNotes(m);
+      });
+      body.querySelector('[data-ga-create]').addEventListener('click', function () {
+        syncPreview(m);
+        var title = draft.title.trim();
+        if (!title) { A.ui.toast('Give your goal a title first', '✍️'); return; }
+        var ms = [];
+        draft.milestones.forEach(function (t) {
+          var tt = String(t).trim();
+          if (tt) ms.push({ id: A.ui.uid(), title: tt, done: false });
+        });
+        var cat = draft.category.trim() || 'Personal';
+        var accent = A.ui.ACCENT_NAMES.indexOf(draft.accent) >= 0 ? draft.accent : 'cyan';
+        var why = draft.why.trim();
+        A.S.update(function (s) {
+          s.goals.push({
+            id: A.ui.uid(), title: title, category: cat, accent: accent, why: why,
+            targetDate: null, status: 'active', milestones: ms, createdAt: Date.now()
+          });
+        });
+        A.ui.toast('Goal created from your notes 🤖', '🎯');
+        if (closeFn) closeFn();
+      });
+    }
+
+    A.ui.modal({
+      title: '🤖 Tell Acendri about your goal',
+      accent: 'cyan',
+      wide: true,
+      body: '<div id="ga-wrap"></div>',
+      onOpen: function (m, close) {
+        closeFn = close;
+        renderNotes(m);
+      }
+    });
+  }
+
   /* ---------------- screen HTML builders ---------------- */
 
   function goalCardHTML(g) {
@@ -472,7 +641,10 @@
       var html =
         '<div class="screen-head"><div class="spread wrap">' +
         '<div><h1>Goals</h1><div class="sub">Big ambitions, broken into steps you can do today.</div></div>' +
+        '<div class="row wrap" style="gap:10px">' +
+        '<button type="button" class="btn btn-acc acc-cyan" data-ask>🤖 Ask Acendri</button>' +
         '<button type="button" class="btn btn-primary" data-new>+ New goal</button>' +
+        '</div>' +
         '</div></div>';
 
       if (!goals.length) {
@@ -480,7 +652,10 @@
           '<div class="empty section-gap">' +
           '<div class="e-emoji">🎯</div>' +
           '<p>A goal without a plan is just a wish. Create one and Acendri breaks it into steps.</p>' +
+          '<div class="row wrap" style="gap:10px;justify-content:center">' +
           '<button type="button" class="btn btn-primary" data-new>+ Create your first goal</button>' +
+          '<button type="button" class="btn btn-acc acc-cyan" data-ask>🤖 Ask Acendri</button>' +
+          '</div>' +
           '</div>';
       } else {
         html +=
@@ -517,6 +692,9 @@
 
       el.querySelectorAll('[data-new]').forEach(function (b) {
         b.addEventListener('click', function () { openGoalModal(null); });
+      });
+      el.querySelectorAll('[data-ask]').forEach(function (b) {
+        b.addEventListener('click', function () { openAskModal(); });
       });
       el.querySelectorAll('[data-edit]').forEach(function (b) {
         b.addEventListener('click', function () { openGoalModal(b.getAttribute('data-edit')); });
