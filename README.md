@@ -1,5 +1,9 @@
 # Hoops Elite
 
+> **Also in this repo: [Acendri OS](ascendri/README.md)** — a Life Operating
+> System prototype (goals, automatic timetables, finance, habits, achievements,
+> social hub and a personal AI). Open **`ascendri/index.html`** in any browser.
+
 A 1v1 basketball game: green-bar shooting, six genuinely different CPU difficulty
 levels, a MyPlayer builder with real attribute ceilings, badges that level up by
 playing, five parks, 20-day seasons, and a **nine-tier ranked ladder against scaling CPU
