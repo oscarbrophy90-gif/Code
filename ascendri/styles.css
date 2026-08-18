@@ -333,6 +333,9 @@ input[type="date"], input[type="time"] { color-scheme: dark; }
   .hamburger { display: inline-flex; }
   .screen { padding: 18px 14px; }
   .sidebar-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 25; }
+  .topbar { padding: 12px 14px; }
+  .xp-chip .muted { display: none; }
+  .xp-chip .bar { width: 44px; }
 }
 
 /* ============================================================
