@@ -19,6 +19,10 @@
     return (s.tasks || []).filter(function (t) { return t.id === id; })[0] || null;
   }
 
+  function findEvent(s, id) {
+    return (s.events || []).filter(function (e) { return e.id === id; })[0] || null;
+  }
+
   function findBlock(s, iso, blockId) {
     if (!s.timetable || !s.timetable.days || !s.timetable.days[iso]) return null;
     return s.timetable.days[iso].filter(function (b) { return b.id === blockId; })[0] || null;
@@ -195,10 +199,29 @@
     );
   }
 
+  // Rearranges the planned week: every open task is re-placed around commitments,
+  // events and everything already done. Works even while the week is locked —
+  // it rearranges what's there, it never regenerates. The engine guarantees no
+  // duplicates and never moves done blocks.
+  function rebuildWeekNow() {
+    if (!A.S.get().timetable) {
+      A.ui.toast('No week on the grid yet — build it first', '🤔');
+      return;
+    }
+    A.S.update(function (s) { A.engine.rebuildWeek(s); });
+    var after = A.S.get();
+    var prog = taskBlockProgress(after, after.timetable);
+    var open = Math.max(0, prog.total - prog.done);
+    A.ui.toast('Rearranged ' + open + ' open task block' + (open === 1 ? '' : 's') + ' — done blocks didn’t move', '🔁');
+    unplacedToast(after.timetable);
+    A.S.log('Rebuilt the week around what’s fixed', '🔁');
+  }
+
   function deleteCommitment(id) {
     var c = findCommitment(A.S.get(), id);
     if (!c) return;
     A.ui.confirm('Delete "' + c.title + '"? Its blocks come off the timetable too.', function () {
+      var hadTT = !!A.S.get().timetable;
       A.S.update(function (s) {
         s.commitments = s.commitments.filter(function (x) { return x.id !== id; });
         if (s.timetable && s.timetable.days) {
@@ -209,7 +232,7 @@
           });
         }
       });
-      A.ui.toast('Commitment deleted — regenerate to reclaim the time', '🗑️');
+      A.ui.toast(hadTT ? 'Commitment deleted — 🔁 Rebuild week reclaims the time' : 'Commitment deleted', '🗑️');
     }, { yesLabel: 'Delete it' });
   }
 
@@ -494,12 +517,12 @@
           c.title = title; c.days = days; c.start = draft.start; c.end = draft.end; c.accent = accent;
         });
         if (!found) { A.ui.toast('That commitment no longer exists', '🤔'); return true; }
-        A.ui.toast(hadPlan ? 'Commitment updated — regenerate to replan' : 'Commitment updated', '✏️');
+        A.ui.toast(hadPlan ? 'Commitment updated — hit 🔁 Rebuild week to replan around it' : 'Commitment updated', '✏️');
       } else {
         A.S.update(function (s) {
           s.commitments.push({ id: A.ui.uid(), title: title, days: days, start: draft.start, end: draft.end, accent: accent });
         });
-        A.ui.toast(hadPlan ? 'Commitment added — regenerate to weave it in' : 'Commitment added', '📌');
+        A.ui.toast(hadPlan ? 'Commitment added — hit 🔁 Rebuild week to weave it in' : 'Commitment added', '📌');
       }
       return true;
     }
@@ -516,6 +539,140 @@
     });
   }
 
+  /* ---------------- one-off events ---------------- */
+
+  function openEventModal(eventId) {
+    var esc = A.ui.esc;
+    var t0 = A.ui.todayISO();
+    var src = eventId ? findEvent(A.S.get(), eventId) : null;
+    var isEdit = !!src;
+    var draft = {
+      title: src ? String(src.title || '') : '',
+      date: (src && src.date) || t0,
+      start: (src && src.start) || '18:00',
+      end: (src && src.end) || '19:30',
+      accent: src ? safeAccent(src.accent, 'pink') : 'pink'
+    };
+
+    function syncDraft(m) {
+      var f;
+      f = m.querySelector('#ev-title'); if (f) draft.title = f.value;
+      f = m.querySelector('#ev-date'); if (f) draft.date = f.value;
+      f = m.querySelector('#ev-start'); if (f) draft.start = f.value;
+      f = m.querySelector('#ev-end'); if (f) draft.end = f.value;
+    }
+
+    function renderForm(m) {
+      var body = m.querySelector('#ev-form');
+      body.innerHTML =
+        '<div class="field"><label>What’s happening?</label>' +
+        '<input class="input" id="ev-title" maxlength="60" placeholder="e.g. Dentist, Match day, Sam’s party" value="' + esc(draft.title) + '"></div>' +
+        '<div class="field"><label>Date</label>' +
+        '<input class="input" id="ev-date" type="date" min="' + t0 + '" value="' + esc(draft.date) + '"></div>' +
+        '<div class="grid2">' +
+        '<div class="field"><label>Starts</label><input class="input" id="ev-start" type="time" value="' + esc(draft.start) + '"></div>' +
+        '<div class="field"><label>Ends</label><input class="input" id="ev-end" type="time" value="' + esc(draft.end) + '"></div>' +
+        '</div>' +
+        '<div class="field"><label>Colour</label><div class="swatches">' +
+        A.ui.ACCENT_NAMES.map(function (n) {
+          return '<button type="button" data-swatch="' + n + '" class="' + (draft.accent === n ? 'sel' : '') + '"' +
+            ' style="background:' + A.ui.ACCENTS[n].b + '" title="' + n + '"></button>';
+        }).join('') +
+        '</div></div>';
+
+      body.querySelectorAll('[data-swatch]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          syncDraft(m);
+          draft.accent = btn.getAttribute('data-swatch');
+          A.ui.ACCENT_NAMES.forEach(function (n) { m.classList.remove('acc-' + n); });
+          m.classList.add('acc-' + draft.accent);
+          renderForm(m);
+        });
+      });
+    }
+
+    function save(m) {
+      syncDraft(m);
+      var title = draft.title.trim();
+      if (!title) { A.ui.toast('Name the event first', '✍️'); return false; }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(draft.date || '')) { A.ui.toast('Pick a date for it', '📆'); return false; }
+      if (draft.date < t0) { A.ui.toast('Events go on today or a later day', '📆'); return false; }
+      if (!draft.start || !draft.end || A.ui.minutes(draft.end) <= A.ui.minutes(draft.start)) {
+        A.ui.toast('The end time must be after the start', '⏰'); return false;
+      }
+      var accent = safeAccent(draft.accent, 'pink');
+      var pre = A.S.get();
+      var hadTT = !!pre.timetable;
+      var windowIsos = hadTT ? A.engine.planWindow(pre) : [];
+      var oldDate = (isEdit && src && src.date) || null;
+      // Only rebuild when the event actually touches the planned week — either
+      // it lands inside it, or it is being moved out of it.
+      var inWindowNew = hadTT && windowIsos.indexOf(draft.date) >= 0;
+      var inWindowOld = hadTT && !!oldDate && windowIsos.indexOf(oldDate) >= 0;
+      var touchesGrid = inWindowNew || inWindowOld;
+      var missing = false;
+
+      A.S.update(function (s) {
+        if (!s.events) s.events = [];
+        if (isEdit) {
+          var ev = findEvent(s, eventId);
+          if (!ev) { missing = true; return; }
+          ev.title = title; ev.date = draft.date; ev.start = draft.start; ev.end = draft.end; ev.accent = accent;
+        } else {
+          s.events.push({ id: A.ui.uid(), title: title, date: draft.date, start: draft.start, end: draft.end, accent: accent });
+        }
+        // Same update: the planned week absorbs the change straight away — the
+        // rebuild re-places open tasks around it and never moves done blocks.
+        if (s.timetable && touchesGrid) A.engine.rebuildWeek(s);
+      });
+
+      if (missing) { A.ui.toast('That event no longer exists', '🤔'); return true; }
+      if (inWindowNew) {
+        A.ui.toast((isEdit ? 'Event updated' : 'Event added') + ' — the week rearranged itself so it’s on the grid', '🎉');
+        unplacedToast(A.S.get().timetable);
+      } else if (touchesGrid) {
+        A.ui.toast('Event moved beyond this plan — the week rearranged around the gap it left', '🎉');
+        unplacedToast(A.S.get().timetable);
+      } else if (hadTT) {
+        A.ui.toast((isEdit ? 'Event updated' : 'Event added') + ' — it’s after this plan ends, so it’ll be placed when that week is built', '🎉');
+      } else {
+        A.ui.toast((isEdit ? 'Event updated' : 'Event added') + ' — build your week to see it on the grid', '🎉');
+      }
+      A.S.log((isEdit ? 'Updated event: ' : 'Added event: ') + title, '🎉');
+      return true;
+    }
+
+    A.ui.modal({
+      title: isEdit ? '✏️ Edit event' : '🎉 New event',
+      accent: draft.accent,
+      body: '<div id="ev-form"></div>',
+      actions: [
+        { label: 'Cancel', cls: 'btn-ghost' },
+        { label: isEdit ? 'Save changes' : 'Add event', cls: 'btn-primary', onClick: function (m) { return save(m); } }
+      ],
+      onOpen: function (m) { renderForm(m); }
+    });
+  }
+
+  function deleteEvent(id) {
+    var ev = findEvent(A.S.get(), id);
+    if (!ev) return;
+    A.ui.confirm('Delete "' + ev.title + '"? Its block comes off the timetable too.', function () {
+      var hadTT = !!A.S.get().timetable;
+      A.S.update(function (s) {
+        s.events = (s.events || []).filter(function (x) { return x.id !== id; });
+        if (s.timetable && s.timetable.days) {
+          Object.keys(s.timetable.days).forEach(function (iso) {
+            s.timetable.days[iso] = s.timetable.days[iso].filter(function (b) {
+              return !(b.type === 'event' && b.refId === id);
+            });
+          });
+        }
+      });
+      A.ui.toast(hadTT ? 'Event deleted — 🔁 Rebuild week reclaims the time' : 'Event deleted', '🗑️');
+    }, { yesLabel: 'Delete it' });
+  }
+
   /* ---------------- block detail modal ---------------- */
 
   function openBlockModal(iso, blockId) {
@@ -525,14 +682,16 @@
     if (!b) { A.ui.toast('That block is gone — regenerate for a fresh plan', '🤔'); return; }
 
     var isTask = b.type === 'task';
+    var isEvent = b.type === 'event';
     var task = isTask ? findTask(s, b.refId) : null;
-    var commitment = !isTask ? findCommitment(s, b.refId) : null;
+    var ev = isEvent ? findEvent(s, b.refId) : null;
+    var commitment = (!isTask && !isEvent) ? findCommitment(s, b.refId) : null;
     var done = !!(b.done || (task && task.done));
     var mins = Math.max(0, b.endMin - b.startMin);
 
     var rows =
       '<div class="row wrap" style="margin-bottom:10px">' +
-      '<span class="pill">' + (isTask ? '📋 Task' : '📌 Commitment') + '</span>' +
+      '<span class="pill">' + (isTask ? '📋 Task' : isEvent ? '🎉 Event' : '📌 Commitment') + '</span>' +
       (done ? '<span class="tag">✅ done</span>' : '') +
       (task && task.priority === 3 ? '<span class="tag" style="color:#f87171;border-color:#7f1d1d">high priority</span>' : '') +
       '</div>' +
@@ -542,8 +701,10 @@
       (task && task.due ? '<div class="row muted small">' + A.ui.icon('flag', 'sm') + '<span>Due ' + A.ui.fmtDate(task.due) + '</span></div>' : '') +
       (commitment ? '<div class="row muted small">' + A.ui.icon('calendar', 'sm') + '<span>Repeats: ' + esc(fmtDays(commitment.days)) + '</span></div>' : '') +
       '</div>' +
-      (!isTask && !commitment ? '<p class="dim small" style="margin-top:10px">This commitment was deleted — regenerate to tidy the week.</p>' : '') +
+      (!isTask && !isEvent && !commitment ? '<p class="dim small" style="margin-top:10px">This commitment was deleted — regenerate to tidy the week.</p>' : '') +
       (isTask && !task ? '<p class="dim small" style="margin-top:10px">The task behind this block was deleted — you can remove the block.</p>' : '') +
+      (isEvent && ev ? '<p class="dim small" style="margin-top:10px">One-off event — Acendri plans your tasks around it.</p>' : '') +
+      (isEvent && !ev ? '<p class="dim small" style="margin-top:10px">This event was deleted — you can take the block off the grid.</p>' : '') +
       (!isTask && commitment ? '<p class="dim small" style="margin-top:10px">Fixed block — Acendri plans your tasks around it.</p>' : '');
 
     var actions = [{ label: 'Close', cls: 'btn-ghost' }];
@@ -554,6 +715,12 @@
       } else if (!task) {
         // task deleted; only removal makes sense (button above)
       }
+    } else if (isEvent) {
+      if (ev) {
+        actions.push({ label: '✏️ Edit event', cls: 'btn-acc', onClick: function () { openEventModal(ev.id); } });
+      } else {
+        actions.push({ label: 'Remove from plan', cls: 'btn-danger', onClick: function () { removeBlock(iso, blockId); } });
+      }
     } else if (commitment) {
       actions.push({ label: '✏️ Edit commitment', cls: 'btn-acc', onClick: function () { openCommitmentModal(commitment.id); } });
     } else {
@@ -562,7 +729,7 @@
 
     A.ui.modal({
       title: esc(b.title),
-      accent: safeAccent(b.accent, isTask ? 'cyan' : 'indigo'),
+      accent: safeAccent(b.accent, isTask ? 'cyan' : isEvent ? 'pink' : 'indigo'),
       body: rows,
       actions: actions
     });
@@ -600,14 +767,53 @@
       inner + '</div>';
   }
 
+  function eventsCardHTML(s) {
+    var esc = A.ui.esc;
+    var t0 = A.ui.todayISO();
+    var list = (s.events || [])
+      .filter(function (ev) { return ev && ev.date && ev.date >= t0; })
+      .sort(function (a, b) {
+        if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+        return A.ui.minutes(a.start || '00:00') - A.ui.minutes(b.start || '00:00');
+      });
+    var inner;
+    if (!list.length) {
+      inner =
+        '<div class="empty" style="padding:22px 14px">' +
+        '<div class="e-emoji">🎉</div>' +
+        '<p>One-off things — a match, a party, an appointment. Acendri plans your week around them.</p>' +
+        '<button type="button" class="btn btn-acc btn-sm" data-add-event>＋ Add event</button>' +
+        '</div>';
+    } else {
+      inner = '<div class="list">' + list.map(function (ev) {
+        var acc = safeAccent(ev.accent, 'pink');
+        return '<div class="list-item">' +
+          '<span class="badge-dot acc-' + acc + '"></span>' +
+          '<div class="li-main">' +
+          '<div class="li-title">' + esc(ev.title) + '</div>' +
+          '<div class="li-sub">' + esc(A.ui.fmtDate(ev.date)) + ' · ' + A.ui.fmtTime(ev.start || '00:00') + '–' + A.ui.fmtTime(ev.end || '00:00') + '</div>' +
+          '</div>' +
+          '<button type="button" class="icon-btn" data-edit-ev="' + ev.id + '" title="Edit event">' + A.ui.icon('edit') + '</button>' +
+          '<button type="button" class="icon-btn danger" data-del-ev="' + ev.id + '" title="Delete event">' + A.ui.icon('trash') + '</button>' +
+          '</div>';
+      }).join('') + '</div>';
+    }
+    return '<div class="card acc acc-pink section-gap">' +
+      '<div class="card-title">' + A.ui.icon('flag') + 'Upcoming events</div>' +
+      inner + '</div>';
+  }
+
   function unplacedCardHTML(tt) {
     var esc = A.ui.esc;
     if (!tt || !tt.unplaced || !tt.unplaced.length) return '';
     var titles = tt.unplaced.map(function (t) { return '“' + esc(t) + '”'; }).join(', ');
     return '<div class="card acc acc-orange section-gap">' +
       '<div class="card-title">⚠️ Couldn’t fit: ' + titles + '</div>' +
-      '<p class="muted small" style="margin-bottom:10px">Your week is packed. Shorten these tasks, trim a commitment, or stretch your day — then regenerate.</p>' +
-      '<button type="button" class="btn btn-acc btn-sm" data-goto-settings>⚙️ Adjust wake / sleep</button>' +
+      '<p class="muted small" style="margin-bottom:10px">Your week is packed. Shorten these tasks, trim a commitment, or stretch your day — then hit 🔁 Rebuild week to retry them.</p>' +
+      '<div class="row wrap">' +
+      '<button type="button" class="btn btn-acc btn-sm" data-rebuild>🔁 Rebuild week</button>' +
+      '<button type="button" class="btn btn-ghost btn-sm" data-goto-settings>⚙️ Adjust wake / sleep</button>' +
+      '</div>' +
       '</div>';
   }
 
@@ -649,7 +855,7 @@
         var hgt = Math.max(16, (en - st) * PX_PER_MIN).toFixed(1);
         var task = b.type === 'task' ? findTask(s, b.refId) : null;
         var done = !!(b.done || (task && task.done));
-        var acc = safeAccent(b.accent, b.type === 'task' ? 'cyan' : 'indigo');
+        var acc = safeAccent(b.accent, b.type === 'task' ? 'cyan' : b.type === 'event' ? 'pink' : 'indigo');
         return '<div class="tt-block acc-' + acc + (done ? ' done' : '') + '"' +
           ' data-block="' + b.id + '" data-iso="' + iso + '"' +
           ' style="top:' + top + 'px;height:' + hgt + 'px" title="' + esc(b.title) + '">' +
@@ -670,6 +876,13 @@
       '<div class="muted small" style="margin-top:6px">' + prog.done + ' of ' + prog.total +
       ' planned block' + (prog.total === 1 ? '' : 's') + ' done — XP settles when the week ends</div>' +
       '</div>';
+
+    // unplaced tasks: a quiet pointer at the Rebuild button
+    var unCount = (s.timetable.unplaced || []).length;
+    if (unCount) {
+      html += '<div class="muted small" style="margin-top:6px">⚠️ ' + unCount + ' task' + (unCount === 1 ? '' : 's') +
+        ' couldn’t fit — free some time, then 🔁 Rebuild week tries them again.</div>';
+    }
 
     // where this plan is up to + how to change it
     var lock = A.engine.weekLock(s);
@@ -705,7 +918,7 @@
         ? 'A new week is open. Repeat last week’s shape, describe what’s changed, or let Acendri plan around your commitments.'
         : 'One click and Acendri builds your week around your commitments, priorities and due dates.') + '</p>' +
       '<div class="row wrap" style="justify-content:center">' +
-      '<button type="button" class="btn btn-primary" data-generate>⚡ Generate my week</button>' +
+      '<button type="button" class="btn btn-primary" data-generate>⚡ Build my week</button>' +
       '<button type="button" class="btn btn-acc acc-cyan" data-ask-acendri>🤖 Ask Acendri</button>' +
       '</div></div>';
   }
@@ -737,12 +950,15 @@
         (lock.locked
           ? '<button type="button" class="btn btn-ghost acc-purple" data-explain-lock title="Why can’t I regenerate?">🔒 Locked ' +
             lock.daysLeft + ' more day' + (lock.daysLeft === 1 ? '' : 's') + '</button>'
-          : '<button type="button" class="btn btn-primary" data-generate>⚡ Generate my week</button>') +
+          : '<button type="button" class="btn btn-primary" data-generate>⚡ Build my week</button>') +
+        (tt ? '<button type="button" class="btn" data-rebuild title="Re-place open task blocks around commitments, events and what’s done">🔁 Rebuild week</button>' : '') +
+        '<button type="button" class="btn" data-add-event>＋ Event</button>' +
         '<button type="button" class="btn" data-add-commitment>＋ Commitment</button>' +
         '</div>' +
         '</div></div>';
 
       html += commitmentsCardHTML(s);
+      html += eventsCardHTML(s);
       html += unplacedCardHTML(tt);
       html += tt ? weekGridHTML(s) : noPlanHTML(s);
 
@@ -759,8 +975,20 @@
       el.querySelectorAll('[data-ask-acendri]').forEach(function (b) {
         b.addEventListener('click', function () { openAskModal(''); });
       });
+      el.querySelectorAll('[data-rebuild]').forEach(function (b) {
+        b.addEventListener('click', rebuildWeekNow);
+      });
       el.querySelectorAll('[data-add-commitment]').forEach(function (b) {
         b.addEventListener('click', function () { openCommitmentModal(null); });
+      });
+      el.querySelectorAll('[data-add-event]').forEach(function (b) {
+        b.addEventListener('click', function () { openEventModal(null); });
+      });
+      el.querySelectorAll('[data-edit-ev]').forEach(function (b) {
+        b.addEventListener('click', function () { openEventModal(b.getAttribute('data-edit-ev')); });
+      });
+      el.querySelectorAll('[data-del-ev]').forEach(function (b) {
+        b.addEventListener('click', function () { deleteEvent(b.getAttribute('data-del-ev')); });
       });
       el.querySelectorAll('[data-edit-cm]').forEach(function (b) {
         b.addEventListener('click', function () { openCommitmentModal(b.getAttribute('data-edit-cm')); });

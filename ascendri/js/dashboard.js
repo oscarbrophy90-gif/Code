@@ -1,7 +1,9 @@
 /* ============================================================
-   Acendri OS — Dashboard: the command centre.
-   Hero greeting + quick actions, "What matters most right now",
-   and a grid of live summaries pulling from every engine.
+   Acendri OS — Dashboard: the Today system.
+   Answers "what should I do right now?" — weekly review banner,
+   hero greeting + quick actions, today's priorities (reorder /
+   complete / focus), next up, today's progress, AI recommendation,
+   and the grid of live summaries pulling from every engine.
    ============================================================ */
 (function () {
   'use strict';
@@ -21,6 +23,10 @@
     return A.ui.DAY_NAMES[d.getDay()] + ' ' + d.getDate() + ' ' + A.ui.MONTHS[d.getMonth()] + ' ' + d.getFullYear();
   }
 
+  function startOfTodayTs() {
+    var d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime();
+  }
+
   function footerBtn(screen, label) {
     return '<div style="margin-top:12px"><button class="btn btn-ghost btn-sm" data-nav="' + screen + '">' +
       label + ' ' + A.ui.icon('arrow', 'sm') + '</button></div>';
@@ -29,6 +35,30 @@
   function emptyBlock(emoji, text, screen, label) {
     return '<div class="empty"><div class="e-emoji">' + emoji + '</div><p>' + text + '</p>' +
       '<button class="btn btn-acc" data-nav="' + screen + '">' + label + '</button></div>';
+  }
+
+  // Set the focus task then jump into Focus Mode. Defensive about old saves.
+  function startFocusOn(taskId, nav) {
+    A.S.update(function (st) {
+      if (!st.focus || typeof st.focus.sessions !== 'number') st.focus = { sessions: 0, minutes: 0, log: [] };
+      st.focus.currentTaskId = taskId || null;
+    }, { silent: true });
+    nav('app/focus');
+  }
+
+  /* ---------------- 0) weekly review banner ---------------- */
+
+  function reviewBanner(s) {
+    if (!s.lastWeekReview || s.lastWeekReview.seen) return '';
+    return '<div class="card acc glow acc-purple section-gap" style="padding:14px 18px">' +
+      '<div class="spread wrap">' +
+        '<div class="row" style="gap:10px">' +
+          '<span style="font-size:1.3rem">🪞</span>' +
+          '<span class="bold">Your weekly review is ready</span>' +
+        '</div>' +
+        '<button class="btn btn-acc btn-sm" data-nav="app/review">Read it ' + A.ui.icon('arrow', 'sm') + '</button>' +
+      '</div>' +
+    '</div>';
   }
 
   /* ---------------- A) hero ---------------- */
@@ -67,7 +97,66 @@
     '</div>';
   }
 
-  /* ---------------- B) focus card ---------------- */
+  /* ---------------- B1) today's priorities ---------------- */
+
+  function prioritiesCard(s, pri) {
+    var esc = A.ui.esc;
+    var t = A.ui.todayISO();
+    var t0 = startOfTodayTs();
+    var accFor = { 1: 'cyan', 2: 'orange', 3: 'red' };
+
+    // completed today = the priorities you already ticked off
+    var doneToday = (s.tasks || []).filter(function (x) { return x.done && (x.doneAt || 0) >= t0; });
+    doneToday.sort(function (a, b) { return (b.doneAt || 0) - (a.doneAt || 0); });
+    doneToday = doneToday.slice(0, 3);
+
+    var inner, foot = '';
+    if (!pri.length && !doneToday.length) {
+      inner = '<div class="empty"><div class="e-emoji">🧭</div>' +
+        '<p>No priorities yet — add tasks or ask Acendri.</p>' +
+        '<div class="row wrap" style="justify-content:center">' +
+          '<button class="btn btn-acc" data-nav="app/tasks">+ Add tasks</button>' +
+          '<button class="btn btn-ghost" data-nav="app/assistant">🤖 Ask Acendri</button>' +
+        '</div></div>';
+    } else {
+      var rows = pri.map(function (task, i) {
+        var sub = [];
+        if (task.due) {
+          var overdue = task.due < t;
+          sub.push('<span class="' + (overdue ? 'neg' : '') + '">' + (overdue ? '⚠️ ' : '') + esc(A.ui.fmtDate(task.due)) + '</span>');
+        }
+        if (task.duration) sub.push(esc(String(task.duration)) + ' min');
+        if (task.priority === 3) sub.push('high priority');
+        var up = i > 0
+          ? '<button class="icon-btn" data-pri-up="' + i + '" title="Move up" aria-label="Move priority up">↑</button>'
+          : (pri.length > 1 ? '<span class="icon-btn" style="visibility:hidden" aria-hidden="true">↑</span>' : '');
+        var down = i < pri.length - 1
+          ? '<button class="icon-btn" data-pri-down="' + i + '" title="Move down" aria-label="Move priority down">↓</button>'
+          : (pri.length > 1 ? '<span class="icon-btn" style="visibility:hidden" aria-hidden="true">↓</span>' : '');
+        return '<div class="list-item">' +
+          '<button class="check acc-' + (accFor[task.priority] || 'cyan') + '" data-pri-toggle="' + esc(task.id) + '" title="Mark done" aria-label="Complete priority">' + A.ui.icon('check', 'sm') + '</button>' +
+          '<div class="li-main"><div class="li-title">' + esc(task.title) + '</div>' +
+          (sub.length ? '<div class="li-sub">' + sub.join(' · ') + '</div>' : '') + '</div>' +
+          up + down +
+          '<button class="btn btn-acc btn-sm" data-pri-focus="' + esc(task.id) + '" title="Start a Focus session on this">▶ Focus</button>' +
+        '</div>';
+      });
+      var ticked = doneToday.map(function (task) {
+        return '<div class="list-item done">' +
+          '<button class="check on acc-green" data-pri-toggle="' + esc(task.id) + '" title="Undo — mark as not done" aria-label="Undo completed priority">' + A.ui.icon('check', 'sm') + '</button>' +
+          '<div class="li-main"><div class="li-title">' + esc(task.title) + '</div>' +
+          '<div class="li-sub">✔ Done today</div></div>' +
+        '</div>';
+      });
+      inner = '<div class="list">' + rows.join('') + ticked.join('') + '</div>' +
+        (!pri.length ? '<div class="small dim" style="margin-top:8px">🎉 All priorities done — brilliant.</div>' : '');
+      foot = footerBtn('app/tasks', 'All tasks');
+    }
+    return '<div class="card acc glow acc-cyan">' +
+      '<div class="card-title">' + A.ui.icon('bolt') + ' Today’s priorities</div>' + inner + foot + '</div>';
+  }
+
+  /* ---------------- B2) focus card ---------------- */
 
   function focusHTML() {
     var esc = A.ui.esc;
@@ -79,11 +168,72 @@
         '<span class="h-acc">' + A.ui.icon('arrow', 'sm') + '</span>' +
       '</div>';
     }).join('');
-    return '<div class="card acc glow acc-purple section-gap">' +
+    return '<div class="card acc glow acc-purple">' +
       '<div class="card-title">' + A.ui.icon('sparkles') + ' What matters most right now</div>' +
       (rows
         ? '<div class="list">' + rows + '</div>'
         : emptyBlock('🧘', 'All quiet — nothing urgent on your plate right now.', 'app/goals', 'Set a goal')) +
+    '</div>';
+  }
+
+  /* ---------------- B3) next up ---------------- */
+
+  function countdownLabel(nb) {
+    if (nb.now) return 'NOW';
+    var m = nb.inMinutes || 0;
+    if (m >= 60) return 'in ' + Math.floor(m / 60) + 'h' + (m % 60 ? ' ' + (m % 60) + 'm' : '');
+    return 'in ' + m + ' min';
+  }
+
+  function nextUpCard(nb) {
+    if (!nb || !nb.block) return '';
+    var esc = A.ui.esc;
+    var b = nb.block;
+    return '<div class="card acc acc-purple" data-nav="app/schedule" style="cursor:pointer">' +
+      '<div class="card-title">' + A.ui.icon('clock') + ' Next up</div>' +
+      '<div class="spread wrap">' +
+        '<div>' +
+          '<div class="big bold">' + esc(b.title) + '</div>' +
+          '<div class="muted small" style="margin-top:4px">' +
+            (nb.now ? 'Started at ' : 'Starts at ') + esc(A.ui.fmtTime(b.start)) + ' · until ' + esc(A.ui.fmtTime(b.end)) +
+            ' · ' + (b.type === 'commitment' ? 'Commitment' : b.type === 'event' ? 'Event' : 'Task') +
+          '</div>' +
+        '</div>' +
+        '<span class="pill ' + (nb.now ? 'acc-green' : 'acc-purple') + '" style="font-weight:700">' +
+          (nb.now ? '▶ ' : '⏳ ') + countdownLabel(nb) + '</span>' +
+      '</div>' +
+    '</div>';
+  }
+
+  /* ---------------- B4) today's progress ---------------- */
+
+  function progressCard() {
+    var ts = A.engine.todayStats();
+    return '<div class="card acc acc-teal">' +
+      '<div class="card-title">' + A.ui.icon('trend') + ' Today’s progress</div>' +
+      '<div class="row wrap" style="gap:26px">' +
+        '<div class="stat"><span class="v">' + (ts.tasksDone || 0) + '</span><span class="k">Tasks done</span></div>' +
+        '<div class="stat"><span class="v">' + (ts.habitsDone || 0) + '/' + (ts.habitsTotal || 0) + '</span><span class="k">Habits</span></div>' +
+        '<div class="stat"><span class="v h-acc">+' + (ts.xpToday || 0) + '</span><span class="k">XP today</span></div>' +
+        '<div class="stat"><span class="v">' + (ts.focusToday || 0) + '</span><span class="k">Focus sessions</span></div>' +
+      '</div>' +
+    '</div>';
+  }
+
+  /* ---------------- B5) AI recommendation ---------------- */
+
+  function aiCard(sug) {
+    var esc = A.ui.esc;
+    return '<div class="card acc acc-pink section-gap">' +
+      '<div class="card-title">' + A.ui.icon('bulb') + ' AI recommendation</div>' +
+      '<div class="row" style="gap:10px;align-items:flex-start">' +
+        '<span style="font-size:1.3rem">' + esc(sug.emoji || '💡') + '</span>' +
+        '<div style="font-weight:500">' + esc(sug.text || 'Set a goal and Acendri will map out your next steps.') + '</div>' +
+      '</div>' +
+      '<div class="row wrap" style="margin-top:14px">' +
+        '<button class="btn btn-primary" data-do-now="1">▶ Do It Now</button>' +
+        '<button class="btn btn-ghost" data-nav="app/assistant">🤖 Ask Acendri</button>' +
+      '</div>' +
     '</div>';
   }
 
@@ -105,7 +255,7 @@
           return '<div class="list-item acc-' + (b.accent || 'cyan') + (b.done ? ' done' : '') + '" data-nav="app/schedule" style="cursor:pointer">' +
             '<span class="pill">' + esc(A.ui.fmtTime(b.start)) + '–' + esc(A.ui.fmtTime(b.end)) + '</span>' +
             '<div class="li-main"><div class="li-title">' + esc(b.title) + '</div>' +
-            '<div class="li-sub">' + (b.type === 'commitment' ? 'Commitment' : 'Task') + (b.done ? ' · done ✔' : '') + '</div></div>' +
+            '<div class="li-sub">' + (b.type === 'commitment' ? 'Commitment' : b.type === 'event' ? 'Event' : 'Task') + (b.done ? ' · done ✔' : '') + '</div></div>' +
           '</div>';
         }).join('') + '</div>' +
         (extra > 0 ? '<div class="small dim" style="margin-top:8px">+' + extra + ' more block' + (extra === 1 ? '' : 's') + ' today</div>' : '');
@@ -268,10 +418,21 @@
     order: 1,
     render: function (el, ctx) {
       var s = A.S.get();
+      var pri = A.engine.priorities(3);
+      var priIds = pri.map(function (task) { return task.id; });
+      var nb = A.engine.nextBlock();
+      var sug = A.engine.focusSuggestions(1)[0] ||
+        { emoji: '🎯', text: 'Set a goal and Acendri will map out your next steps.', screen: 'app/goals' };
+      var nu = nextUpCard(nb);
 
       el.innerHTML =
+        reviewBanner(s) +
         heroHTML(s) +
-        focusHTML() +
+        '<div class="grid2 section-gap">' + prioritiesCard(s, pri) + focusHTML() + '</div>' +
+        (nu
+          ? '<div class="grid2 section-gap">' + nu + progressCard() + '</div>'
+          : '<div class="section-gap">' + progressCard() + '</div>') +
+        aiCard(sug) +
         '<div class="grid2 section-gap">' +
           timetableCard(s) +
           tasksCard(s) +
@@ -281,14 +442,87 @@
           achievementsCard(s) +
         '</div>';
 
-      // navigation (quick actions, focus items, goal/timetable rows, footers, empty CTAs)
+      // navigation (banner, quick actions, focus items, next up, rows, footers, empty CTAs)
       el.querySelectorAll('[data-nav]').forEach(function (n) {
-        n.addEventListener('click', function () { ctx.nav(n.getAttribute('data-nav')); });
+        n.addEventListener('click', function (e) {
+          e.stopPropagation();
+          ctx.nav(n.getAttribute('data-nav'));
+        });
+      });
+
+      // priorities: complete / undo (XP only on the not-done -> done transition)
+      el.querySelectorAll('[data-pri-toggle]').forEach(function (btn) {
+        btn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          var id = btn.getAttribute('data-pri-toggle');
+          var completed = false, hit = false, prio = 1, title = '';
+          A.S.update(function (st) {
+            for (var i = 0; i < (st.tasks || []).length; i++) {
+              var task = st.tasks[i];
+              if (task.id === id) {
+                if (task.done) { task.done = false; delete task.doneAt; }
+                else { task.done = true; task.doneAt = Date.now(); completed = true; prio = task.priority; }
+                title = task.title;
+                hit = true;
+                break;
+              }
+            }
+          });
+          if (!hit) return;
+          if (completed) A.S.addXp(prio === 3 ? 15 : 10, 'Task completed: ' + title);
+          else A.ui.toast('Marked "' + title + '" as not done', '↩️');
+        });
+      });
+
+      // priorities: reorder — persist the visible order with the swap applied
+      function swapOrder(i, j) {
+        if (i < 0 || j < 0 || i >= priIds.length || j >= priIds.length) return;
+        var arr = priIds.slice();
+        var tmp = arr[i]; arr[i] = arr[j]; arr[j] = tmp;
+        A.S.update(function (st) { st.priorityOrder = arr; });
+      }
+      el.querySelectorAll('[data-pri-up]').forEach(function (btn) {
+        btn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          var i = parseInt(btn.getAttribute('data-pri-up'), 10);
+          swapOrder(i, i - 1);
+        });
+      });
+      el.querySelectorAll('[data-pri-down]').forEach(function (btn) {
+        btn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          var i = parseInt(btn.getAttribute('data-pri-down'), 10);
+          swapOrder(i, i + 1);
+        });
+      });
+
+      // priorities: jump into Focus Mode on a specific task
+      el.querySelectorAll('[data-pri-focus]').forEach(function (btn) {
+        btn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          startFocusOn(btn.getAttribute('data-pri-focus'), ctx.nav);
+        });
+      });
+
+      // AI recommendation: Do It Now
+      el.querySelectorAll('[data-do-now]').forEach(function (btn) {
+        btn.addEventListener('click', function (e) {
+          e.stopPropagation();
+          var top = A.engine.priorities(1)[0];
+          if (top) { startFocusOn(top.id, ctx.nav); return; }
+          var target = sug.screen || 'app/goals';
+          if (target === 'app/dashboard') {
+            A.ui.toast('Check the bell — a reminder needs you', '🔔');
+            return;
+          }
+          ctx.nav(target);
+        });
       });
 
       // complete a due task
       el.querySelectorAll('[data-task]').forEach(function (btn) {
-        btn.addEventListener('click', function () {
+        btn.addEventListener('click', function (e) {
+          e.stopPropagation();
           var id = btn.getAttribute('data-task');
           var pr = 1, hit = false;
           A.S.update(function (st) {
@@ -309,7 +543,8 @@
 
       // toggle a habit for today
       el.querySelectorAll('[data-habit]').forEach(function (btn) {
-        btn.addEventListener('click', function () {
+        btn.addEventListener('click', function (e) {
+          e.stopPropagation();
           var id = btn.getAttribute('data-habit');
           var t = A.ui.todayISO();
           var ticked = false, hit = false, title = '';

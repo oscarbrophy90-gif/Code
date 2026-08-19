@@ -1,6 +1,9 @@
 /* ============================================================
    Acendri OS — Goals screen
    Big ambitions, broken into milestones you can act on today.
+   v2: the hub of the Goal → Milestones → Tasks → Timetable →
+   Progress chain (AI plan builder, stuck helper, goal review,
+   full details view of everything hanging off a goal).
    ============================================================ */
 (function () {
   'use strict';
@@ -60,6 +63,16 @@
     'Finish and celebrate'
   ];
 
+  // One supporting habit per goal domain — used by the AI plan builder.
+  var HABIT_SEEDS = {
+    Study: { emoji: '📚', title: '25-minute study sprint', target: 5 },
+    Sport: { emoji: '🏃', title: 'Daily training touch', target: 4 },
+    Finance: { emoji: '💰', title: 'Log every expense', target: 5 },
+    Career: { emoji: '💼', title: 'One career move a day', target: 5 },
+    Health: { emoji: '🥗', title: 'One healthy choice today', target: 5 },
+    Personal: { emoji: '🌱', title: '15 minutes on my goal', target: 4 }
+  };
+
   function templateFor(cat) { return TEMPLATES[cat] || GENERIC_STEPS; }
 
   function findGoal(s, id) {
@@ -80,6 +93,18 @@
     return '<span class="tag">' + d + 'd left</span>';
   }
 
+  // taskId -> linked-task tally per milestone: { msId: {done, total} }
+  function linkedMsStats(s) {
+    var map = {};
+    (s.tasks || []).forEach(function (t) {
+      if (!t.milestoneId) return;
+      var st = map[t.milestoneId] = map[t.milestoneId] || { done: 0, total: 0 };
+      st.total++;
+      if (t.done) st.done++;
+    });
+    return map;
+  }
+
   /* ---------------- state mutations ---------------- */
 
   function toggleMilestone(goalId, msId) {
@@ -90,7 +115,8 @@
       var m = g.milestones.filter(function (x) { return x.id === msId; })[0];
       if (!m) return;
       m.done = !m.done;
-      if (m.done) { becameDone = true; msTitle = m.title; }
+      // a milestone pays its 25 XP exactly once, even across untick/retick cycles
+      if (m.done && !m.xpAwarded) { m.xpAwarded = true; becameDone = true; msTitle = m.title; }
       allDone = g.status === 'active' && g.milestones.length > 0 &&
         g.milestones.every(function (x) { return x.done; });
     });
@@ -139,11 +165,38 @@
         duration: 45,
         done: false,
         goalId: goalId,
+        milestoneId: msId,
         createdAt: Date.now()
       });
       made = true; title = m.title;
     });
-    if (made) A.ui.toast('Added to your tasks', '📋');
+    if (made) A.ui.toast('Added to your tasks — linked to the milestone', '📋');
+  }
+
+  // Complete / un-complete a linked task straight from the details modal.
+  // Mirrors the tasks screen: normal task XP once, milestone XP is core's job.
+  function toggleLinkedTask(taskId) {
+    var completed = false, unticked = false, prio = 1, title = '';
+    A.S.update(function (st) {
+      for (var i = 0; i < st.tasks.length; i++) {
+        var task = st.tasks[i];
+        if (task.id !== taskId) continue;
+        title = task.title;
+        prio = task.priority || 1;
+        if (task.done) {
+          task.done = false;
+          delete task.doneAt;
+          unticked = true;
+        } else {
+          task.done = true;
+          task.doneAt = Date.now();
+          completed = true;
+        }
+        break;
+      }
+    });
+    if (completed) A.S.addXp(prio === 3 ? 15 : 10, 'Task completed: ' + title);
+    else if (unticked) A.ui.toast('Moved "' + title + '" back to open', '↩️');
   }
 
   function completeGoal(goalId) {
@@ -204,6 +257,397 @@
       });
       A.ui.toast('Goal deleted', '🗑️');
     }, { yesLabel: 'Delete goal' });
+  }
+
+  /* ---------------- Build AI plan ---------------- */
+  // One update that fills the whole chain: milestones -> linked tasks ->
+  // supporting habit -> timetable placement. No XP here (achievement +
+  // milestone XP stay core's job — nothing double-awards).
+
+  function buildAiPlan(goalId) {
+    var res = null, gTitle = '';
+    A.S.update(function (s) {
+      var g = findGoal(s, goalId);
+      if (!g || g.status === 'done') return;
+      gTitle = g.title;
+      res = { steps: 0, tasks: 0, habit: null, placed: 0, msTitle: '' };
+      g.milestones = g.milestones || [];
+
+      // (a) no steps yet -> seed from the category template
+      if (!g.milestones.length) {
+        templateFor(g.category).forEach(function (t) {
+          g.milestones.push({ id: A.ui.uid(), title: t, done: false });
+        });
+        res.steps = g.milestones.length;
+      }
+
+      // (b) 2-3 linked tasks for the first open milestone, spread over 5 days
+      var m = g.milestones.filter(function (x) { return !x.done; })[0] || null;
+      var newIds = [];
+      if (m) {
+        res.msTitle = m.title;
+        var openLinked = (s.tasks || []).filter(function (t) {
+          return t.milestoneId === m.id && !t.done;
+        }).length;
+        var need = Math.max(0, 3 - openLinked); // top up to 3, never duplicate a full queue
+        var labels = ['Start: ', 'Keep at it: ', 'Wrap up: '];
+        var offsets = [1, 3, 5];
+        var now = Date.now();
+        for (var i = 0; i < need; i++) {
+          var id = A.ui.uid();
+          newIds.push(id);
+          s.tasks.push({
+            id: id,
+            title: labels[i] + m.title,
+            priority: 2,
+            due: A.ui.addDaysISO(A.ui.todayISO(), offsets[i]),
+            duration: 45,
+            done: false,
+            goalId: g.id,
+            milestoneId: m.id,
+            createdAt: now + i
+          });
+        }
+        res.tasks = newIds.length;
+      }
+
+      // (c) no supporting habit yet -> create a domain-appropriate one
+      var hasHabit = (s.habits || []).some(function (h) {
+        return h.goalId === g.id && !h.archived;
+      });
+      if (!hasHabit) {
+        var seed = HABIT_SEEDS[g.category] || HABIT_SEEDS.Personal;
+        s.habits.push({
+          id: A.ui.uid(), title: seed.title, emoji: seed.emoji,
+          accent: g.accent || 'blue', targetPerWeek: seed.target,
+          log: {}, goalId: g.id, difficulty: 'easy', createdAt: Date.now()
+        });
+        res.habit = seed.emoji + ' ' + seed.title;
+      }
+
+      // (d) place the new tasks on the week
+      if (newIds.length) {
+        if (s.timetable && s.timetable.days) {
+          res.placed = A.engine.addTasksToTimetable(s, newIds).placed;
+        } else {
+          A.engine.generateTimetable(s);
+          var onGrid = {};
+          Object.keys((s.timetable && s.timetable.days) || {}).forEach(function (iso) {
+            s.timetable.days[iso].forEach(function (b) {
+              if (b.type === 'task') onGrid[b.refId] = true;
+            });
+          });
+          res.placed = newIds.filter(function (id2) { return onGrid[id2]; }).length;
+        }
+      }
+
+      s.flags = s.flags || {};
+      s.flags.aiPlanBuilt = true; // one-shot marker; core's ai-architect achievement reads it
+    });
+
+    if (!res) { A.ui.toast('That goal can’t take a plan right now', '🤔'); return; }
+    var bits = [];
+    if (res.steps) bits.push(res.steps + ' steps');
+    if (res.tasks) bits.push(res.tasks + ' task' + (res.tasks === 1 ? '' : 's') + ' for “' + res.msTitle + '”');
+    if (res.habit) bits.push('new habit ' + res.habit);
+    if (res.placed) bits.push(res.placed + ' placed on your week');
+    if (bits.length) {
+      A.S.log('Acendri built a plan for “' + gTitle + '”', '🤖');
+      A.ui.toast('AI plan built: ' + bits.join(' · '), '🤖');
+    } else {
+      A.ui.toast('Plan already in place — tasks and habit are queued', '🤖');
+    }
+  }
+
+  /* ---------------- I’m stuck ---------------- */
+
+  function openStuckModal(goalId) {
+    var esc = A.ui.esc;
+    var s = A.S.get();
+    var g = findGoal(s, goalId);
+    if (!g) return;
+    var msAll = g.milestones || [];
+    var nextMs = msAll.filter(function (m) { return !m.done; })[0] || null;
+    var open = (s.tasks || []).filter(function (t) {
+      return t.goalId === goalId && !t.done;
+    }).sort(function (a, b) {
+      var da = a.duration || 45, db = b.duration || 45;
+      if (da !== db) return da - db;
+      return (a.due || '9999') < (b.due || '9999') ? -1 : 1;
+    });
+    var small = open[0] || null;
+    var shrinkTarget = small ? small.title : (nextMs ? nextMs.title : g.title);
+
+    var body = '<div class="col" style="gap:12px">';
+    body += '<div class="muted small">Stuck is normal. Shrink the next move until it’s impossible to skip.</div>';
+
+    if (nextMs) {
+      body += '<div class="list"><div class="list-item">' +
+        '<span style="font-size:1.1rem">🏁</span>' +
+        '<div class="li-main"><div class="li-title">' + esc(nextMs.title) + '</div>' +
+        '<div class="li-sub">Your next milestone — everything else can wait.</div></div>' +
+        '</div></div>';
+    } else if (msAll.length) {
+      body += '<div class="muted small">🏆 Every milestone is ticked — the only move left is marking the goal complete.</div>';
+    } else {
+      body += '<div class="muted small">🪜 This goal has no steps yet — that’s usually why it feels stuck.</div>';
+    }
+
+    if (small) {
+      body += '<div class="list"><div class="list-item">' +
+        '<span style="font-size:1.1rem">🎯</span>' +
+        '<div class="li-main"><div class="li-title">' + esc(small.title) + '</div>' +
+        '<div class="li-sub">Smallest open task — just ' + (small.duration || 45) + ' min' +
+        (small.due ? ' · due ' + esc(A.ui.fmtDate(small.due)) : '') + '</div></div>' +
+        '<button type="button" class="btn btn-sm btn-acc" data-stuck-focus>▶ Focus on it</button>' +
+        '</div></div>';
+    } else if (nextMs) {
+      body += '<div class="row wrap" style="gap:8px;align-items:center">' +
+        '<span class="muted small">No open tasks linked yet —</span>' +
+        '<button type="button" class="btn btn-sm" data-stuck-mktask>📋 Turn the milestone into a task</button>' +
+        '</div>';
+    } else if (!msAll.length) {
+      body += '<button type="button" class="btn btn-sm btn-acc" data-stuck-suggest style="align-self:flex-start">✨ Suggest steps</button>';
+    }
+
+    body += '<div class="muted small">✂️ Still too big? Commit to only the first 10 minutes of “' +
+      esc(shrinkTarget) + '”. Starting is the whole battle.</div>';
+    body += '</div>';
+
+    A.ui.modal({
+      title: '🧭 I’m stuck — ' + esc(g.title),
+      accent: g.accent || 'blue',
+      body: body,
+      actions: [
+        { label: 'Close', cls: 'btn-ghost' },
+        { label: '🤖 Ask Acendri', cls: 'btn-acc', onClick: function () { A.nav('app/assistant'); } }
+      ],
+      onOpen: function (m, close) {
+        var fb = m.querySelector('[data-stuck-focus]');
+        if (fb) fb.addEventListener('click', function () {
+          close();
+          A.S.update(function (st) {
+            if (!st.focus || typeof st.focus.sessions !== 'number') st.focus = { sessions: 0, minutes: 0, log: [] };
+            st.focus.currentTaskId = small.id;
+          }, { silent: true });
+          A.nav('app/focus');
+        });
+        var mk = m.querySelector('[data-stuck-mktask]');
+        if (mk) mk.addEventListener('click', function () {
+          close();
+          milestoneToTask(goalId, nextMs.id);
+        });
+        var sg = m.querySelector('[data-stuck-suggest]');
+        if (sg) sg.addEventListener('click', function () {
+          close();
+          suggestForGoal(goalId);
+        });
+      }
+    });
+  }
+
+  /* ---------------- Review goal ---------------- */
+
+  function openReviewModal(goalId) {
+    var esc = A.ui.esc;
+    var s = A.S.get();
+    var g = findGoal(s, goalId);
+    if (!g) return;
+    var pct = A.engine.goalProgress(g);
+    var msAll = g.milestones || [];
+    var msDone = msAll.filter(function (m) { return m.done; }).length;
+    var nextMs = msAll.filter(function (m) { return !m.done; })[0] || null;
+    var linked = (s.tasks || []).filter(function (t) { return t.goalId === goalId; });
+    var openL = linked.filter(function (t) { return !t.done; });
+    var doneL = linked.filter(function (t) { return t.done; })
+      .sort(function (a, b) { return (b.doneAt || 0) - (a.doneAt || 0); });
+    var today = A.ui.todayISO();
+    var overdue = linked.filter(function (t) { return !t.done && t.due && t.due < today; })
+      .sort(function (a, b) { return a.due < b.due ? -1 : 1; });
+
+    // going well: most recent completed linked task, else last ticked milestone
+    var well;
+    if (doneL.length) {
+      well = '“' + esc(doneL[0].title) + '” done ' + esc(A.ui.timeAgo(doneL[0].doneAt || doneL[0].createdAt || Date.now()));
+    } else if (msDone) {
+      var lastMs = null;
+      msAll.forEach(function (m) { if (m.done) lastMs = m; });
+      well = 'Milestone “' + esc(lastMs.title) + '” is ticked';
+    } else {
+      well = 'Nothing finished yet — the first win changes everything';
+    }
+
+    // falling behind: oldest overdue linked task
+    var behind;
+    if (!linked.length) behind = 'No tasks linked yet — this goal isn’t on your schedule';
+    else if (overdue.length) behind = '“' + esc(overdue[0].title) + '” has been overdue since ' + esc(A.ui.fmtDate(overdue[0].due));
+    else behind = 'Nothing overdue — you’re keeping pace';
+
+    // one recommended action
+    var rec;
+    if (!msAll.length) rec = 'Add the first steps — a goal without steps never reaches your timetable.';
+    else if (!nextMs) rec = 'Every step is ticked — mark the goal complete and celebrate properly.';
+    else if (overdue.length) rec = 'Clear “' + esc(overdue[0].title) + '” first — it’s the oldest thing blocking “' + esc(nextMs.title) + '”.';
+    else if (!openL.length) rec = 'Turn “' + esc(nextMs.title) + '” into tasks (the arrow on the step, or 🤖 Build AI plan) so it lands in your week.';
+    else rec = 'Keep momentum — ' + openL.length + ' open task' + (openL.length === 1 ? '' : 's') + ' queued for this goal. Do the shortest one first.';
+
+    var body =
+      '<div class="col" style="gap:14px">' +
+      '<div>' +
+      '<div class="bar lg"><div class="bar-fill" style="width:' + pct + '%"></div></div>' +
+      '<div class="small muted" style="margin-top:6px">' + pct + '% complete · milestones ' + msDone + '/' + msAll.length + '</div>' +
+      '</div>' +
+      '<div class="list">' +
+      '<div class="list-item"><span style="font-size:1.1rem">🟢</span><div class="li-main"><div class="li-title">Going well</div><div class="li-sub">' + well + '</div></div></div>' +
+      '<div class="list-item"><span style="font-size:1.1rem">🟠</span><div class="li-main"><div class="li-title">Falling behind</div><div class="li-sub">' + behind + '</div></div></div>' +
+      '<div class="list-item"><span style="font-size:1.1rem">🏁</span><div class="li-main"><div class="li-title">Next milestone</div><div class="li-sub">' +
+      (nextMs ? esc(nextMs.title) : (msAll.length ? 'All ticked — complete the goal!' : 'No steps yet')) + '</div></div></div>' +
+      '<div class="list-item"><span style="font-size:1.1rem">💡</span><div class="li-main"><div class="li-title">Recommended</div><div class="li-sub">' + rec + '</div></div></div>' +
+      '</div>' +
+      '</div>';
+
+    A.ui.modal({
+      title: '📊 Review — ' + esc(g.title),
+      accent: g.accent || 'blue',
+      body: body,
+      actions: [
+        { label: 'Close', cls: 'btn-ghost' },
+        { label: '🗓️ Open plan', cls: 'btn-acc', onClick: function () { A.nav('app/schedule'); } }
+      ]
+    });
+  }
+
+  /* ---------------- Details (everything linked to a goal) ---------------- */
+
+  function openDetailsModal(goalId) {
+    var esc = A.ui.esc;
+
+    function bodyHTML() {
+      var s = A.S.get();
+      var g = findGoal(s, goalId);
+      if (!g) return null;
+      var links = A.engine.goalLinks(g);
+      var open = links.tasks.filter(function (t) { return !t.done; });
+      var done = links.tasks.filter(function (t) { return t.done; })
+        .sort(function (a, b) { return (b.doneAt || 0) - (a.doneAt || 0); });
+
+      var h = '<div class="col" style="gap:14px">';
+
+      // linked tasks — completable right here
+      h += '<div><div class="card-title">📋 Linked tasks</div>';
+      if (!links.tasks.length) {
+        h += '<div class="dim small">No tasks linked yet — use the arrow on a milestone, or 🤖 Build AI plan.</div>';
+      } else {
+        h += '<div class="list">';
+        open.forEach(function (t) {
+          h += '<div class="list-item">' +
+            '<button type="button" class="check" data-dt-check="' + t.id + '" title="Mark as done">' + A.ui.icon('check', 'sm') + '</button>' +
+            '<div class="li-main"><div class="li-title">' + esc(t.title) + '</div>' +
+            '<div class="li-sub">' + (t.due ? 'Due ' + esc(A.ui.fmtDate(t.due)) + ' · ' : '') + (t.duration || 45) + ' min</div></div>' +
+            '</div>';
+        });
+        done.slice(0, 6).forEach(function (t) {
+          h += '<div class="list-item done">' +
+            '<button type="button" class="check on" data-dt-check="' + t.id + '" title="Mark as not done">' + A.ui.icon('check', 'sm') + '</button>' +
+            '<div class="li-main"><div class="li-title">' + esc(t.title) + '</div>' +
+            '<div class="li-sub">✔ Done ' + esc(A.ui.timeAgo(t.doneAt || t.createdAt || Date.now())) + '</div></div>' +
+            '</div>';
+        });
+        if (done.length > 6) h += '<div class="dim small" style="padding:6px 2px">+ ' + (done.length - 6) + ' more completed</div>';
+        h += '</div>';
+      }
+      h += '</div>';
+
+      // linked habits with streaks
+      h += '<div><div class="card-title">🌱 Supporting habits</div>';
+      if (!links.habits.length) {
+        h += '<div class="dim small">No habit linked to this goal — 🤖 Build AI plan can add one.</div>';
+      } else {
+        h += '<div class="list">';
+        links.habits.forEach(function (hb) {
+          var st = A.engine.habitStreak(hb);
+          var wk = A.engine.habitWeekCount(hb);
+          h += '<div class="list-item"><span style="font-size:1.1rem">' + esc(hb.emoji || '🌱') + '</span>' +
+            '<div class="li-main"><div class="li-title">' + esc(hb.title) + '</div>' +
+            '<div class="li-sub">🔥 ' + st + '-day streak · ' + wk + '/' + (hb.targetPerWeek || 0) + ' this week</div></div>' +
+            '</div>';
+        });
+        h += '</div>';
+      }
+      h += '</div>';
+
+      // this week's sessions on the timetable
+      var sess = links.sessions.slice().sort(function (a, b) {
+        if (a.iso !== b.iso) return a.iso < b.iso ? -1 : 1;
+        return (a.block.startMin || 0) - (b.block.startMin || 0);
+      });
+      h += '<div><div class="card-title">🗓️ This week’s sessions</div>';
+      if (!sess.length) {
+        h += '<div class="dim small">Nothing on the timetable for this goal yet.</div>';
+      } else {
+        h += '<div class="list">';
+        sess.slice(0, 8).forEach(function (x) {
+          h += '<div class="list-item' + (x.block.done ? ' done' : '') + '">' +
+            '<span style="font-size:1.1rem">' + (x.block.done ? '✅' : '⏱️') + '</span>' +
+            '<div class="li-main"><div class="li-title">' + esc(x.block.title) + '</div>' +
+            '<div class="li-sub">' + esc(A.ui.fmtDate(x.iso)) + ' · ' + esc(A.ui.fmtTime(x.block.start)) + '–' + esc(A.ui.fmtTime(x.block.end)) + '</div></div>' +
+            '</div>';
+        });
+        if (sess.length > 8) h += '<div class="dim small" style="padding:6px 2px">+ ' + (sess.length - 8) + ' more this week</div>';
+        h += '</div>';
+      }
+      h += '</div>';
+
+      // recent activity mentioning this goal
+      var needle = String(g.title || '').toLowerCase();
+      var acts = (s.activityLog || []).filter(function (a) {
+        return needle && String(a.text || '').toLowerCase().indexOf(needle) >= 0;
+      }).slice(0, 5);
+      h += '<div><div class="card-title">🕑 Recent activity</div>';
+      if (!acts.length) {
+        h += '<div class="dim small">No activity mentioning this goal yet — go make some.</div>';
+      } else {
+        h += '<div class="list">';
+        acts.forEach(function (a) {
+          h += '<div class="list-item"><span style="font-size:1.05rem">' + esc(a.emoji || '✨') + '</span>' +
+            '<div class="li-main"><div class="li-title" style="font-weight:500;font-size:.88rem">' + esc(a.text) + '</div>' +
+            '<div class="li-sub">' + esc(A.ui.timeAgo(a.ts)) + (a.xp ? ' · +' + a.xp + ' XP' : '') + '</div></div>' +
+            '</div>';
+        });
+        h += '</div>';
+      }
+      h += '</div>';
+
+      h += '</div>';
+      return h;
+    }
+
+    var g0 = findGoal(A.S.get(), goalId);
+    if (!g0) return;
+
+    A.ui.modal({
+      title: '🔍 ' + esc(g0.title),
+      accent: g0.accent || 'blue',
+      wide: true,
+      body: '<div id="gd-wrap"></div>',
+      actions: [{ label: 'Close', cls: 'btn-ghost' }],
+      onOpen: function (m, close) {
+        function renderBody() {
+          var html = bodyHTML();
+          if (html == null) { close(); A.ui.toast('That goal no longer exists', '🤔'); return; }
+          var wrap = m.querySelector('#gd-wrap');
+          if (!wrap) return;
+          wrap.innerHTML = html;
+          wrap.querySelectorAll('[data-dt-check]').forEach(function (b) {
+            b.addEventListener('click', function () {
+              toggleLinkedTask(b.getAttribute('data-dt-check'));
+              renderBody(); // refresh the modal over the re-rendered screen
+            });
+          });
+        }
+        renderBody();
+      }
+    });
   }
 
   /* ---------------- new / edit modal ---------------- */
@@ -533,19 +977,21 @@
 
   /* ---------------- screen HTML builders ---------------- */
 
-  function goalCardHTML(g) {
+  function goalCardHTML(g, msStats) {
     var esc = A.ui.esc;
     var pct = A.engine.goalProgress(g);
     var total = g.milestones.length;
     var done = g.milestones.filter(function (m) { return m.done; }).length;
+    msStats = msStats || {};
 
     var head =
       '<div class="spread" style="align-items:flex-start">' +
       '<div class="row wrap" style="gap:8px;min-width:0">' +
-      '<span class="bold" style="font-size:1.1rem">' + esc(g.title) + '</span>' +
+      '<span class="bold" data-details="' + g.id + '" style="font-size:1.1rem;cursor:pointer" title="Open goal details">' + esc(g.title) + '</span>' +
       '<span class="tag">' + esc(g.category) + '</span>' +
       '</div>' +
       '<div class="row" style="gap:2px;flex:0 0 auto">' +
+      '<button type="button" class="icon-btn" data-details="' + g.id + '" title="Goal details">' + A.ui.icon('eye') + '</button>' +
       '<button type="button" class="icon-btn" data-edit="' + g.id + '" title="Edit goal">' + A.ui.icon('edit') + '</button>' +
       '<button type="button" class="icon-btn danger" data-del="' + g.id + '" title="Delete goal">' + A.ui.icon('trash') + '</button>' +
       '</div></div>';
@@ -575,10 +1021,14 @@
         '</div>';
     } else {
       steps = '<div class="list">' + g.milestones.map(function (m) {
+        var lt = msStats[m.id];
+        var sub = lt
+          ? '<div class="li-sub">' + lt.done + '/' + lt.total + ' task' + (lt.total === 1 ? '' : 's') + '</div>'
+          : '';
         return '<div class="list-item' + (m.done ? ' done' : '') + '">' +
           '<button type="button" class="check' + (m.done ? ' on' : '') + '" data-ms-toggle data-goal="' + g.id + '" data-ms="' + m.id + '" title="' + (m.done ? 'Mark as not done' : 'Mark as done') + '">' + A.ui.icon('check', 'sm') + '</button>' +
-          '<div class="li-main"><div class="li-title">' + esc(m.title) + '</div></div>' +
-          '<button type="button" class="icon-btn" data-ms-task data-goal="' + g.id + '" data-ms="' + m.id + '" title="Create task from milestone">' + A.ui.icon('arrow', 'sm') + '</button>' +
+          '<div class="li-main"><div class="li-title">' + esc(m.title) + '</div>' + sub + '</div>' +
+          '<button type="button" class="icon-btn" data-ms-task data-goal="' + g.id + '" data-ms="' + m.id + '" title="Create linked task from milestone">' + A.ui.icon('arrow', 'sm') + '</button>' +
           '</div>';
       }).join('') + '</div>';
     }
@@ -589,11 +1039,18 @@
       '<button type="button" class="btn btn-sm" data-ms-add data-goal="' + g.id + '">Add</button>' +
       '</div>';
 
+    var tools =
+      '<div class="row wrap" style="gap:8px">' +
+      '<button type="button" class="btn btn-sm btn-acc" data-aiplan="' + g.id + '">🤖 Build AI plan</button>' +
+      '<button type="button" class="btn btn-sm" data-stuck="' + g.id + '">🧭 I’m stuck</button>' +
+      '<button type="button" class="btn btn-sm" data-review="' + g.id + '">📊 Review goal</button>' +
+      '</div>';
+
     var footer =
       '<button type="button" class="btn btn-acc" data-complete="' + g.id + '" style="width:100%">🏆 Mark goal complete</button>';
 
     return '<div class="card acc glow col acc-' + esc(g.accent || 'blue') + '">' +
-      head + why + date + bar + steps + addRow + footer + '</div>';
+      head + why + date + bar + steps + addRow + tools + footer + '</div>';
   }
 
   function completedRowHTML(g) {
@@ -628,6 +1085,7 @@
       var goals = s.goals || [];
       var active = goals.filter(function (g) { return g.status !== 'done'; });
       var completed = goals.filter(function (g) { return g.status === 'done'; });
+      var msStats = linkedMsStats(s);
 
       var milestonesDone = 0;
       goals.forEach(function (g) {
@@ -667,7 +1125,9 @@
           '</div>';
 
         if (active.length) {
-          html += '<div class="grid2 section-gap">' + active.map(goalCardHTML).join('') + '</div>';
+          html += '<div class="grid2 section-gap">' + active.map(function (g) {
+            return goalCardHTML(g, msStats);
+          }).join('') + '</div>';
         } else {
           html +=
             '<div class="empty section-gap">' +
@@ -732,6 +1192,18 @@
       });
       el.querySelectorAll('[data-restore]').forEach(function (b) {
         b.addEventListener('click', function () { reactivateGoal(b.getAttribute('data-restore')); });
+      });
+      el.querySelectorAll('[data-aiplan]').forEach(function (b) {
+        b.addEventListener('click', function () { buildAiPlan(b.getAttribute('data-aiplan')); });
+      });
+      el.querySelectorAll('[data-stuck]').forEach(function (b) {
+        b.addEventListener('click', function () { openStuckModal(b.getAttribute('data-stuck')); });
+      });
+      el.querySelectorAll('[data-review]').forEach(function (b) {
+        b.addEventListener('click', function () { openReviewModal(b.getAttribute('data-review')); });
+      });
+      el.querySelectorAll('[data-details]').forEach(function (b) {
+        b.addEventListener('click', function () { openDetailsModal(b.getAttribute('data-details')); });
       });
     }
   });

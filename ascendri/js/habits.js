@@ -1,13 +1,34 @@
 /* ============================================================
    Acendri OS — Habits: streak-powered daily actions.
-   Stats row, glowing habit cards with a 7-day tick strip,
-   weekly progress bars and a new/edit modal.
+   Stats row (with perfect-day note), glowing habit cards with a
+   7-day tick strip, weekly progress bars, 8-week consistency
+   graphs, goal links / preferred time / difficulty metadata,
+   a "Why am I struggling?" analysis and a new/edit modal.
    ============================================================ */
 (function () {
   'use strict';
   var A = window.Ascendri;
 
   var EMOJIS = ['📚', '🏃', '🤸', '💪', '🥗', '💧', '😴', '🧹', '🎸', '🧠', '📖', '☀️'];
+
+  var TIME_OPTS = [
+    ['', 'Any time of day'],
+    ['morning', '🌅 Morning'],
+    ['afternoon', '🌤️ Afternoon'],
+    ['evening', '🌙 Evening']
+  ];
+  var TIME_NOTE = {
+    morning: '🌅 best in the morning',
+    afternoon: '🌤️ best in the afternoon',
+    evening: '🌙 best in the evening'
+  };
+  var DIFF_OPTS = [
+    ['', 'Not set'],
+    ['easy', '🟢 Easy'],
+    ['medium', '🟡 Medium'],
+    ['hard', '🔴 Hard']
+  ];
+  var DIFF_TAG = { easy: '🟢 easy', medium: '🟡 medium', hard: '🔴 hard' };
 
   /* ---------------- helpers ---------------- */
 
@@ -21,11 +42,20 @@
     return out;
   }
 
-  // Weekday initial for a local ISO date (component construction, not string parsing).
-  function dayLetter(iso) {
+  // Local ISO date from a Date (component construction, no UTC drift).
+  function localISO(d) {
+    var m = d.getMonth() + 1, day = d.getDate();
+    return d.getFullYear() + '-' + (m < 10 ? '0' : '') + m + '-' + (day < 10 ? '0' : '') + day;
+  }
+
+  // Weekday index (Sun=0) for a local ISO date.
+  function dowOf(iso) {
     var p = iso.split('-');
-    var d = new Date(+p[0], +p[1] - 1, +p[2]);
-    return A.ui.DAY_NAMES[d.getDay()].charAt(0);
+    return new Date(+p[0], +p[1] - 1, +p[2]).getDay();
+  }
+
+  function dayLetter(iso) {
+    return A.ui.DAY_NAMES[dowOf(iso)].charAt(0);
   }
 
   function last7(todayIso) {
@@ -43,6 +73,37 @@
     return n;
   }
 
+  // How many days (inclusive of today, capped at `cap`) this habit has existed.
+  function ageDays(h, todayIso, cap) {
+    var days = cap;
+    if (h.createdAt) {
+      var created = localISO(new Date(h.createdAt));
+      var d = 0, cur = created;
+      while (cur < todayIso && d < cap) { cur = A.ui.addDaysISO(cur, 1); d++; }
+      days = Math.min(cap, d + 1);
+    }
+    return Math.max(1, days);
+  }
+
+  // 30-day completion rate 0..1 (young habits measured over their real age).
+  function completionRate30(h, todayIso) {
+    return Math.min(1, ticksLast30(h, todayIso) / ageDays(h, todayIso, 30));
+  }
+
+  // Tick counts for the last 8 weeks: 7-day windows ending today, oldest first.
+  function weeklyCounts(h, todayIso) {
+    var out = [];
+    for (var w = 7; w >= 0; w--) {
+      var n = 0;
+      for (var d = 0; d < 7; d++) {
+        var iso = A.ui.addDaysISO(todayIso, -(w * 7 + d));
+        if (h.log && h.log[iso]) n++;
+      }
+      out.push(n);
+    }
+    return out;
+  }
+
   /* ---------------- new / edit modal ---------------- */
 
   function openHabitModal(habitId) {
@@ -55,7 +116,15 @@
     var vEmoji = isNew ? EMOJIS[0] : (habit.emoji || EMOJIS[0]);
     var vTarget = isNew ? 7 : (habit.targetPerWeek || 7);
     var vAccent = isNew ? 'orange' : safeAccent(habit.accent);
+    var vGoal = isNew ? '' : (habit.goalId || '');
+    var vTime = isNew ? '' : (habit.preferredTime || '');
+    var vDiff = isNew ? '' : (habit.difficulty || '');
     if (EMOJIS.indexOf(vEmoji) === -1) vEmoji = EMOJIS[0];
+
+    var goals = (s.goals || []).filter(function (g) { return g.status === 'active'; });
+    if (vGoal && !goals.some(function (g) { return g.id === vGoal; })) {
+      (s.goals || []).forEach(function (g) { if (g.id === vGoal) goals.push(g); });
+    }
 
     var targetOpts = '';
     for (var n = 1; n <= 7; n++) {
@@ -78,6 +147,28 @@
           '</div></div>' +
         '<div class="field"><label>Target per week</label>' +
           '<select id="hb-target" class="select">' + targetOpts + '</select></div>' +
+        '<div class="field"><label>Linked goal (optional)</label>' +
+          '<select id="hb-goal" class="select">' +
+            '<option value="">No goal</option>' +
+            goals.map(function (g) {
+              return '<option value="' + esc(g.id) + '"' + (g.id === vGoal ? ' selected' : '') + '>' +
+                esc(g.title) + (g.status === 'done' ? ' (done)' : '') + '</option>';
+            }).join('') +
+          '</select></div>' +
+        '<div class="grid2">' +
+          '<div class="field"><label>Preferred time</label>' +
+            '<select id="hb-time" class="select">' +
+              TIME_OPTS.map(function (o) {
+                return '<option value="' + o[0] + '"' + (o[0] === vTime ? ' selected' : '') + '>' + o[1] + '</option>';
+              }).join('') +
+            '</select></div>' +
+          '<div class="field"><label>Difficulty</label>' +
+            '<select id="hb-diff" class="select">' +
+              DIFF_OPTS.map(function (o) {
+                return '<option value="' + o[0] + '"' + (o[0] === vDiff ? ' selected' : '') + '>' + o[1] + '</option>';
+              }).join('') +
+            '</select></div>' +
+        '</div>' +
         '<div class="field"><label>Accent colour</label>' +
           '<div class="swatches" id="hb-acc">' +
             A.ui.ACCENT_NAMES.map(function (name) {
@@ -112,11 +203,20 @@
             var target = +m.querySelector('#hb-target').value || 7;
             var swBtn = m.querySelector('#hb-acc button.sel');
             var accent = safeAccent(swBtn ? swBtn.getAttribute('data-swatch') : 'orange');
+            var goalEl = m.querySelector('#hb-goal');
+            var goalId = goalEl ? goalEl.value : '';
+            var timeEl = m.querySelector('#hb-time');
+            var pTime = timeEl ? timeEl.value : '';
+            var diffEl = m.querySelector('#hb-diff');
+            var diff = diffEl ? diffEl.value : '';
             A.S.update(function (st) {
               if (isNew) {
                 st.habits.push({
                   id: A.ui.uid(), title: title, emoji: emoji, accent: accent,
-                  targetPerWeek: target, log: {}, createdAt: Date.now()
+                  targetPerWeek: target, log: {}, createdAt: Date.now(),
+                  goalId: goalId || undefined,
+                  preferredTime: pTime || undefined,
+                  difficulty: diff || undefined
                 });
               } else {
                 for (var i = 0; i < st.habits.length; i++) {
@@ -125,6 +225,9 @@
                     st.habits[i].emoji = emoji;
                     st.habits[i].accent = accent;
                     st.habits[i].targetPerWeek = target;
+                    if (goalId) st.habits[i].goalId = goalId; else delete st.habits[i].goalId;
+                    if (pTime) st.habits[i].preferredTime = pTime; else delete st.habits[i].preferredTime;
+                    if (diff) st.habits[i].difficulty = diff; else delete st.habits[i].difficulty;
                     break;
                   }
                 }
@@ -133,6 +236,127 @@
             if (isNew) A.ui.toast('Habit started — tick day one today!', '🌱');
             else A.ui.toast('Habit updated', '✏️');
           }
+        }
+      ]
+    });
+  }
+
+  /* ---------------- "Why am I struggling?" ---------------- */
+
+  function openWhyModal(habitId) {
+    var esc = A.ui.esc;
+    var s = A.S.get();
+    var h = findHabit(s, habitId);
+    if (!h) return;
+    var t = A.ui.todayISO();
+    var acc = safeAccent(h.accent);
+    var tickedToday = !!(h.log && h.log[t]);
+    var createdIso = h.createdAt ? localISO(new Date(h.createdAt)) : null;
+
+    // Per-weekday totals & misses over the last 4 weeks (28 days).
+    // Today only counts once it's ticked (the day isn't over yet), and days
+    // before the habit existed don't count against it.
+    var total = [0, 0, 0, 0, 0, 0, 0];
+    var miss = [0, 0, 0, 0, 0, 0, 0];
+    for (var i = 0; i < 28; i++) {
+      var iso = A.ui.addDaysISO(t, -i);
+      if (createdIso && iso < createdIso) continue;
+      var done = !!(h.log && h.log[iso]);
+      if (iso === t && !done) continue;
+      var dw = dowOf(iso);
+      total[dw]++;
+      if (!done) miss[dw]++;
+    }
+
+    // Worst weekday(s) by miss rate.
+    var maxRate = 0;
+    for (var d = 0; d < 7; d++) {
+      if (total[d] && miss[d] / total[d] > maxRate) maxRate = miss[d] / total[d];
+    }
+    var worst = [];
+    for (var d2 = 0; d2 < 7; d2++) {
+      if (total[d2] && maxRate > 0 && miss[d2] / total[d2] >= maxRate - 0.001) worst.push(d2);
+    }
+
+    var callout;
+    if (!worst.length) {
+      callout = 'No clear weekday pattern in the last 4 weeks — the misses are spread out. A fixed daily anchor should tighten things up.';
+    } else if (worst.indexOf(0) >= 0 && worst.indexOf(6) >= 0 && worst.length <= 3) {
+      callout = 'You mostly miss this on weekends — try anchoring it to Saturday morning, before the day drifts.';
+    } else if (worst.length === 1) {
+      callout = 'You mostly miss this on ' + A.ui.DAY_NAMES[worst[0]] + 's — give it a specific slot that day and it stops slipping.';
+    } else {
+      var names = worst.map(function (w) { return A.ui.DAY_NAMES[w]; }).join(' & ');
+      callout = names + ' are your trickiest days — a set time on those days would catch most of the misses.';
+    }
+
+    // Current gap.
+    var gap = A.engine.daysSinceLastTick(h);
+    var gapNote = tickedToday
+      ? 'You’ve already ticked it today — momentum is on your side.'
+      : (gap <= 0
+        ? 'Your last tick was today or yesterday — the streak is very much alive.'
+        : 'Current gap: ' + gap + (gap === 1 ? ' day' : ' days') + ' since your last tick. One tick today resets that to zero.');
+
+    // Two concrete suggestions.
+    var target = Math.max(1, h.targetPerWeek || 7);
+    var shrink;
+    if (h.difficulty === 'hard') {
+      shrink = 'Shrink it: you marked this one 🔴 hard, so make the bad-day version laughably small (2 minutes counts). A tiny tick keeps the streak alive; ambition can come back later.';
+    } else if (target >= 6) {
+      shrink = 'Shrink it: drop the target from ' + target + ' to ' + Math.max(3, target - 2) + ' days a week for a fortnight. Hitting a smaller target rebuilds the identity — you can raise it again once it feels automatic.';
+    } else {
+      shrink = 'Shrink it: halve the habit until it’s impossible to skip — one page instead of twenty, one minute instead of ten. Consistency first, size later.';
+    }
+
+    var anchorC = null;
+    (s.commitments || []).forEach(function (c) {
+      if (!c || !c.title) return;
+      var nDays = (c.days || []).length;
+      if (!anchorC || nDays > (anchorC.days || []).length) anchorC = c;
+    });
+    var anchor;
+    if (anchorC) {
+      anchor = 'Stack it onto “' + esc(anchorC.title) + '” — right after it' +
+        (anchorC.end ? ' ends at ' + esc(A.ui.fmtTime(anchorC.end)) : '') +
+        ', do this habit while you’re already in motion. Riding an existing routine beats willpower.';
+    } else {
+      anchor = 'Tie it to something you already do every day — right after breakfast, or the moment you first sit at your desk. Habits stick when they ride on an existing routine.';
+    }
+
+    var DOW_ORDER = [1, 2, 3, 4, 5, 6, 0]; // Mon..Sun reads naturally
+    var rowsHTML = DOW_ORDER.map(function (dw2) {
+      var tot = total[dw2];
+      var ms = miss[dw2];
+      var pct = tot ? Math.round(100 * ms / tot) : 0;
+      return '<div class="row" style="margin:6px 0">' +
+        '<span class="small muted" style="width:34px;flex:none">' + A.ui.DAY_NAMES[dw2] + '</span>' +
+        '<div class="bar" style="flex:1"><span class="bar-fill" style="width:' + pct + '%"></span></div>' +
+        '<span class="small dim" style="width:86px;flex:none;text-align:right">' +
+          (tot ? 'missed ' + ms + ' of ' + tot : 'no data') + '</span>' +
+        '</div>';
+    }).join('');
+
+    A.ui.modal({
+      title: '🤔 Why am I struggling?',
+      accent: acc,
+      body:
+        '<div class="row" style="margin-bottom:8px"><span class="avatar sm">' + esc(h.emoji || '🌱') + '</span>' +
+          '<span class="bold">' + esc(h.title) + '</span></div>' +
+        '<p class="muted small">No judgement here — struggling habits are a scheduling problem, not a character flaw. Here’s what the last 4 weeks say:</p>' +
+        '<div class="card-title" style="margin-top:12px">📅 Misses by weekday</div>' +
+        rowsHTML +
+        '<p class="small bold h-acc" style="margin-top:12px">💡 ' + callout + '</p>' +
+        '<p class="muted small" style="margin-top:10px">' + gapNote + '</p>' +
+        '<div class="card-title" style="margin-top:12px">🛠️ Two things to try</div>' +
+        '<p class="small" style="margin-top:6px"><span class="bold">1.</span> ' + shrink + '</p>' +
+        '<p class="small" style="margin-top:6px"><span class="bold">2.</span> ' + anchor + '</p>',
+      actions: [
+        { label: 'Got it', cls: 'btn-ghost' },
+        {
+          label: '✏️ Shrink this habit',
+          cls: 'btn-primary',
+          onClick: function () { openHabitModal(habitId); }
         }
       ]
     });
@@ -161,7 +385,9 @@
       ticks30 += ticksLast30(h, t);
     });
     var consistency = habits.length ? Math.round(100 * ticks30 / (habits.length * 30)) : 0;
-    return '<div class="grid4">' +
+    var perfect = habits.length > 0 && habits.every(function (h) { return !!(h.log && h.log[t]); });
+    return '<div>' +
+      '<div class="grid4">' +
       '<div class="card acc-orange"><div class="stat">' +
         '<div class="v">🔥 ' + best + (best === 1 ? ' day' : ' days') + '</div><div class="k">Best streak</div></div></div>' +
       '<div class="card acc-cyan"><div class="stat">' +
@@ -170,10 +396,28 @@
         '<div class="v">' + habits.length + '</div><div class="k">Habit' + (habits.length === 1 ? '' : 's') + '</div></div></div>' +
       '<div class="card acc-purple"><div class="stat">' +
         '<div class="v h-acc">' + consistency + '%</div><div class="k">30-day consistency</div></div></div>' +
+      '</div>' +
+      (perfect
+        ? '<div style="margin-top:10px;text-align:center"><span class="tag acc-yellow">🌟 All habits done today</span></div>'
+        : '') +
       '</div>';
   }
 
-  function habitCardHTML(h, t) {
+  function weekGraphHTML(h, t) {
+    var weeks = weeklyCounts(h, t);
+    var cols = weeks.map(function (n, i) {
+      var hpx = Math.max(3, Math.round(36 * n / 7));
+      var weeksAgo = 7 - i;
+      var label = (weeksAgo === 0 ? 'This week' : weeksAgo + (weeksAgo === 1 ? ' week ago' : ' weeks ago')) +
+        ': ' + n + '/7';
+      return '<div title="' + label + '" style="flex:1;max-width:22px;height:' + hpx +
+        'px;background:var(--accB);border-radius:3px 3px 0 0;opacity:' + (n ? '1' : '.3') + '"></div>';
+    }).join('');
+    return '<div style="display:flex;align-items:flex-end;gap:4px;height:36px;margin-top:14px">' + cols + '</div>' +
+      '<div class="small dim" style="margin-top:4px">8-week consistency</div>';
+  }
+
+  function habitCardHTML(h, t, goalById) {
     var esc = A.ui.esc;
     var acc = safeAccent(h.accent);
     var streak = A.engine.habitStreak(h);
@@ -198,6 +442,16 @@
       }
     }
 
+    // Metadata: linked goal tag + difficulty tag + preferred-time sub note.
+    var goal = h.goalId ? goalById[h.goalId] : null;
+    var metaTags = '';
+    if (goal) metaTags += '<span class="tag">🎯 ' + esc(goal.title) + '</span>';
+    if (h.difficulty && DIFF_TAG[h.difficulty]) metaTags += '<span class="tag">' + DIFF_TAG[h.difficulty] + '</span>';
+    var metaHTML = metaTags ? '<div class="row wrap" style="margin-top:10px;gap:6px">' + metaTags + '</div>' : '';
+    var timeNote = (h.preferredTime && TIME_NOTE[h.preferredTime])
+      ? '<div class="li-sub">' + TIME_NOTE[h.preferredTime] + '</div>'
+      : '';
+
     var daysHTML = last7(t).map(function (iso) {
       var isToday = iso === t;
       var on = !!(h.log && h.log[iso]);
@@ -208,6 +462,13 @@
         '>' + dayLetter(iso) + '</button>';
     }).join('');
 
+    // Struggle helper — only for habits old enough to have a real pattern.
+    var struggling = ageDays(h, t, 30) >= 7 && completionRate30(h, t) < 0.6;
+    var whyHTML = struggling
+      ? '<div style="margin-top:12px"><button class="btn btn-sm btn-ghost" data-why="' + esc(h.id) +
+        '" title="A kind look at the data">🤔 Why am I struggling?</button></div>'
+      : '';
+
     return '<div class="card acc glow acc-' + acc + '">' +
       '<div class="spread">' +
         '<div class="row" style="min-width:0">' +
@@ -215,6 +476,7 @@
           '<div class="li-main">' +
             '<div class="li-title">' + esc(h.title) + '</div>' +
             '<div class="li-sub">🔥 ' + streak + ' day streak · target ' + target + '/week</div>' +
+            timeNote +
           '</div>' +
         '</div>' +
         '<div class="row">' +
@@ -222,6 +484,7 @@
           '<button class="icon-btn danger" data-del="' + esc(h.id) + '" title="Delete habit" aria-label="Delete habit">' + A.ui.icon('trash', 'sm') + '</button>' +
         '</div>' +
       '</div>' +
+      metaHTML +
       warnHTML +
       '<div class="small muted" style="margin:12px 0 6px">Last 7 days</div>' +
       '<div class="habit-days">' + daysHTML + '</div>' +
@@ -230,6 +493,8 @@
         (hit ? '<span class="tag acc-' + acc + '">🎉 Weekly target hit!</span>' : '') +
       '</div>' +
       '<div class="bar" style="margin-top:6px"><span class="bar-fill" style="width:' + pct + '%"></span></div>' +
+      weekGraphHTML(h, t) +
+      whyHTML +
       '</div>';
   }
 
@@ -272,12 +537,15 @@
     var archived = all.filter(function (h) { return !!h.archived; });
     var t = A.ui.todayISO();
 
+    var goalById = {};
+    (s.goals || []).forEach(function (g) { goalById[g.id] = g; });
+
     var body;
     if (!habits.length) {
       body = emptyHTML();
     } else {
       body = '<div class="grid2 section-gap">' +
-        habits.map(function (h) { return habitCardHTML(h, t); }).join('') +
+        habits.map(function (h) { return habitCardHTML(h, t, goalById); }).join('') +
         '</div>';
     }
 
@@ -291,6 +559,10 @@
 
     el.querySelectorAll('[data-edit]').forEach(function (b) {
       b.addEventListener('click', function () { openHabitModal(b.getAttribute('data-edit')); });
+    });
+
+    el.querySelectorAll('[data-why]').forEach(function (b) {
+      b.addEventListener('click', function () { openWhyModal(b.getAttribute('data-why')); });
     });
 
     el.querySelectorAll('[data-tick]').forEach(function (b) {

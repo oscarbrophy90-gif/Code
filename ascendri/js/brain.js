@@ -1,7 +1,12 @@
 /* Acendri OS — the brain (js/brain.js)
    Local, deterministic NLU + response generation for the assistant.
    Loads right after core.js. Only reads A.S / A.ui / A.engine lazily inside
-   functions (never at load time). No network, no frameworks. */
+   functions (never at load time). No network, no frameworks.
+   v2: buildLifePlan (goal -> milestones -> linked sessions -> timetable ->
+   habits in one update), exam detection -> revision plans, unfinished-work
+   rescue, weekly-review replies, and CMD actions ({label, cmd:{type,taskId?}}
+   with types reschedule|focus|rebuild|review|dismiss) that the assistant
+   screen executes — the brain only emits JSON-safe descriptors. */
 (function () {
   'use strict';
   var A = window.Ascendri;
@@ -645,6 +650,11 @@
   /* ========================= respond() helpers ======================== */
   function act(label, screen) { return { label: label, screen: screen }; }
 
+  /* CMD action: a serializable descriptor the ASSISTANT executes.
+     types: reschedule (taskId) | focus (taskId) | rebuild | review | dismiss.
+     Keep these plain JSON — they persist in assistant history. */
+  function cmdAct(label, cmd) { return { label: label, cmd: cmd }; }
+
   function reply(text, actions) { return { text: text, actions: actions || [] }; }
 
   function activeGoals(st) { return (st.goals || []).filter(function (g) { return g.status !== 'done'; }); }
@@ -702,6 +712,217 @@
     return { created: created, placed: placed, unplaced: (st.timetable && st.timetable.unplaced || []).length };
   }
 
+  /* ========================= buildLifePlan ============================
+     The flagship: one ambition in, a connected structure out —
+     Goal -> Milestones -> Session tasks (linked to milestone 1) ->
+     Timetable placement -> Two supporting habits. One single update. */
+  function habitsForCategory(category, topic) {
+    if (category === 'Sport') return [
+      ['Daily ' + (topic || 'skills') + ' practice', '🏅', 'green', 6],
+      ['Conditioning & stretching', '💪', 'orange', 3]
+    ];
+    if (category === 'Study') return [
+      ['Daily study hour', '📚', 'blue', 6],
+      ['Morning review of notes', '🌅', 'cyan', 5]
+    ];
+    if (category === 'Finance') return [
+      ['Log every expense', '🧾', 'yellow', 7],
+      ['Weekly savings transfer', '💰', 'green', 1]
+    ];
+    if (category === 'Career') return [
+      ['Daily skill practice', '🛠️', 'purple', 5],
+      ['Weekly plan & reflection', '📝', 'indigo', 1]
+    ];
+    if (category === 'Health') return [
+      ['Daily movement (30 min)', '🏃', 'orange', 7],
+      ['Wind down before bed', '😴', 'purple', 7]
+    ];
+    return [
+      ['Daily practice' + (topic ? ': ' + topic : ''), '✨', 'cyan', 6],
+      ['Weekly review & plan', '📝', 'teal', 1]
+    ];
+  }
+
+  function buildLifePlan(text) {
+    var Aw = window.Ascendri, ui = Aw.ui, E = Aw.engine;
+    var draft = goalFromText(text);
+    var c = classify(text);
+    var topic = (c.slots && c.slots.topic) || null;
+    var taskDrafts = tasksFromText(text).slice(0, 5);
+    var goalId = ui.uid();
+    var milestones = (draft.milestones || []).map(function (m) {
+      return { id: ui.uid(), title: m, done: false };
+    });
+    var firstMilestoneId = milestones.length ? milestones[0].id : null;
+    var habitDefs = habitsForCategory(draft.category, topic);
+    var newTaskIds = [];
+    var placedCount = 0;
+    Aw.S.update(function (s) {
+      s.goals = s.goals || []; s.tasks = s.tasks || []; s.habits = s.habits || [];
+      var now = Date.now();
+      // (a) the goal
+      s.goals.push({
+        id: goalId, title: draft.title, category: draft.category,
+        accent: draft.accent, why: draft.why, targetDate: null, status: 'active',
+        milestones: milestones, createdAt: now
+      });
+      // (b) two supporting habits, linked to the goal
+      habitDefs.forEach(function (h, ix) {
+        s.habits.push({
+          id: ui.uid(), title: h[0], emoji: h[1], accent: h[2],
+          targetPerWeek: h[3], goalId: goalId, log: {}, createdAt: now + ix
+        });
+      });
+      // (c) session tasks over the coming week, linked to milestone 1 so
+      //     core auto-completes it when the last one is ticked
+      taskDrafts.forEach(function (t, ix) {
+        var id = ui.uid();
+        newTaskIds.push(id);
+        s.tasks.push({
+          id: id, title: t.title, priority: t.priority, due: t.due,
+          duration: t.duration, done: false, goalId: goalId,
+          milestoneId: firstMilestoneId || undefined, createdAt: now + ix
+        });
+      });
+      // (d) place them — add to an existing week, only generate when blank
+      if (s.timetable && E.addTasksToTimetable) {
+        placedCount = (E.addTasksToTimetable(s, newTaskIds) || { placed: 0 }).placed;
+      } else if (E.generateTimetable) {
+        E.generateTimetable(s);
+        var mine = {};
+        newTaskIds.forEach(function (id) { mine[id] = true; });
+        if (s.timetable && s.timetable.days) {
+          Object.keys(s.timetable.days).forEach(function (d) {
+            s.timetable.days[d].forEach(function (b) {
+              if (b.type === 'task' && mine[b.refId]) placedCount++;
+            });
+          });
+        }
+      }
+      // (e) one-shot flag -> unlocks the ai-architect achievement (core-checked)
+      s.flags = s.flags || {};
+      s.flags.aiPlanBuilt = true;
+    }, { silent: true });
+    if (Aw.S.log) Aw.S.log('Acendri AI built a full plan for "' + draft.title + '"', '🤖');
+    return {
+      goalTitle: draft.title,
+      category: draft.category,
+      milestones: milestones.map(function (m) { return m.title; }),
+      firstMilestone: milestones.length ? milestones[0].title : null,
+      habits: habitDefs.map(function (h) { return h[1] + ' ' + h[0]; }),
+      sessionsCreated: newTaskIds.length,
+      sessionsPlaced: placedCount
+    };
+  }
+
+  function lifePlanReply(p) {
+    var msLines = p.milestones.map(function (m, ix) { return '   ' + (ix + 1) + '. ' + m; }).join('\n');
+    var txt = 'Big ambition — I built the whole structure for it, top to bottom:\n\n' +
+      '🎯 Goal: “' + p.goalTitle + '” (' + p.category + ')\n' +
+      '🏁 Milestones (' + p.milestones.length + '):\n' + msLines + '\n' +
+      '✅ Sessions: ' + p.sessionsCreated + ' tasks spread over the coming week, all linked to milestone 1' +
+      (p.firstMilestone ? ' (“' + p.firstMilestone + '”)' : '') +
+      ' — tick the last one and the milestone completes itself automatically (+25 XP).\n' +
+      '📅 Timetable: ' + p.sessionsPlaced + ' of ' + p.sessionsCreated + ' placed into free slots' +
+      (p.sessionsPlaced < p.sessionsCreated ? ' (the rest wait on your task list for space)' : '') + '.\n' +
+      '🔁 Habits: ' + p.habits.join('  ·  ') + ' — both wired to the goal.\n\n' +
+      'Goal → milestones → tasks → timetable → habits. All connected. Now we execute.';
+    return reply(txt, [act('Open goals', 'app/goals'), act('See timetable', 'app/schedule')]);
+  }
+
+  /* =========================== exam detection ========================= */
+  var EXAM_RE = /\b(test|exam|assessment)\b/;
+  var DAY_IDX = {
+    sunday: 0, sun: 0, monday: 1, mon: 1, tuesday: 2, tues: 2, tue: 2,
+    wednesday: 3, wed: 3, thursday: 4, thurs: 4, thur: 4, thu: 4,
+    friday: 5, fri: 5, saturday: 6, sat: 6
+  };
+
+  function parseExamDate(s) {
+    var ui = window.Ascendri.ui;
+    var today = ui.todayISO();
+    var m = s.match(/\bin (\d{1,2}) days?\b/);
+    if (m) {
+      var nd = parseInt(m[1], 10);
+      if (nd >= 1 && nd <= 60) return ui.addDaysISO(today, nd);
+      return null;
+    }
+    if (/\btomorrow\b/.test(s)) return ui.addDaysISO(today, 1);
+    m = s.match(/\b(next )?(sunday|sun|monday|mon|tuesday|tues|tue|wednesday|wed|thursday|thurs|thur|thu|friday|fri|saturday|sat)\b/);
+    if (m) {
+      var target = DAY_IDX[m[2]];
+      if (target === undefined) return null;
+      var offset = (target - new Date().getDay() + 7) % 7;
+      var min = m[1] ? 4 : 1; // "next friday" -> at least 4 days ahead
+      while (offset < min) offset += 7;
+      return ui.addDaysISO(today, offset);
+    }
+    return null;
+  }
+
+  function examTitleFrom(s) {
+    var kind = (s.match(EXAM_RE) || [])[1] || 'test';
+    var subj = (s.match(SUBJECT_RE) || [])[0] || null;
+    return subj ? cap(subj) + ' ' + kind : cap(kind);
+  }
+
+  function buildExamPlan(s2, dateISO) {
+    var Aw = window.Ascendri, ui = Aw.ui, E = Aw.engine;
+    var title = examTitleFrom(s2);
+    var examId = ui.uid();
+    var res = null;
+    Aw.S.update(function (s) {
+      if (!s.learning) s.learning = { subjects: [], exams: [] };
+      if (!s.learning.exams) s.learning.exams = [];
+      if (!s.reminders) s.reminders = [];
+      s.learning.exams.push({ id: examId, title: title, subjectId: null, date: dateISO });
+      if (E.buildRevisionPlan) res = E.buildRevisionPlan(s, examId);
+    }, { silent: true });
+    if (res && res.created) Aw.S.addXp(10, 'Revision plan built');
+    return { title: title, date: dateISO, res: res };
+  }
+
+  /* ======================= unfinished-work detection =================== */
+  var UNFIN_RE = new RegExp(
+    '\\b(didn t finish|didnt finish|did not finish|couldn t finish|couldnt finish|could not finish|' +
+    'didn t complete|didnt complete|didn t get to|didnt get to|never got to|' +
+    'haven t finished|havent finished)\\b' +
+    '|\\bmissed my\\b.*\\b(homework|task|essay|revision|assignment|study|session|training|practice|reading|workout|deadline)\\b'
+  );
+  var UNFIN_SKIP_INTENTS = {
+    troubleshooting: 1, app_navigation: 1, reminder_management: 1,
+    finance_management: 1, purchase_budgeting: 1, social_management: 1
+  };
+  var UNFIN_STOP = {
+    the: 1, and: 1, but: 1, for: 1, was: 1, not: 1, did: 1, didn: 1, didnt: 1,
+    couldn: 1, couldnt: 1, could: 1, never: 1, got: 1, get: 1, havent: 1, haven: 1,
+    finish: 1, finished: 1, complete: 1, completed: 1, missed: 1, today: 1,
+    yesterday: 1, tonight: 1, this: 1, last: 1, week: 1, night: 1, morning: 1,
+    afternoon: 1, evening: 1, really: 1, still: 1, sorry: 1, task: 1, work: 1,
+    time: 1, that: 1, what: 1, with: 1, all: 1, off: 1
+  };
+
+  function findUnfinishedTask(st, s2) {
+    var open = (st.tasks || []).filter(function (t) { return !t.done; });
+    if (!open.length) return null;
+    var words = s2.split(' ').filter(function (w) { return w.length > 2 && !UNFIN_STOP[w]; });
+    var best = null, bestScore = 0;
+    open.forEach(function (t) {
+      var title = String(t.title || '').toLowerCase();
+      var sc = 0;
+      words.forEach(function (w) { if (title.indexOf(w) >= 0) sc++; });
+      if (sc > bestScore) { best = t; bestScore = sc; }
+    });
+    if (best) return best;
+    // no topic match -> the most overdue open task
+    var withDue = open.filter(function (t) { return t.due; });
+    withDue.sort(function (a, b) { return a.due < b.due ? -1 : a.due > b.due ? 1 : 0; });
+    return withDue[0] || open[0];
+  }
+
+  /* ========================= review-my-week =========================== */
+  var REVIEW_RE = /\breview my week\b|\bmy week(ly)? review\b|\bweekly review\b|\blast week s review\b|\bweek in review\b/;
+
   var QUOTES = [
     '“Success is the sum of small efforts repeated day in and day out.”',
     '“You don’t have to be great to start, but you have to start to be great.”',
@@ -744,7 +965,72 @@
     var intent = c.intent;
     var i;
 
+    /* ---------------- "review my week" (any intent) ---------------- */
+    if (REVIEW_RE.test(s2)) {
+      var lw = st.lastWeekReview;
+      if (lw) {
+        var rvTxt = 'Your week in review (' + ui.fmtDate(lw.weekStart) + ' → ' + ui.fmtDate(lw.weekEnd) + '):\n' +
+          '• Timetable: ' + (lw.blocksDone || 0) + '/' + (lw.blocksTotal || 0) + ' blocks completed\n' +
+          '• ' + (lw.tasksDone || 0) + ' tasks done · ' + (lw.habitTicks || 0) + ' habit ticks · ' + (lw.focusSessions || 0) + ' focus session' + ((lw.focusSessions || 0) !== 1 ? 's' : '') + '\n' +
+          '• ' + (lw.xpEarned || 0) + ' XP earned' +
+          ((lw.goalsMoved && lw.goalsMoved.length) ? '\n• Goals that moved: ' + lw.goalsMoved.join(', ') : '') +
+          ((lw.unfinished && lw.unfinished.length) ? '\n• Rolled over unfinished: ' + lw.unfinished.slice(0, 3).join(', ') : '') +
+          '\n\nThe full story is on your Review screen.';
+        return reply(rvTxt, [act('Open review', 'app/review')]);
+      }
+      return reply('Your first weekly review appears once a planned week wraps up — the timetable settles after its 7 days and I write up how it went. Keep this week rolling and check back.', [act('Open review', 'app/review')]);
+    }
+
+    /* -------------- unfinished work ("I didn't finish…") -------------- */
+    if (!UNFIN_SKIP_INTENTS[intent] && UNFIN_RE.test(s2)) {
+      var utask = findUnfinishedTask(st, s2);
+      if (!utask) {
+        return reply('I looked, and your task list is actually all clear — nothing open to reschedule. If it never made it onto the list, tell me what it was and I’ll add it with a due date.', [act('Open tasks', 'app/tasks')]);
+      }
+      if (st.settings && st.settings.autoReschedule) {
+        var tmr = ui.addDaysISO(ui.todayISO(), 1);
+        Aw.S.update(function (s) {
+          var tk = (s.tasks || []).filter(function (x) { return x.id === utask.id; })[0];
+          if (tk) tk.due = tmr;
+          if (E.rebuildWeek) E.rebuildWeek(s);
+        }, { silent: true });
+        return reply('No stress — it happens. Auto-reschedule is on, so I’ve moved “' + utask.title + '” to ' + ui.fmtDate(tmr) + ' and rebuilt this week’s timetable around it. Everything already done stayed exactly where it was.', [act('See timetable', 'app/schedule'), act('Open tasks', 'app/tasks')]);
+      }
+      return reply('No stress — “' + utask.title + '” is still open' + (utask.due ? ' (due ' + ui.fmtDate(utask.due) + ')' : '') + '. Want me to move it to tomorrow and rearrange the week around it?', [
+        cmdAct('Reschedule to tomorrow', { type: 'reschedule', taskId: utask.id }),
+        cmdAct('Leave it', { type: 'dismiss' })
+      ]);
+    }
+
+    /* ------- exam detection ("maths test next Friday") ------- */
+    if ((intent === 'study_management' || intent === 'general_conversation') && EXAM_RE.test(s2)) {
+      var exDate = parseExamDate(s2);
+      if (exDate) {
+        var ex = buildExamPlan(s2, exDate);
+        var er = ex.res || {};
+        var exTxt;
+        if (er.created) {
+          exTxt = 'Locked in: ' + ex.title + ' on ' + ui.fmtDate(ex.date) + '. Here’s what I set up:\n' +
+            '• ' + er.created + ' revision session' + (er.created !== 1 ? 's' : '') + ' spread across the days before it — never one cram night\n' +
+            '• ' + (er.placed || 0) + ' of them placed straight onto your timetable' + ((er.placed || 0) < er.created ? ' (the rest wait on your task list for space)' : '') + '\n' +
+            '• A reminder for exam day under the bell\n\nTick the sessions off as you go and you’ll walk in prepared.';
+        } else {
+          exTxt = 'Noted: ' + ex.title + ' on ' + ui.fmtDate(ex.date) + ' — it’s on your Learning screen. I couldn’t fit revision sessions before it, so build them from there when you’re ready.';
+        }
+        return reply(exTxt, [act('Open learning', 'app/learning'), act('See timetable', 'app/schedule')]);
+      }
+    }
+
     /* ---------------- goal_management ---------------- */
+    /* ------- strong ambitions get the full plan builder, whatever the surface intent -------
+       "I want to become a professional tennis player" scores as training_management,
+       but it's an ambition — ambitions get the whole Goal→Milestones→Tasks→Week plan. */
+    if ((intent === 'training_management' || intent === 'career_planning' || intent === 'personal_development' ||
+         intent === 'study_management' || intent === 'general_conversation' || intent === 'wellbeing_support') &&
+        /\bi (really )?(want|would love|wanna|dream) (to )?(be|become)\b|\bbecome a (professional|pro)\b|\bmy dream is\b|\bmake the\b.*\b(team|squad)\b/.test(s2)) {
+      return lifePlanReply(buildLifePlan(text));
+    }
+
     if (intent === 'goal_management') {
       var wantsCreate = /\b(set|create|make|add|start|new)\b.*\bgoal\b|\bgoal\b.*\b(for|about)\b|\bi want to\b|\binto a (proper|real) goal\b|\bturn my idea\b|\bhelp me (achieve|reach)\b/.test(s2);
       var asksProgress = /\btrack my progress\b|\bhow (is|are|am)\b|\breview\b|\bnext milestone\b|\bstay consistent\b|\bstuck\b|\bsmaller steps\b/.test(s2);
@@ -756,15 +1042,14 @@
         for (i = hist.length - 1; i >= 0; i--) {
           if (hist[i].role === 'user' && norm(hist[i].text) !== s2) { prevUser = hist[i].text; break; }
         }
-        var dFollow = goalFromText(prevUser || text);
-        createGoalFromDraft(dFollow);
-        return reply('Done — created goal “' + dFollow.title + '” (' + dFollow.category + ') with ' + dFollow.milestones.length + ' milestones ready to tick off.', [act('Open goals', 'app/goals')]);
+        var pFollow = buildLifePlan(prevUser || text);
+        return lifePlanReply(pFollow);
       }
       if (wantsCreate && !asksProgress) {
-        var draft = goalFromText(text);
-        createGoalFromDraft(draft);
-        var steps = draft.milestones.map(function (m, ix) { return (ix + 1) + '. ' + m; }).join('\n');
-        return reply('Created goal “' + draft.title + '” (' + draft.category + ') with these steps:\n' + steps + '\n\nWhy it matters: ' + draft.why, [act('Open goals', 'app/goals')]);
+        // CREATE -> the full connected plan: goal + milestones + linked
+        // sessions on the timetable + two supporting habits, in one update.
+        var pFull = buildLifePlan(text);
+        return lifePlanReply(pFull);
       }
       var ag = activeGoals(st);
       if (!ag.length) {
@@ -810,11 +1095,14 @@
     /* ---------------- productivity_support ---------------- */
     if (intent === 'productivity_support') {
       var sugg = E.focusSuggestions(4) || [];
+      var topPri = (E.priorities ? E.priorities(1) : [])[0] || null;
+      var prodActs = [act('Open tasks', 'app/tasks'), act('See timetable', 'app/schedule')];
+      if (topPri) prodActs.unshift(cmdAct('Start Focus Mode', { type: 'focus', taskId: topPri.id }));
       if (!sugg.length) {
-        return reply('Nothing urgent on the radar — nice. A good move now: pick tomorrow’s top task tonight, or add one small task so momentum never stops.', [act('Open tasks', 'app/tasks'), act('See timetable', 'app/schedule')]);
+        return reply('Nothing urgent on the radar — nice. A good move now: pick tomorrow’s top task tonight, or add one small task so momentum never stops.' + (topPri ? ' Or dive straight into “' + topPri.title + '” with a Focus session below.' : ''), prodActs);
       }
       var list = sugg.map(function (x, ix) { return (ix + 1) + '. ' + x.text; });
-      return reply('Here’s what matters most right now:\n' + list.join('\n'), [act('Open tasks', 'app/tasks'), act('See timetable', 'app/schedule')]);
+      return reply('Here’s what matters most right now:\n' + list.join('\n') + (topPri ? '\n\nBest move: a distraction-free Focus session on “' + topPri.title + '” — one tap below.' : ''), prodActs);
     }
 
     /* ---------------- habit_management ---------------- */
@@ -925,7 +1213,9 @@
       var bestStreak = 0;
       activeHabits(st).forEach(function (h) { var v = E.habitStreak(h); if (v > bestStreak) bestStreak = v; });
       var doneGoals = (st.goals || []).filter(function (g) { return g.status === 'done'; }).length;
-      return reply('Your scoreboard:\n• Level ' + lp.level + ' — ' + lp.into + '/' + lp.span + ' XP into this level (' + lp.pct + '%)\n• ' + unlocked + (totalAch ? ' of ' + totalAch : '') + ' achievements unlocked\n• ' + doneTasks + ' tasks completed, ' + doneGoals + ' goal' + (doneGoals !== 1 ? 's' : '') + ' finished\n• Best habit streak: ' + bestStreak + ' day' + (bestStreak !== 1 ? 's' : '') + '\n\nKeep stacking wins — the next level is closer than it looks.', [act('Open achievements', 'app/achievements')]);
+      var ptActs = [act('Open achievements', 'app/achievements')];
+      if (st.lastWeekReview) ptActs.push(act('Review my week', 'app/review'));
+      return reply('Your scoreboard:\n• Level ' + lp.level + ' — ' + lp.into + '/' + lp.span + ' XP into this level (' + lp.pct + '%)\n• ' + unlocked + (totalAch ? ' of ' + totalAch : '') + ' achievements unlocked\n• ' + doneTasks + ' tasks completed, ' + doneGoals + ' goal' + (doneGoals !== 1 ? 's' : '') + ' finished\n• Best habit streak: ' + bestStreak + ' day' + (bestStreak !== 1 ? 's' : '') + '\n\nKeep stacking wins — the next level is closer than it looks.', ptActs);
     }
 
     /* ---------------- app_navigation ---------------- */
@@ -943,10 +1233,14 @@
       if (/timetable|schedule/.test(s2)) {
         var openTasks = (st.tasks || []).filter(function (t) { return !t.done; }).length;
         var cause;
+        var tsActs = [act('Open timetable', 'app/schedule')];
         if (!st.timetable) cause = 'it looks like a timetable hasn’t been generated yet — hit Generate on the timetable screen and I’ll lay your week out.';
-        else if (!openTasks) cause = 'all your tasks are done, so there’s nothing new to place — add tasks and hit Regenerate.';
-        else cause = 'it only refreshes when you regenerate it — hit Regenerate on the timetable screen and your ' + openTasks + ' open task' + (openTasks !== 1 ? 's' : '') + ' will be re-placed.';
-        return reply('Sorry about that — ' + cause, [act('Open timetable', 'app/schedule')]);
+        else if (!openTasks) cause = 'all your tasks are done, so there’s nothing new to place — add tasks and I’ll fit them in.';
+        else {
+          cause = 'new and changed tasks only land on the grid when the week is re-placed. I can do that right now — tap Rebuild below and your ' + openTasks + ' open task' + (openTasks !== 1 ? 's' : '') + ' get re-placed around everything already done (nothing finished moves).';
+          tsActs.unshift(cmdAct('Rebuild my week', { type: 'rebuild' }));
+        }
+        return reply('Sorry about that — ' + cause, tsActs);
       }
       if (/goal/.test(s2)) {
         var dg = (st.goals || []).filter(function (g) { return g.status === 'done'; }).length;
@@ -1048,6 +1342,7 @@
     goalFromText: goalFromText,
     tasksFromText: tasksFromText,
     planFromText: planFromText,
+    buildLifePlan: buildLifePlan,
     respond: respond
   };
 })();

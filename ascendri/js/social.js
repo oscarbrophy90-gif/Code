@@ -30,6 +30,41 @@
     'Show up every day until it’s done'
   ];
 
+  var GROUP_EMOJIS = ['🏀', '📚', '🎮', '🏋️', '🎨', '🌱', '💻', '🎾'];
+
+  /* Built-in challenges — progress is computed live from REAL app data. */
+  var CHALLENGES = [
+    {
+      id: 'c-tasks', emoji: '⚡', title: 'Task Blitz',
+      desc: 'Complete 10 tasks this week', target: 10,
+      metric: function (s) {
+        var since = Date.now() - 7 * 86400000;
+        return (s.tasks || []).filter(function (t) {
+          return t && t.done && (t.doneAt || 0) >= since;
+        }).length;
+      }
+    },
+    {
+      id: 'c-streak', emoji: '🔥', title: 'Streak Keeper',
+      desc: 'Reach a 5-day streak on any habit', target: 5,
+      metric: function (s) {
+        var best = 0;
+        (s.habits || []).forEach(function (h) {
+          if (!h || h.archived || !h.log) return;
+          if (!(A.engine && A.engine.habitStreak)) return;
+          var st = A.engine.habitStreak(h);
+          if (st > best) best = st;
+        });
+        return best;
+      }
+    },
+    {
+      id: 'c-focus', emoji: '🎧', title: 'Focus Five',
+      desc: 'Finish 5 focus sessions', target: 5,
+      metric: function (s) { return (s.focus && s.focus.sessions) || 0; }
+    }
+  ];
+
   /* ---------------- helpers ---------------- */
 
   function safeAccent(name, fallback) {
@@ -54,6 +89,7 @@
     st.social.feed = st.social.feed || [];
     st.social.groups = st.social.groups || [];
     st.social.paths = st.social.paths || [];
+    st.social.challenges = st.social.challenges || {};
     return st.social;
   }
 
@@ -381,34 +417,171 @@
 
   /* ================= GROUPS ================= */
 
-  function groupsHTML(s) {
+  function challengesHTML(s) {
     var esc = A.ui.esc;
-    var groups = socialOf(s).groups || [];
-    if (!groups.length) {
-      return '<div class="empty"><div class="e-emoji">👥</div>' +
-        '<p>No groups around right now — hang out in the feed while the community grows.</p>' +
-        '<button class="btn btn-acc acc-pink" data-goto-feed>🌍 Back to the feed</button></div>';
-    }
-    return '<div class="grid2">' + groups.map(function (g) {
-      var acc = safeAccent(g.accent, 'teal');
-      return '<div class="card acc acc-' + acc + '">' +
-        '<div class="row">' +
-          '<span class="avatar lg">' + esc(g.emoji || '👥') + '</span>' +
-          '<div class="li-main">' +
-            '<div class="bold">' + esc(g.name) + '</div>' +
-            '<div class="muted small">' + (g.members || 0) + ' members</div>' +
+    var joined = socialOf(s).challenges || {};
+    var h = '<div class="card acc acc-teal">' +
+      '<div class="card-title">🏁 Challenges</div>' +
+      '<div class="muted small" style="margin-bottom:6px">Community challenges powered by your real activity — the bars move whether you’ve joined or not.</div>' +
+      '<div class="list">';
+    CHALLENGES.forEach(function (c) {
+      var m = c.metric(s);
+      var pct = Math.min(100, Math.round(100 * m / c.target));
+      var rec = joined[c.id];
+      var complete = m >= c.target;
+      h += '<div class="list-item">' +
+        '<div class="li-main">' +
+          '<div class="row wrap" style="gap:8px">' +
+            '<span class="li-title">' + esc(c.emoji + ' ' + c.title) + '</span>' +
+            (rec ? '<span class="tag">✓ Joined</span>' : '') +
+            (rec && complete ? '<span class="pill acc-teal">🏆 Complete!</span>' : '') +
           '</div>' +
-          (g.joined ? '<span class="pill">✓ Joined</span>' : '') +
+          '<div class="li-sub">' + esc(c.desc) + '</div>' +
+          '<div class="row" style="margin-top:7px;align-items:center;gap:10px">' +
+            '<div class="bar" style="flex:1;min-width:120px"><span class="bar-fill" style="width:' + pct + '%"></span></div>' +
+            '<span class="small muted" style="white-space:nowrap">' + m + '/' + c.target + '</span>' +
+          '</div>' +
         '</div>' +
-        '<p class="muted small" style="margin:10px 0 12px">' + esc(g.desc || '') + '</p>' +
-        '<div class="row wrap">' +
-          (g.joined
-            ? '<button class="btn btn-sm btn-ghost" data-leave="' + esc(g.id) + '">Leave</button>'
-            : '<button class="btn btn-sm btn-acc" data-join="' + esc(g.id) + '">Join</button>') +
-          '<button class="btn btn-sm" data-lb="' + esc(g.id) + '">🏆 Leaderboard</button>' +
-        '</div>' +
+        (rec ? '' : '<button class="btn btn-sm btn-acc" data-cjoin="' + esc(c.id) + '">Join</button>') +
       '</div>';
-    }).join('') + '</div>';
+    });
+    h += '</div></div>';
+    return h;
+  }
+
+  /* One-time +15 XP per completed challenge; the rewarded flag is written in a
+     silent update BEFORE the XP award, so re-renders can never double-award. */
+  function checkChallengeRewards() {
+    var s = A.S.get();
+    var joined = (s.social && s.social.challenges) || null;
+    if (!joined) return;
+    var newly = [];
+    CHALLENGES.forEach(function (c) {
+      var rec = joined[c.id];
+      if (rec && !rec.rewarded && c.metric(s) >= c.target) newly.push(c);
+    });
+    if (!newly.length) return;
+    A.S.update(function (st) {
+      var so = ensureSocial(st);
+      newly.forEach(function (c) {
+        if (!so.challenges[c.id]) so.challenges[c.id] = { joinedAt: Date.now() };
+        so.challenges[c.id].rewarded = true;
+      });
+    }, { silent: true });
+    newly.forEach(function (c) {
+      A.S.addXp(15, 'Challenge complete: ' + c.title);
+    });
+  }
+
+  function groupCardHTML(g) {
+    var esc = A.ui.esc;
+    var acc = safeAccent(g.accent, 'teal');
+    return '<div class="card acc acc-' + acc + '">' +
+      '<div class="row">' +
+        '<span class="avatar lg">' + esc(g.emoji || '👥') + '</span>' +
+        '<div class="li-main">' +
+          '<div class="bold">' + esc(g.name) + '</div>' +
+          '<div class="muted small">' + (g.members || 0) + ' members</div>' +
+        '</div>' +
+        (g.mine
+          ? '<span class="pill">Your group</span>'
+          : (g.joined ? '<span class="pill">✓ Joined</span>' : '')) +
+      '</div>' +
+      '<p class="muted small" style="margin:10px 0 12px">' + esc(g.desc || '') + '</p>' +
+      '<div class="row wrap">' +
+        (g.mine
+          ? '<button class="icon-btn danger" data-delgroup="' + esc(g.id) + '" title="Delete group" aria-label="Delete group">' + A.ui.icon('trash', 'sm') + '</button>'
+          : (g.joined
+            ? '<button class="btn btn-sm btn-ghost" data-leave="' + esc(g.id) + '">Leave</button>'
+            : '<button class="btn btn-sm btn-acc" data-join="' + esc(g.id) + '">Join</button>')) +
+        '<button class="btn btn-sm" data-lb="' + esc(g.id) + '">🏆 Leaderboard</button>' +
+      '</div>' +
+    '</div>';
+  }
+
+  function groupsHTML(s) {
+    var groups = socialOf(s).groups || [];
+    var h = challengesHTML(s);
+    h += '<div class="spread section-gap" style="margin-bottom:14px">' +
+      '<span class="bold">👥 Groups</span>' +
+      '<button class="btn btn-primary" data-newgroup>＋ Create group</button>' +
+    '</div>';
+    if (!groups.length) {
+      h += '<div class="empty"><div class="e-emoji">👥</div>' +
+        '<p>No groups around right now — create the first one, or hang out in the feed while the community grows.</p>' +
+        '<button class="btn btn-acc acc-pink" data-goto-feed>🌍 Back to the feed</button></div>';
+    } else {
+      h += '<div class="grid2">' + groups.map(groupCardHTML).join('') + '</div>';
+    }
+    return h;
+  }
+
+  function openCreateGroup() {
+    var esc = A.ui.esc;
+    A.ui.modal({
+      title: '＋ Create group',
+      accent: 'teal',
+      body:
+        '<div class="field"><label>Group name</label>' +
+          '<input id="grp-name" class="input" maxlength="40" placeholder="e.g. Morning Hoopers"></div>' +
+        '<div class="field"><label>Emoji</label>' +
+          '<div class="emoji-pick" id="grp-emoji">' +
+            GROUP_EMOJIS.map(function (e, i) {
+              return '<button type="button" data-emoji="' + esc(e) + '"' + (i === 0 ? ' class="sel"' : '') +
+                ' aria-label="Pick emoji ' + esc(e) + '">' + esc(e) + '</button>';
+            }).join('') +
+          '</div></div>' +
+        '<div class="field"><label>One-line description</label>' +
+          '<input id="grp-desc" class="input" maxlength="90" placeholder="What is this crew about?"></div>' +
+        '<div class="field"><label>Accent colour</label>' +
+          '<div class="swatches" id="grp-acc">' +
+            A.ui.ACCENT_NAMES.map(function (name) {
+              return '<button type="button" class="acc-' + name + (name === 'teal' ? ' sel' : '') +
+                '" data-swatch="' + name + '" title="' + name + '" aria-label="Accent ' + name + '"></button>';
+            }).join('') +
+          '</div></div>',
+      onOpen: function (m) {
+        m.querySelectorAll('#grp-emoji button').forEach(function (b) {
+          b.addEventListener('click', function () {
+            m.querySelectorAll('#grp-emoji button').forEach(function (x) { x.classList.remove('sel'); });
+            b.classList.add('sel');
+          });
+        });
+        m.querySelectorAll('#grp-acc button').forEach(function (b) {
+          b.addEventListener('click', function () {
+            m.querySelectorAll('#grp-acc button').forEach(function (x) { x.classList.remove('sel'); });
+            b.classList.add('sel');
+          });
+        });
+        var nameEl = m.querySelector('#grp-name');
+        if (nameEl) nameEl.focus();
+      },
+      actions: [
+        { label: 'Cancel', cls: 'btn-ghost' },
+        {
+          label: 'Create group',
+          cls: 'btn-primary',
+          onClick: function (m) {
+            var name = m.querySelector('#grp-name').value.trim();
+            if (!name) { A.ui.toast('Give your group a name first', '✍️'); return false; }
+            var desc = m.querySelector('#grp-desc').value.trim();
+            var emBtn = m.querySelector('#grp-emoji button.sel');
+            var emoji = emBtn ? emBtn.getAttribute('data-emoji') : GROUP_EMOJIS[0];
+            var swBtn = m.querySelector('#grp-acc button.sel');
+            var accent = safeAccent(swBtn ? swBtn.getAttribute('data-swatch') : 'teal', 'teal');
+            A.S.update(function (st) {
+              var p = st.profile || {};
+              ensureSocial(st).groups.unshift({
+                id: A.ui.uid(), name: name, emoji: emoji, accent: accent,
+                members: 1, joined: true, mine: true, desc: desc,
+                leaderboard: [{ name: p.name || 'You', avatar: p.avatar || '🙂', xp: p.xp || 0 }]
+              });
+            });
+            A.ui.toast('Group created — invite your friends!', '🎉');
+          }
+        }
+      ]
+    });
   }
 
   function openLeaderboard(groupId) {
@@ -416,9 +589,15 @@
     var s = A.S.get();
     var g = findById(socialOf(s).groups, groupId);
     if (!g) return;
-    var rows = (g.leaderboard || []).map(function (r) {
-      return { name: r.name, avatar: r.avatar, xp: r.xp || 0, me: false };
-    });
+    var rows = (g.leaderboard || [])
+      .filter(function (r) {
+        // In a joined group the live "You" row is appended below — drop any
+        // stored copy of the user (e.g. the seed row of a group they created).
+        return !(g.joined && r && r.name === myName(s));
+      })
+      .map(function (r) {
+        return { name: r.name, avatar: r.avatar, xp: r.xp || 0, me: false };
+      });
     if (g.joined) {
       rows.push({ name: myName(s), avatar: myAvatar(s), xp: (s.profile && s.profile.xp) || 0, me: true });
     }
@@ -476,6 +655,38 @@
 
     el.querySelectorAll('[data-lb]').forEach(function (b) {
       b.addEventListener('click', function () { openLeaderboard(b.getAttribute('data-lb')); });
+    });
+
+    el.querySelectorAll('[data-delgroup]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var id = b.getAttribute('data-delgroup');
+        var g = findById(socialOf(A.S.get()).groups, id);
+        if (!g) return;
+        A.ui.confirm('Delete "' + g.name + '"? The group and its leaderboard will be gone for good.', function () {
+          A.S.update(function (st) {
+            var so = ensureSocial(st);
+            so.groups = so.groups.filter(function (x) { return x.id !== id; });
+          });
+          A.ui.toast('Group deleted', '🗑️');
+        }, { title: 'Delete group', yesLabel: 'Delete', danger: true });
+      });
+    });
+
+    var newGrp = el.querySelector('[data-newgroup]');
+    if (newGrp) newGrp.addEventListener('click', openCreateGroup);
+
+    el.querySelectorAll('[data-cjoin]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var id = b.getAttribute('data-cjoin');
+        var title = '';
+        CHALLENGES.forEach(function (c) { if (c.id === id) title = c.title; });
+        if (!title) return;
+        A.S.update(function (st) {
+          var so = ensureSocial(st);
+          if (!so.challenges[id]) so.challenges[id] = { joinedAt: Date.now() };
+        });
+        A.ui.toast('You joined ' + title + ' — go get it!', '🏁');
+      });
     });
 
     var goFeed = el.querySelector('[data-goto-feed]');
@@ -719,6 +930,7 @@
   function renderSocial(el, ctx) {
     curEl = el;
     curCtx = ctx;
+    checkChallengeRewards(); // one-time challenge XP, guarded by the rewarded flag
     var s = A.S.get();
 
     var body;

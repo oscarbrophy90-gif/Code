@@ -105,7 +105,10 @@
     menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
     flag: '<path d="M5 21V4"/><path d="M5 4.5c4-2.5 7 2 12 0v9c-5 2-8-2.5-12 0"/>',
     eye: '<path d="M2 12s3.5-6.5 10-6.5S22 12 22 12s-3.5 6.5-10 6.5S2 12 2 12z"/><circle cx="12" cy="12" r="2.8"/>',
-    shield: '<path d="M12 2.5l8 3v6c0 5-3.4 8.4-8 10-4.6-1.6-8-5-8-10v-6l8-3z"/><polyline points="8.7 12 11.2 14.5 15.5 9.5"/>'
+    shield: '<path d="M12 2.5l8 3v6c0 5-3.4 8.4-8 10-4.6-1.6-8-5-8-10v-6l8-3z"/><polyline points="8.7 12 11.2 14.5 15.5 9.5"/>',
+    search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/>',
+    pause: '<path d="M8 4.5v15M16 4.5v15"/>',
+    play: '<polygon points="7 4 20 12 7 20"/>'
   };
 
   function icon(name, cls) {
@@ -189,11 +192,38 @@
       timetable: null,
       achievements: {},          // id -> unlocked at (ts)
       reminders: [],             // { id, text, due:'YYYY-MM-DD'|null, done, createdAt }
+      events: [],                // one-off dated blocks: { id, title, date:'YYYY-MM-DD', start, end, accent }
+      learning: { subjects: [], exams: [] },  // subjects:[{id,title,emoji,accent}] exams:[{id,title,subjectId|null,date,planBuilt?}]
+      focus: { sessions: 0, minutes: 0, log: [] },  // log: [{ts,taskId,title,minutes}]
+      priorityOrder: [],         // manual ordering of today's priorities (task ids)
+      perfectDays: {},           // 'YYYY-MM-DD': true — every priority + habit done
+      flags: {},                 // one-shot markers (aiPlanBuilt, ...)
+      lastWeekReview: null,      // written by settleTimetableWeek
       activityLog: [],           // { ts, text, emoji, xp }
       assistant: { history: [] },
       social: seedSocial(),
-      settings: { wake: '07:00', sleep: '22:30', currency: '$', autoPost: true, notifications: true }
+      settings: {
+        wake: '07:00', sleep: '22:30', currency: '$', autoPost: true, notifications: true,
+        autoReschedule: false,           // AI may move unfinished tasks without asking
+        notifyStartSoon: true, notifyDaily: true, notifyReview: true,
+        privacyProfile: 'friends', privacySocial: true
+      }
     };
+  }
+
+  // Older saved states pick up any keys added since they were written.
+  function migrate(s) {
+    var fresh = initialState();
+    ['events', 'priorityOrder', 'perfectDays', 'flags', 'reminders'].forEach(function (k) {
+      if (s[k] == null) s[k] = fresh[k];
+    });
+    if (!s.learning || !s.learning.subjects) s.learning = fresh.learning;
+    if (!s.focus || typeof s.focus.sessions !== 'number') s.focus = fresh.focus;
+    if (s.lastWeekReview === undefined) s.lastWeekReview = null;
+    Object.keys(fresh.settings).forEach(function (k) {
+      if (s.settings[k] === undefined) s.settings[k] = fresh.settings[k];
+    });
+    return s;
   }
 
   /* ---------------- store ---------------- */
@@ -207,8 +237,7 @@
       if (raw) {
         var s = JSON.parse(raw);
         if (s && s.version === 1) {
-          if (!s.reminders) s.reminders = [];   // saved before reminders existed
-          state = s;
+          state = migrate(s);
           maintainHabits(state);
           settleTimetableWeek(state);
           save();
@@ -241,6 +270,8 @@
   function update(fn, opts) {
     fn(state);
     syncTimetableDone(state);
+    syncMilestones(state);
+    checkPerfectDay(state);
     settleTimetableWeek(state);
     checkAchievements();
     save();
@@ -309,7 +340,13 @@
     { id: 'pathfinder', title: 'Pathfinder', desc: 'Follow your first Path.', emoji: '🧭', accent: 'indigo', xp: 15, test: function (s) { return s.social.paths.some(function (p) { return p.following; }); } },
     { id: 'ai-curious', title: 'Ask Acendri', desc: 'Have your first chat with the AI assistant.', emoji: '🤖', accent: 'cyan', xp: 10, test: function (s) { return s.assistant.history.some(function (m) { return m.role === 'user'; }); } },
     { id: 'level-5', title: 'Climber', desc: 'Reach Level 5.', emoji: '⛰️', accent: 'blue', xp: 0, test: function (s) { return levelFor(s.profile.xp) >= 5; } },
-    { id: 'level-10', title: 'Ascendant', desc: 'Reach Level 10.', emoji: '🌌', accent: 'purple', xp: 0, test: function (s) { return levelFor(s.profile.xp) >= 10; } }
+    { id: 'level-10', title: 'Ascendant', desc: 'Reach Level 10.', emoji: '🌌', accent: 'purple', xp: 0, test: function (s) { return levelFor(s.profile.xp) >= 10; } },
+    { id: 'first-focus', title: 'Deep Work', desc: 'Finish your first Focus session.', emoji: '🎧', accent: 'cyan', xp: 20, test: function (s) { return (s.focus && s.focus.sessions) >= 1; } },
+    { id: 'focus-10', title: 'In the Zone', desc: 'Finish 10 Focus sessions.', emoji: '🧘', accent: 'indigo', xp: 60, test: function (s) { return (s.focus && s.focus.sessions) >= 10; } },
+    { id: 'first-review', title: 'Reflector', desc: 'Read your first Weekly Review.', emoji: '🪞', accent: 'purple', xp: 25, test: function (s) { return !!(s.lastWeekReview && s.lastWeekReview.seen); } },
+    { id: 'perfect-day', title: 'Perfect Day', desc: 'Complete every priority and every habit in one day.', emoji: '🌟', accent: 'yellow', xp: 50, test: function (s) { return Object.keys(s.perfectDays || {}).length >= 1; } },
+    { id: 'scholar', title: 'Scholar', desc: 'Build your first revision plan.', emoji: '📚', accent: 'blue', xp: 20, test: function (s) { return (s.learning.exams || []).some(function (e) { return e.planBuilt; }); } },
+    { id: 'ai-architect', title: 'AI Architect', desc: 'Have Acendri build a full plan — goal, steps, habits and week in one go.', emoji: '🤖', accent: 'cyan', xp: 30, test: function (s) { return !!(s.flags && s.flags.aiPlanBuilt); } }
   ];
 
   function checkAchievements() {
@@ -403,6 +440,37 @@
     tt.settled = true;
     var snap = snapshotWeek(tt);
     if (snap) s.lastWeekPlan = snap;   // offered as "keep the same as last week"
+
+    // the week's story, kept for the Weekly Review screen
+    var wStart = tt.weekStart || isoList[0];
+    var wEnd = isoList[isoList.length - 1];
+    var p0 = wStart.split('-');
+    var startTs = new Date(+p0[0], +p0[1] - 1, +p0[2]).getTime();
+    var endTs = startTs + WEEK_DAYS * 86400000;
+    var tasksDone = s.tasks.filter(function (t) { return t.done && t.doneAt >= startTs && t.doneAt < endTs; });
+    var habitTicks = 0;
+    s.habits.forEach(function (h) {
+      Object.keys(h.log || {}).forEach(function (d) { if (h.log[d] && d >= wStart && d <= wEnd) habitTicks++; });
+    });
+    var xpEarned = 0;
+    s.activityLog.forEach(function (a) { if (a.ts >= startTs && a.ts < endTs && a.xp) xpEarned += a.xp; });
+    var achUnlocked = Object.keys(s.achievements).filter(function (id) {
+      return s.achievements[id] >= startTs && s.achievements[id] < endTs;
+    });
+    var focusSessions = ((s.focus && s.focus.log) || []).filter(function (f) { return f.ts >= startTs && f.ts < endTs; }).length;
+    var goalMoves = [];
+    s.goals.forEach(function (g) {
+      var moved = (g.milestones || []).some(function (m) { return m.done; }) &&
+        s.tasks.some(function (t) { return t.goalId === g.id && t.done && t.doneAt >= startTs && t.doneAt < endTs; });
+      if (moved || (g.completedAt && g.completedAt >= startTs && g.completedAt < endTs)) goalMoves.push(g.title);
+    });
+    s.lastWeekReview = {
+      weekStart: wStart, weekEnd: wEnd, generatedAt: Date.now(), seen: false,
+      blocksDone: done, blocksTotal: total,
+      tasksDone: tasksDone.length, habitTicks: habitTicks, focusSessions: focusSessions,
+      xpEarned: xpEarned, achievements: achUnlocked, goalsMoved: goalMoves,
+      unfinished: s.tasks.filter(function (t) { return !t.done && t.createdAt < endTs; }).slice(0, 8).map(function (t) { return t.title; })
+    };
     if (!total) return;
     var ratio = done / total;
     var xp = done * 4 + (ratio >= 0.8 ? 30 : 0);
@@ -569,6 +637,12 @@
         if (en <= st) return;
         blocks.push({ id: uid(), refId: c.id, title: c.title, type: 'commitment', accent: c.accent || 'indigo', startMin: st, endMin: en, start: hhmm(st), end: hhmm(en) });
       });
+      (s.events || []).forEach(function (ev) {
+        if (ev.date !== iso) return;
+        var st = minutes(ev.start), en = minutes(ev.end);
+        if (en <= st) return;
+        blocks.push({ id: uid(), refId: ev.id, title: ev.title, type: 'event', accent: ev.accent || 'pink', startMin: st, endMin: en, start: hhmm(st), end: hhmm(en) });
+      });
       blocks.sort(function (a, b) { return a.startMin - b.startMin; });
       days[iso] = blocks;
     });
@@ -635,6 +709,30 @@
     return items.length ? { weekStart: tt.weekStart || null, savedAt: Date.now(), items: items } : null;
   }
 
+  // Re-places every unfinished task around the fixed blocks and everything
+  // already completed. Done blocks stay exactly where they are; nothing is
+  // duplicated; the week's start and lock are untouched.
+  function rebuildWeek(s) {
+    s = s || state;
+    var tt = s.timetable;
+    if (!tt || !tt.days) return null;
+    var isoList = planWindow(s);
+    var taskDone = {};
+    (s.tasks || []).forEach(function (t) { if (t.done) taskDone[t.id] = true; });
+    var fixed = commitmentDays(s, isoList);
+    isoList.forEach(function (iso) {
+      var keep = (tt.days[iso] || []).filter(function (b) {
+        return b.type === 'task' && (b.done || taskDone[b.refId]);
+      });
+      tt.days[iso] = fixed[iso].concat(keep);
+      tt.days[iso].sort(function (a, b) { return a.startMin - b.startMin; });
+    });
+    var open = (s.tasks || []).filter(function (t) { return !t.done; });
+    tt.unplaced = placeTasks(s, tt.days, isoList, open);
+    tt.generatedAt = Date.now();
+    return tt;
+  }
+
   // Rebuild this week from the shape of the last one — same activities, same slots.
   function repeatLastWeek(s) {
     s = s || state;
@@ -653,6 +751,163 @@
       prefer[id] = { dow: item.dow, startMin: item.startMin };
     });
     return generateTimetable(s, prefer);
+  }
+
+  /* ---------------- the connected day ---------------- */
+
+  function startOfTodayTs() {
+    var d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime();
+  }
+
+  // Today's priorities: open tasks that matter today, in the user's own order
+  // first (priorityOrder), then by urgency.
+  function priorities(n) {
+    var t = todayISO();
+    var scheduledToday = {};
+    if (state.timetable && state.timetable.days && state.timetable.days[t]) {
+      state.timetable.days[t].forEach(function (b) { if (b.type === 'task') scheduledToday[b.refId] = true; });
+    }
+    var cand = state.tasks.filter(function (task) {
+      if (task.done) return false;
+      return (task.due && task.due <= t) || scheduledToday[task.id] || task.priority === 3;
+    });
+    cand.sort(function (a, b) {
+      var oa = state.priorityOrder.indexOf(a.id), ob = state.priorityOrder.indexOf(b.id);
+      if (oa !== -1 || ob !== -1) {
+        if (oa === -1) return 1;
+        if (ob === -1) return -1;
+        return oa - ob;
+      }
+      var da = a.due || '9999', db = b.due || '9999';
+      if (da !== db) return da < db ? -1 : 1;
+      if ((a.priority || 1) !== (b.priority || 1)) return (b.priority || 1) - (a.priority || 1);
+      return (a.createdAt || 0) - (b.createdAt || 0);
+    });
+    return cand.slice(0, n || 3);
+  }
+
+  function todayStats() {
+    var t = todayISO();
+    var t0 = startOfTodayTs();
+    var pri = priorities(6);
+    var doneToday = state.tasks.filter(function (x) { return x.done && (x.doneAt || 0) >= t0; }).length;
+    var habits = state.habits.filter(function (h) { return !h.archived; });
+    var habitsDone = habits.filter(function (h) { return h.log && h.log[t]; }).length;
+    var xpToday = 0;
+    state.activityLog.forEach(function (a) { if (a.ts >= t0 && a.xp) xpToday += a.xp; });
+    var focusToday = (state.focus && state.focus.log || []).filter(function (f) { return f.ts >= t0; }).length;
+    return {
+      priorities: pri, tasksDone: doneToday, tasksOpen: pri.length,
+      habitsDone: habitsDone, habitsTotal: habits.length,
+      xpToday: xpToday, focusToday: focusToday
+    };
+  }
+
+  // The current / next thing on today's timetable.
+  function nextBlock() {
+    var t = todayISO();
+    if (!state.timetable || !state.timetable.days || !state.timetable.days[t]) return null;
+    var nowMin = new Date().getHours() * 60 + new Date().getMinutes();
+    var blocks = state.timetable.days[t].filter(function (b) { return !b.done && b.endMin > nowMin; });
+    if (!blocks.length) return null;
+    var b = blocks[0];
+    return {
+      block: b, iso: t,
+      now: b.startMin <= nowMin,
+      inMinutes: Math.max(0, b.startMin - nowMin)
+    };
+  }
+
+  // Everything hanging off a goal: its tasks, habits and this week's sessions.
+  function goalLinks(g) {
+    var tasks = state.tasks.filter(function (t) { return t.goalId === g.id; });
+    var habits = state.habits.filter(function (h) { return h.goalId === g.id && !h.archived; });
+    var byId = {}; tasks.forEach(function (t) { byId[t.id] = true; });
+    var sessions = [];
+    if (state.timetable && state.timetable.days) {
+      Object.keys(state.timetable.days).forEach(function (iso) {
+        state.timetable.days[iso].forEach(function (b) {
+          if (b.type === 'task' && byId[b.refId]) sessions.push({ iso: iso, block: b });
+        });
+      });
+    }
+    return { tasks: tasks, habits: habits, sessions: sessions };
+  }
+
+  // Milestones with linked tasks complete themselves when their last task does.
+  function syncMilestones(s) {
+    var byMilestone = {};
+    s.tasks.forEach(function (t) {
+      if (!t.milestoneId) return;
+      (byMilestone[t.milestoneId] = byMilestone[t.milestoneId] || []).push(t);
+    });
+    s.goals.forEach(function (g) {
+      if (g.status === 'done') return;
+      (g.milestones || []).forEach(function (m) {
+        if (m.done) return;
+        var linked = byMilestone[m.id];
+        if (!linked || !linked.length) return;
+        if (linked.every(function (t) { return t.done; })) {
+          m.done = true;
+          // each milestone pays out exactly once, however many times it is re-ticked
+          if (!m.xpAwarded) {
+            m.xpAwarded = true;
+            s.profile.xp += 25;
+            logActivity('Milestone complete: ' + m.title + ' (' + g.title + ')', '🏁');
+            pendingToasts.push({ msg: 'Milestone complete: ' + m.title + '  (+25 XP)', emoji: '🏁' });
+          }
+        }
+      });
+    });
+  }
+
+  // A perfect day = every priority ticked and every habit ticked.
+  function checkPerfectDay(s) {
+    var t = todayISO();
+    if (s.perfectDays[t]) return;
+    var habits = s.habits.filter(function (h) { return !h.archived; });
+    if (!habits.length || !habits.every(function (h) { return h.log && h.log[t]; })) return;
+    var due = s.tasks.filter(function (x) { return !x.done && x.due && x.due <= t; });
+    var doneToday = s.tasks.filter(function (x) { return x.done && (x.doneAt || 0) >= startOfTodayTs(); }).length;
+    if (due.length === 0 && doneToday > 0) {
+      s.perfectDays[t] = true;
+      logActivity('Perfect day — every priority and habit done', '🌟');
+      pendingToasts.push({ msg: 'Perfect day! Everything that mattered got done 🌟', emoji: '🌟' });
+    }
+  }
+
+  // Spread revision for an exam across the days before it — never one cram day.
+  function buildRevisionPlan(s, examId) {
+    var exam = (s.learning.exams || []).filter(function (e) { return e.id === examId; })[0];
+    if (!exam || !exam.date) return null;
+    var t = todayISO();
+    if (exam.date <= t) return { created: 0, reason: 'past' };
+    var daysUntil = 0; var cur = t;
+    while (cur < exam.date && daysUntil < 30) { cur = addDaysISO(cur, 1); daysUntil++; }
+    var sessions = Math.max(2, Math.min(6, daysUntil - 0));
+    var subject = (s.learning.subjects || []).filter(function (x) { return x.id === exam.subjectId; })[0];
+    var label = subject ? subject.title : exam.title;
+    var goal = s.goals.filter(function (g) { return g.status === 'active' && g.category === 'Study'; })[0];
+    var ids = [];
+    var now = Date.now();
+    for (var i = 0; i < sessions; i++) {
+      // last session lands the day before the exam, the rest spread back from there
+      var offset = Math.max(1, daysUntil - 1 - Math.floor(i * (daysUntil - 1) / sessions));
+      var id = uid();
+      ids.push(id);
+      s.tasks.push({
+        id: id, title: 'Revise ' + label + ' (' + (sessions - i) + '/' + sessions + ')',
+        priority: i === 0 ? 3 : 2, due: addDaysISO(exam.date, -offset), duration: 45,
+        done: false, goalId: goal ? goal.id : undefined, createdAt: now + i
+      });
+    }
+    exam.planBuilt = true;
+    s.reminders.push({ id: uid(), text: exam.title + ' — exam day! You’ve prepared for this', due: exam.date, done: false, createdAt: now });
+    var placed = 0;
+    if (s.timetable) placed = addTasksToTimetable(s, ids).placed;
+    else { generateTimetable(s); placed = ids.length - (s.timetable.unplaced || []).length; }
+    logActivity('Revision plan built for ' + exam.title, '📚');
+    return { created: sessions, placed: placed, examDate: exam.date };
   }
 
   // "What matters most right now?" — ranked focus items for dashboard + assistant.
@@ -857,7 +1112,158 @@
 
   function registerScreen(id, def) {
     screens[id] = def;
-    if (def.inShell) navOrder.push(id);
+    if (def.inShell && !def.hideNav) navOrder.push(id);
+  }
+
+  /* ---------------- global search ---------------- */
+
+  function searchAll(q) {
+    q = q.toLowerCase().trim();
+    if (q.length < 2) return [];
+    var out = [];
+    function hit(emoji, title, sub, screen) { out.push({ emoji: emoji, title: title, sub: sub, screen: screen }); }
+    state.goals.forEach(function (g) {
+      if (g.title.toLowerCase().indexOf(q) >= 0) hit('🎯', g.title, 'Goal · ' + (g.status === 'done' ? 'completed' : goalProgress(g) + '%'), 'app/goals');
+      (g.milestones || []).forEach(function (m) { if (m.title.toLowerCase().indexOf(q) >= 0) hit('🏁', m.title, 'Milestone of “' + g.title + '”', 'app/goals'); });
+    });
+    state.tasks.forEach(function (t) {
+      if (t.title.toLowerCase().indexOf(q) >= 0) hit(t.done ? '✅' : '📋', t.title, 'Task · ' + (t.done ? 'done' : t.due ? 'due ' + fmtDate(t.due) : 'no due date'), 'app/tasks');
+    });
+    state.habits.forEach(function (h) {
+      if (h.title.toLowerCase().indexOf(q) >= 0) hit(h.emoji || '🌱', h.title, (h.archived ? 'Archived habit' : 'Habit · 🔥 ' + habitStreak(h) + ' day streak'), 'app/habits');
+    });
+    if (state.timetable && state.timetable.days) {
+      var seen = {};
+      Object.keys(state.timetable.days).sort().forEach(function (iso) {
+        state.timetable.days[iso].forEach(function (b) {
+          var key = b.title + iso;
+          if (seen[key]) return;
+          if (b.title.toLowerCase().indexOf(q) >= 0) { seen[key] = 1; hit('📅', b.title, fmtDate(iso) + ' · ' + fmtTime(b.start), 'app/schedule'); }
+        });
+      });
+    }
+    (state.learning.exams || []).forEach(function (e) {
+      if (e.title.toLowerCase().indexOf(q) >= 0) hit('🎓', e.title, 'Exam · ' + fmtDate(e.date), 'app/learning');
+    });
+    ACHIEVEMENTS.forEach(function (a) {
+      if (a.title.toLowerCase().indexOf(q) >= 0) hit(a.emoji, a.title, (state.achievements[a.id] ? 'Achievement · unlocked' : 'Achievement · locked'), 'app/achievements');
+    });
+    state.social.friends.forEach(function (f) {
+      if (f.name.toLowerCase().indexOf(q) >= 0) hit(f.avatar, f.name, 'Friend · ' + (f.role || ''), 'app/social');
+    });
+    state.social.groups.forEach(function (g) {
+      if (g.name.toLowerCase().indexOf(q) >= 0) hit(g.emoji, g.name, 'Group · ' + g.members + ' members', 'app/social');
+    });
+    state.social.paths.forEach(function (p) {
+      if (p.title.toLowerCase().indexOf(q) >= 0) hit(p.emoji || '🧭', p.title, 'Path by ' + p.author, 'app/social');
+    });
+    (state.reminders || []).forEach(function (r) {
+      if (!r.done && r.text.toLowerCase().indexOf(q) >= 0) hit('⏰', r.text, 'Reminder' + (r.due ? ' · ' + fmtDate(r.due) : ''), 'app/dashboard');
+    });
+    (state.assistant.history || []).forEach(function (msg) {
+      if (msg.text && msg.text.toLowerCase().indexOf(q) >= 0) hit(msg.role === 'user' ? '💬' : '🤖', msg.text.slice(0, 70) + (msg.text.length > 70 ? '…' : ''), 'AI conversation', 'app/assistant');
+    });
+    return out.slice(0, 20);
+  }
+
+  function showSearch() {
+    var m = modal({
+      title: '🔍 Search Acendri', accent: 'cyan', wide: true,
+      body:
+        '<input class="input" id="gs-q" placeholder="Goals, tasks, habits, timetable, friends, chats…" autocomplete="off">' +
+        '<div id="gs-results" class="list" style="margin-top:12px"><div class="dim small">Type at least two characters…</div></div>'
+    });
+    var input = m.el.querySelector('#gs-q');
+    var box = m.el.querySelector('#gs-results');
+    function draw() {
+      var res = searchAll(input.value || '');
+      if (!input.value || input.value.trim().length < 2) { box.innerHTML = '<div class="dim small">Type at least two characters…</div>'; return; }
+      if (!res.length) { box.innerHTML = '<div class="empty" style="padding:18px"><div class="e-emoji">🕳️</div><p>Nothing matches “' + esc(input.value) + '” yet.</p></div>'; return; }
+      box.innerHTML = res.map(function (r, i) {
+        return '<div class="list-item" data-go="' + i + '" style="cursor:pointer">' +
+          '<span style="font-size:1.1rem">' + esc(r.emoji) + '</span>' +
+          '<div class="li-main"><div class="li-title" style="font-size:.92rem">' + esc(r.title) + '</div>' +
+          '<div class="li-sub">' + esc(r.sub) + '</div></div>' + icon('arrow', 'sm') + '</div>';
+      }).join('');
+      box.querySelectorAll('[data-go]').forEach(function (row) {
+        row.addEventListener('click', function () {
+          var r = res[+row.getAttribute('data-go')];
+          m.close(); nav(r.screen);
+        });
+      });
+    }
+    input.addEventListener('input', draw);
+  }
+
+  /* ---------------- quick actions (the + button) ---------------- */
+
+  function quickCreate(kind, m) {
+    var title = m.el.querySelector('#qa-title').value.trim();
+    if (!title) { toast('Give it a name first', '✍️'); return; }
+    if (kind === 'goal') {
+      update(function (s) {
+        s.goals.push({ id: uid(), title: title, category: 'Personal', accent: 'cyan', why: '', targetDate: null, status: 'active', milestones: [], createdAt: Date.now() });
+      });
+      toast('Goal created — open Goals to break it into steps', '🎯');
+      m.close(); nav('app/goals');
+    } else if (kind === 'task') {
+      update(function (s) {
+        s.tasks.push({ id: uid(), title: title, priority: 2, due: todayISO(), duration: 45, done: false, createdAt: Date.now() });
+      });
+      toast('Task added for today', '📋');
+      m.close();
+    } else if (kind === 'habit') {
+      update(function (s) {
+        s.habits.push({ id: uid(), title: title, emoji: '🌱', accent: 'green', targetPerWeek: 7, log: {}, createdAt: Date.now() });
+      });
+      toast('Habit started — first tick today?', '🌱');
+      m.close(); nav('app/habits');
+    }
+  }
+
+  function showQuickActions() {
+    var opts = [
+      { k: 'goal', emoji: '🎯', accent: 'blue', label: 'Create a goal' },
+      { k: 'task', emoji: '📋', accent: 'green', label: 'Create a task' },
+      { k: 'habit', emoji: '🌱', accent: 'orange', label: 'Create a habit' },
+      { k: 'schedule', emoji: '📅', accent: 'purple', label: 'Schedule something' },
+      { k: 'focus', emoji: '🎧', accent: 'cyan', label: 'Start Focus Mode' },
+      { k: 'ai', emoji: '🤖', accent: 'pink', label: 'Ask Acendri' }
+    ];
+    var m = modal({
+      title: '⚡ What do you want to do?', accent: 'cyan',
+      body: '<div class="list">' + opts.map(function (o) {
+        return '<div class="list-item acc-' + o.accent + '" data-qa="' + o.k + '" style="cursor:pointer">' +
+          '<span class="icon-tile">' + o.emoji + '</span>' +
+          '<div class="li-main"><div class="li-title">' + o.label + '</div></div>' + icon('arrow', 'sm') + '</div>';
+      }).join('') + '</div>'
+    });
+    m.el.querySelectorAll('[data-qa]').forEach(function (row) {
+      row.addEventListener('click', function () {
+        var k = row.getAttribute('data-qa');
+        if (k === 'schedule') { m.close(); nav('app/schedule'); return; }
+        if (k === 'ai') { m.close(); nav('app/assistant'); return; }
+        if (k === 'focus') {
+          m.close();
+          var pri = priorities(1);
+          update(function (s) { s.focus.currentTaskId = pri.length ? pri[0].id : null; }, { silent: true });
+          nav('app/focus');
+          return;
+        }
+        // inline mini-form for goal/task/habit
+        var label = k === 'goal' ? 'What do you want to achieve?' : k === 'task' ? 'What needs doing?' : 'What’s the habit?';
+        m.el.querySelector('.modal-body').innerHTML =
+          '<div class="field"><label>' + label + '</label><input class="input" id="qa-title" maxlength="90"></div>' +
+          '<div class="row" style="justify-content:flex-end;gap:10px">' +
+          '<button class="btn btn-ghost" id="qa-back">← Back</button>' +
+          '<button class="btn btn-primary" id="qa-go">Create</button></div>';
+        var inp = m.el.querySelector('#qa-title');
+        inp.focus();
+        inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') quickCreate(k, m); });
+        m.el.querySelector('#qa-go').addEventListener('click', function () { quickCreate(k, m); });
+        m.el.querySelector('#qa-back').addEventListener('click', function () { m.close(); showQuickActions(); });
+      });
+    });
   }
 
   function currentRoute() {
@@ -918,7 +1324,8 @@
       '<button class="icon-btn hamburger" data-burger="1" aria-label="Menu">' + icon('menu') + '</button>' +
       '<div class="tb-title">' + esc(def.title) + '</div>' +
       '<div class="tb-spacer"></div>' +
-      '<button class="icon-btn" data-bell="1" aria-label="Activity" title="Recent activity">' + icon('bell') + '</button>' +
+      '<button class="icon-btn" data-search="1" aria-label="Search" title="Search everything">' + icon('search') + '</button>' +
+      '<button class="icon-btn" data-bell="1" aria-label="Activity" title="Reminders & activity">' + icon('bell') + '</button>' +
       '<button class="xp-chip acc-cyan" data-nav="app/achievements" title="' + state.profile.xp + ' XP — ' + esc(levelTitle(lp.level)) + '">' +
       '<span class="lvl">LV ' + lp.level + '</span>' +
       '<span class="bar"><span class="bar-fill" style="width:' + lp.pct + '%"></span></span>' +
@@ -945,8 +1352,49 @@
     });
     top.querySelector('[data-burger]').addEventListener('click', function () { sidebarOpen = !sidebarOpen; render(); });
     top.querySelector('[data-bell]').addEventListener('click', showActivity);
+    top.querySelector('[data-search]').addEventListener('click', showSearch);
+
+    var fab = document.createElement('button');
+    fab.className = 'fab';
+    fab.setAttribute('aria-label', 'Quick actions');
+    fab.title = 'Quick actions';
+    fab.innerHTML = icon('plus', 'lg');
+    fab.addEventListener('click', showQuickActions);
+    shell.appendChild(fab);
 
     def.render(screenEl, ctx());
+  }
+
+  // Live notifications: every entry is computed from real state right now.
+  function smartNotifications() {
+    var out = [];
+    if (!state.settings.notifications) return out;
+    var t = todayISO();
+    if (state.settings.notifyStartSoon) {
+      var nb = nextBlock();
+      if (nb && !nb.now && nb.inMinutes <= 60) out.push({ emoji: '⏱️', accent: 'purple', text: '“' + nb.block.title + '” starts in ' + nb.inMinutes + ' min (' + fmtTime(nb.block.start) + ')', screen: 'app/schedule' });
+      if (nb && nb.now) out.push({ emoji: '▶️', accent: 'purple', text: 'Now on your timetable: ' + nb.block.title + ' — until ' + fmtTime(nb.block.end), screen: 'app/schedule' });
+    }
+    if (state.settings.notifyDaily) {
+      var ts = todayStats();
+      var totalPri = ts.priorities.length + ts.tasksDone;
+      if (ts.tasksDone > 0 && ts.priorities.length > 0) out.push({ emoji: '📈', accent: 'green', text: 'You’ve completed ' + ts.tasksDone + '/' + totalPri + ' priorities today — keep rolling.', screen: 'app/dashboard' });
+      state.habits.forEach(function (h) {
+        if (h.archived || !h.log[t]) return;
+        var st = habitStreak(h);
+        if (st === 3 || st === 7 || st === 30) out.push({ emoji: '🔥', accent: 'orange', text: st + '-day streak on “' + h.title + '” — that’s how habits are built!', screen: 'app/habits' });
+      });
+      var weekAgo = Date.now() - 7 * 86400000;
+      state.goals.forEach(function (g) {
+        if (g.status !== 'active') return;
+        var moved = state.tasks.some(function (x) { return x.goalId === g.id && x.done && (x.doneAt || 0) >= weekAgo; });
+        if (!moved && (Date.now() - (g.createdAt || 0)) > 7 * 86400000) out.push({ emoji: '🎯', accent: 'blue', text: '“' + g.title + '” hasn’t progressed this week — one small task would change that.', screen: 'app/goals' });
+      });
+    }
+    if (state.settings.notifyReview && state.lastWeekReview && !state.lastWeekReview.seen) {
+      out.push({ emoji: '🪞', accent: 'purple', text: 'Your weekly review is ready — see how the week went.', screen: 'app/review' });
+    }
+    return out.slice(0, 6);
   }
 
   function showActivity() {
@@ -955,7 +1403,16 @@
     var nudges = state.habits.filter(function (h) {
       return !h.archived && !h.log[t] && daysSinceLastTick(h) >= 2;
     });
+    var smart = smartNotifications();
     var html = '';
+    if (smart.length) {
+      html += '<div class="list" style="margin-bottom:14px">' + smart.map(function (n, i) {
+        return '<div class="list-item acc-' + n.accent + '" data-smart="' + i + '" style="cursor:pointer">' +
+          '<span style="font-size:1.1rem">' + n.emoji + '</span>' +
+          '<div class="li-main"><div class="li-title" style="font-weight:500;font-size:.88rem">' + esc(n.text) + '</div></div>' +
+          icon('arrow', 'sm') + '</div>';
+      }).join('') + '</div>';
+    }
     if (pending.length || nudges.length) {
       html += '<div class="list" style="margin-bottom:14px">' +
         pending.map(function (r) {
@@ -981,6 +1438,13 @@
         }).join('') + '</div>'
       : '<div class="empty"><div class="e-emoji">🌙</div><p>Nothing yet — everything you do in Acendri shows up here.</p></div>';
     var m = modal({ title: '🔔 Reminders & activity', accent: 'purple', body: html });
+    m.el.querySelectorAll('[data-smart]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var n = smart[+b.getAttribute('data-smart')];
+        m.close();
+        if (n && n.screen) nav(n.screen);
+      });
+    });
     m.el.querySelectorAll('[data-rdone]').forEach(function (b) {
       b.addEventListener('click', function () {
         var id = b.getAttribute('data-rdone');
@@ -1026,9 +1490,19 @@
     generateTimetable: generateTimetable,
     addTasksToTimetable: addTasksToTimetable,
     repeatLastWeek: repeatLastWeek,
+    rebuildWeek: rebuildWeek,
     weekLock: weekLock,
     planWindow: planWindow,
     WEEK_DAYS: WEEK_DAYS,
+    todayStats: todayStats,
+    priorities: priorities,
+    nextBlock: nextBlock,
+    goalLinks: goalLinks,
+    buildRevisionPlan: buildRevisionPlan,
+    smartNotifications: smartNotifications,
+    searchAll: searchAll,
+    showSearch: function () { showSearch(); },
+    showQuickActions: function () { showQuickActions(); },
     focusSuggestions: focusSuggestions,
     financeSummary: financeSummary,
     habitStreak: habitStreak,

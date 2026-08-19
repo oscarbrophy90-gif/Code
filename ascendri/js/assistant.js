@@ -10,10 +10,10 @@
 
   var CHIPS = [
     'What should I focus on today?',
-    'Generate my timetable for basketball training',
-    'Set me a goal for tennis',
-    'Remind me to stretch tomorrow',
-    'How is my spending?',
+    'I want to become a professional tennis player',
+    'I have a maths test next Friday',
+    'I didn’t finish my homework',
+    'Review my week',
     'Motivate me'
   ];
 
@@ -40,6 +40,65 @@
 
   function userName(s) {
     return (s.profile && s.profile.name) ? s.profile.name : '';
+  }
+
+  function byId(list, id) {
+    if (!list || !id) return null;
+    for (var i = 0; i < list.length; i++) if (list[i] && list[i].id === id) return list[i];
+    return null;
+  }
+
+  /* ---------------- command dispatcher ----------------
+     Brain actions may carry cmd:{type, taskId?} instead of (or as well as)
+     the classic {screen}. Every branch ends in a state change, a nav or a
+     toast — never a silent dead click, never a crash. */
+
+  function runCmd(cmd, ctx) {
+    var type = cmd && cmd.type;
+    var E = A.engine || {};
+
+    if (type === 'reschedule') {
+      var st = A.S.get();
+      var t = byId(st.tasks, cmd.taskId);
+      if (!t) { A.ui.toast('I can’t find that task any more', '🤔'); return; }
+      if (t.done) { A.ui.toast('Nice — that one’s already done', '✅'); return; }
+      A.S.update(function (s) {
+        var task = byId(s.tasks, cmd.taskId);
+        if (!task || task.done) return;
+        task.due = A.ui.addDaysISO(A.ui.todayISO(), 1);
+        if (typeof E.rebuildWeek === 'function') E.rebuildWeek(s);
+      });
+      A.ui.toast('Moved to tomorrow and replanned', '🗓️');
+      return;
+    }
+
+    if (type === 'focus') {
+      A.S.update(function (s) {
+        if (!s.focus || typeof s.focus !== 'object') s.focus = { sessions: 0, minutes: 0, log: [] };
+        var task = byId(s.tasks, cmd.taskId);
+        s.focus.currentTaskId = (task && !task.done) ? task.id : null;
+      }, { silent: true });
+      ctx.nav('app/focus');
+      return;
+    }
+
+    if (type === 'rebuild') {
+      var st2 = A.S.get();
+      if (!st2.timetable || !st2.timetable.days) {
+        A.ui.toast('No weekly plan yet — ask me to plan your week first', '🗓️');
+        return;
+      }
+      if (typeof E.rebuildWeek !== 'function') { A.ui.toast('The planner isn’t loaded right now', '🤖'); return; }
+      A.S.update(function (s) { E.rebuildWeek(s); });
+      A.ui.toast('Week replanned around what’s left', '✨');
+      return;
+    }
+
+    if (type === 'review') { ctx.nav('app/review'); return; }
+
+    if (type === 'dismiss') { A.ui.toast('Okay, leaving it', '👍'); return; }
+
+    A.ui.toast('I don’t know that trick yet — ask me in words instead', '🤖');
   }
 
   /* ---------------- send flow ---------------- */
@@ -128,18 +187,18 @@
     if (!history.length) {
       var introName = userName(s) || 'there';
       msgsHTML += '<div class="msg ai">' +
-        esc('Hey ' + introName + ' 👋 I’m your Acendri assistant — and I don’t just talk. From this chat I can create goals with milestones, plan your whole week into a timetable and set reminders, plus keep an eye on your focus, money and streaks. Try a suggestion below.') +
+        esc('Hey ' + introName + ' 👋 I’m your Acendri assistant — and I don’t just chat. Tell me a dream and I’ll build the whole plan: goal → steps → habits → a scheduled week. Got a test coming? I’ll spread a revision plan across the days before it. Slipped on something? I’ll reschedule it and replan your week. I can even drop you straight into a focus session. Try a suggestion below.') +
         '</div>';
     }
-    history.forEach(function (m) {
+    history.forEach(function (m, mi) {
       var when = m.ts ? esc(A.ui.timeAgo(m.ts)) : '';
       if (m.role === 'user') {
         msgsHTML += '<div class="msg me" title="' + when + '">' + esc(m.text) + '</div>';
       } else {
         var actionsHTML = '';
         if (m.actions && m.actions.length) {
-          actionsHTML = '<div class="msg-actions">' + m.actions.map(function (a) {
-            return '<button class="btn btn-sm btn-acc acc-cyan" data-goto="' + esc(a.screen) + '">' + esc(a.label) + '</button>';
+          actionsHTML = '<div class="msg-actions">' + m.actions.map(function (a, ai) {
+            return '<button class="btn btn-sm btn-acc acc-cyan" data-msg="' + mi + '" data-act="' + ai + '">' + esc(a.label || 'Do it') + '</button>';
           }).join('') + '</div>';
         }
         msgsHTML += '<div class="msg ai" title="' + when + '">' + esc(m.text) + actionsHTML + '</div>';
@@ -212,10 +271,17 @@
     el.querySelector('[data-send]').addEventListener('click', trySend);
     if (inputFocused) { try { input.focus(); } catch (e2) { /* noop */ } }
 
-    // action buttons inside ai messages
-    el.querySelectorAll('[data-goto]').forEach(function (b) {
+    // action buttons inside ai messages — resolve the action from the live
+    // history at click time so both old {screen} and new {cmd} shapes work
+    el.querySelectorAll('[data-act]').forEach(function (b) {
       b.addEventListener('click', function () {
-        ctx.nav(b.getAttribute('data-goto'));
+        var hist = historyOf(A.S.get());
+        var m = hist[parseInt(b.getAttribute('data-msg'), 10)];
+        var a = m && m.actions && m.actions[parseInt(b.getAttribute('data-act'), 10)];
+        if (!a) { A.ui.toast('That button has expired — ask me again', '🤖'); return; }
+        if (a.cmd && a.cmd.type) runCmd(a.cmd, ctx);
+        else if (a.screen) ctx.nav(a.screen);
+        else A.ui.toast('That one’s just a label — ask me again', '🤖');
       });
     });
   }

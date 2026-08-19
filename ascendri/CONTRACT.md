@@ -160,3 +160,51 @@ Engine additions: `A.engine.daysSinceLastTick(h)`, `A.engine.HABIT_FADE_DAYS`.
   `generateTimetable(s, prefer?)` where prefer maps taskId -> {dow, startMin}.
 - Anything that schedules (screens or brain) must ADD to an existing plan via
   `addTasksToTimetable`, and only call `generateTimetable` when there is no plan.
+
+## v2 — the connected OS (round 4)
+
+State additions (core migrates old saves automatically):
+- `events: [{id,title,date:'YYYY-MM-DD',start,end,accent}]` — one-off blocks; the timetable
+  engines place around them (block type 'event').
+- `learning: { subjects:[{id,title,emoji,accent}], exams:[{id,title,subjectId|null,date,planBuilt?}] }`
+- `focus: { sessions, minutes, log:[{ts,taskId,title,minutes}], currentTaskId? }` — Focus Mode
+  MUST increment sessions/minutes + push log exactly once per finished session.
+- `priorityOrder: [taskId]` — the user's manual ordering of today's priorities.
+- `perfectDays: {'YYYY-MM-DD':true}` (core maintains), `flags: {aiPlanBuilt?...}` (one-shot markers),
+- `lastWeekReview: null | {weekStart,weekEnd,generatedAt,seen,blocksDone,blocksTotal,tasksDone,
+   habitTicks,focusSessions,xpEarned,achievements:[ids],goalsMoved:[titles],unfinished:[titles]}`
+  — written by core when a week settles. The review screen sets `seen=true` when read.
+- `tasks[i].milestoneId?` — link a task to a goal milestone; core auto-completes the milestone
+  (+25 XP, once) when ALL its linked tasks are done. `habits[i].goalId?`, `habits[i].preferredTime?`,
+  `habits[i].difficulty?` ('easy'|'medium'|'hard') are optional metadata.
+- settings additions: autoReschedule, notifyStartSoon, notifyDaily, notifyReview,
+  privacyProfile ('everyone'|'friends'|'private'), privacySocial (bool).
+
+Engine additions (`A.engine`):
+- `todayStats()` -> {priorities:[tasks], tasksDone, habitsDone, habitsTotal, xpToday, focusToday}
+- `priorities(n)` -> today's ranked open tasks (honours priorityOrder)
+- `nextBlock()` -> null | {block, iso, now:bool, inMinutes}
+- `rebuildWeek(s)` — inside update: re-places ALL unfinished tasks around commitments/events and
+  already-done blocks; no duplicates; keeps weekStart/lock. Allowed even while the week is locked
+  (it rearranges, it doesn't regenerate).
+- `goalLinks(g)` -> {tasks, habits, sessions:[{iso,block}]}
+- `buildRevisionPlan(s, examId)` — inside update: spreads revision tasks to the days before the
+  exam, adds a reminder, places into the timetable. Returns {created, placed, examDate}.
+- `smartNotifications()` -> computed live notifications (already shown in the bell).
+- `searchAll(q)`, `showSearch()`, `showQuickActions()` — global search + the "+" FAB (core-owned;
+  screens never need to re-implement them).
+
+New screens (all registered like any screen): `app/learning` (icon grad, accent blue, in sidebar),
+`app/review` (icon eye, accent purple, in sidebar), `app/focus` (inShell:true, hideNav:true — no
+sidebar entry; opened via quick actions / Do It Now with `focus.currentTaskId` set first).
+`registerScreen` now honours `hideNav:true`.
+
+New icons: search, pause, play. New CSS: `.fab`, `.focus-stage`, `.focus-timer`, `.focus-task`,
+`.focus-ring`.
+
+New achievements (already in core): first-focus, focus-10, first-review, perfect-day, scholar,
+ai-architect (test: flags.aiPlanBuilt).
+
+XP rules recap (no double-award): task done 10/15 · milestone 25 (auto, core) · goal 100 ·
+habit tick 5 · focus session finish 20 + task XP if it completes the task · week settlement
+4/block + 30 bonus (core) · revision plan build 10.

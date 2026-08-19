@@ -13,8 +13,12 @@
   var CURRENCIES = ['$', '€', '£', 'A$', '¥'];
 
   function settingsOf(s) {
-    // guard: settings may be absent on old/imported states
-    return s.settings || { wake: '07:00', sleep: '22:30', currency: '$', autoPost: true, notifications: true };
+    // guard: settings may be absent on old/imported states (core migrates, but stay defensive)
+    return s.settings || {
+      wake: '07:00', sleep: '22:30', currency: '$', autoPost: true, notifications: true,
+      autoReschedule: false, notifyStartSoon: true, notifyDaily: true, notifyReview: true,
+      privacyProfile: 'friends', privacySocial: true
+    };
   }
 
   function profileCard(s) {
@@ -58,13 +62,63 @@
             }).join('') +
           '</select></div>' +
         '<div class="field">' +
-          '<label class="checkbox"><input type="checkbox" id="set-autopost"' + (st.autoPost ? ' checked' : '') + '> Auto-share my achievements to the feed</label>' +
-        '</div>' +
-        '<div class="field">' +
-          '<label class="checkbox"><input type="checkbox" id="set-notif"' + (st.notifications ? ' checked' : '') + '> Motivational nudges</label>' +
+          '<label class="checkbox"><input type="checkbox" id="set-autoresched"' + (st.autoReschedule ? ' checked' : '') + '> Automatic rescheduling — let Acendri move unfinished tasks without asking</label>' +
         '</div>' +
         '<button class="btn btn-primary" data-act="save-prefs">' + icon('check', 'sm') + 'Save preferences</button>' +
         '<p class="muted small" style="margin-top:10px">Wake/sleep shape your automatic timetable.</p>' +
+      '</div>';
+  }
+
+  function notificationsCard(s) {
+    var st = settingsOf(s);
+    var master = st.notifications !== false;
+    var sub = master ? '' : ' disabled';
+    var dim = master ? '' : ' style="opacity:.5"';
+    return '' +
+      '<div class="card acc glow acc-yellow">' +
+        '<div class="card-title">' + icon('bell') + 'Notifications</div>' +
+        '<div class="field">' +
+          '<label class="checkbox"><input type="checkbox" id="set-notif-master"' + (master ? ' checked' : '') + '> Enable notifications</label>' +
+        '</div>' +
+        '<div class="field" style="padding-left:24px">' +
+          '<label class="checkbox"' + dim + '><input type="checkbox" id="set-notif-start"' + (st.notifyStartSoon !== false ? ' checked' : '') + sub + '> Upcoming activity alerts</label>' +
+        '</div>' +
+        '<div class="field" style="padding-left:24px">' +
+          '<label class="checkbox"' + dim + '><input type="checkbox" id="set-notif-daily"' + (st.notifyDaily !== false ? ' checked' : '') + sub + '> Daily progress nudges</label>' +
+        '</div>' +
+        '<div class="field" style="padding-left:24px">' +
+          '<label class="checkbox"' + dim + '><input type="checkbox" id="set-notif-review"' + (st.notifyReview !== false ? ' checked' : '') + sub + '> Weekly review ready</label>' +
+        '</div>' +
+        '<button class="btn btn-primary" data-act="save-notifications">' + icon('check', 'sm') + 'Save notifications</button>' +
+        '<p class="muted small" style="margin-top:10px">Notifications appear under the 🔔 bell and are always computed from your real data.</p>' +
+      '</div>';
+  }
+
+  function privacyCard(s) {
+    var st = settingsOf(s);
+    var vis = st.privacyProfile || 'friends';
+    var OPTIONS = [
+      { v: 'everyone', label: 'Everyone in the community' },
+      { v: 'friends', label: 'Friends only' },
+      { v: 'private', label: 'Private — just me' }
+    ];
+    return '' +
+      '<div class="card acc glow acc-teal">' +
+        '<div class="card-title">' + icon('eye') + 'Privacy</div>' +
+        '<div class="field"><label>Who can see my profile</label>' +
+          '<select class="select" id="set-privacy-profile">' +
+            OPTIONS.map(function (o) {
+              return '<option value="' + esc(o.v) + '"' + (vis === o.v ? ' selected' : '') + '>' + esc(o.label) + '</option>';
+            }).join('') +
+          '</select></div>' +
+        '<div class="field">' +
+          '<label class="checkbox"><input type="checkbox" id="set-privacy-feed"' + (st.autoPost ? ' checked' : '') + '> Show my achievements in the social feed</label>' +
+        '</div>' +
+        '<div class="field">' +
+          '<label class="checkbox"><input type="checkbox" id="set-privacy-demo"' + (st.privacySocial !== false ? ' checked' : '') + '> Appear in the demo community</label>' +
+        '</div>' +
+        '<button class="btn btn-primary" data-act="save-privacy">' + icon('check', 'sm') + 'Save privacy</button>' +
+        '<p class="muted small" style="margin-top:10px">Honest note: everything stays local to this browser — these switches only control what the in-app community screens do.</p>' +
       '</div>';
   }
 
@@ -145,8 +199,7 @@
     var wake = el.querySelector('#set-wake').value;
     var sleep = el.querySelector('#set-sleep').value;
     var currency = el.querySelector('#set-currency').value;
-    var autoPost = el.querySelector('#set-autopost').checked;
-    var notifications = el.querySelector('#set-notif').checked;
+    var autoReschedule = el.querySelector('#set-autoresched').checked;
     if (!wake || !sleep) { A.ui.toast('Set both a wake and a sleep time', '⏰'); return; }
     if (A.ui.minutes(sleep) <= A.ui.minutes(wake)) { A.ui.toast('Sleep time must be after wake time', '🌙'); return; }
     A.S.update(function (s) {
@@ -154,12 +207,42 @@
       s.settings.wake = wake;
       s.settings.sleep = sleep;
       s.settings.currency = currency;
-      s.settings.autoPost = autoPost;
-      s.settings.notifications = notifications;
+      s.settings.autoReschedule = autoReschedule;
       if (s.timetable) A.engine.generateTimetable(s); // keep the timetable in step with the new day shape
     });
     A.S.log('Updated planner preferences', '⚙️');
     A.ui.toast('Preferences saved', '✅');
+  }
+
+  function saveNotifications(el) {
+    var master = el.querySelector('#set-notif-master').checked;
+    var startSoon = el.querySelector('#set-notif-start').checked;
+    var daily = el.querySelector('#set-notif-daily').checked;
+    var review = el.querySelector('#set-notif-review').checked;
+    A.S.update(function (s) {
+      if (!s.settings) s.settings = {};
+      s.settings.notifications = master;
+      s.settings.notifyStartSoon = startSoon;
+      s.settings.notifyDaily = daily;
+      s.settings.notifyReview = review;
+    });
+    A.S.log('Updated notification preferences', '🔔');
+    A.ui.toast(master ? 'Notification preferences saved' : 'Notifications muted', '🔔');
+  }
+
+  function savePrivacy(el) {
+    var vis = el.querySelector('#set-privacy-profile').value;
+    if (['everyone', 'friends', 'private'].indexOf(vis) === -1) vis = 'friends';
+    var autoPost = el.querySelector('#set-privacy-feed').checked;
+    var demo = el.querySelector('#set-privacy-demo').checked;
+    A.S.update(function (s) {
+      if (!s.settings) s.settings = {};
+      s.settings.privacyProfile = vis;
+      s.settings.autoPost = autoPost;
+      s.settings.privacySocial = demo;
+    });
+    A.S.log('Updated privacy settings', '🛡️');
+    A.ui.toast('Privacy settings saved', '✅');
   }
 
   function exportData() {
@@ -226,8 +309,23 @@
         '<div class="screen-head"><h1>Settings <span class="h-grad">&amp; privacy</span></h1>' +
         '<div class="sub">Tune Acendri to your life — and keep every byte of your data in your hands.</div></div>' +
         '<div class="grid2">' + profileCard(s) + prefsCard(s) + '</div>' +
+        '<div class="grid2 section-gap">' + notificationsCard(s) + privacyCard(s) + '</div>' +
         dataCard(s) +
         aboutCard();
+
+      // master notifications toggle: enable/disable the sub-options live (saved on "Save notifications")
+      var master = el.querySelector('#set-notif-master');
+      if (master) {
+        master.addEventListener('change', function () {
+          ['#set-notif-start', '#set-notif-daily', '#set-notif-review'].forEach(function (sel) {
+            var box = el.querySelector(sel);
+            if (!box) return;
+            box.disabled = !master.checked;
+            var label = box.closest ? box.closest('label') : null;
+            if (label) label.style.opacity = master.checked ? '' : '.5';
+          });
+        });
+      }
 
       // avatar picker: highlight locally, saved on "Save profile"
       el.querySelectorAll('#set-avatars button').forEach(function (btn) {
@@ -242,6 +340,8 @@
           var act = btn.getAttribute('data-act');
           if (act === 'save-profile') saveProfile(el);
           else if (act === 'save-prefs') savePrefs(el);
+          else if (act === 'save-notifications') saveNotifications(el);
+          else if (act === 'save-privacy') savePrivacy(el);
           else if (act === 'export') exportData();
           else if (act === 'import') importData(el);
           else if (act === 'demo') loadDemo();

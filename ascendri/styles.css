@@ -333,10 +333,17 @@ input[type="date"], input[type="time"] { color-scheme: dark; }
   .hamburger { display: inline-flex; }
   .screen { padding: 18px 14px; }
   .sidebar-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 25; }
-  .topbar { padding: 12px 14px; }
+  .topbar { padding: 12px 14px; gap: 8px; }
   .xp-chip .muted { display: none; }
   .xp-chip .bar { width: 44px; }
 }
+@media (max-width: 480px) {
+  .xp-chip .bar { display: none; }
+  .list-item { flex-wrap: wrap; }
+}
+/* grid children may never force horizontal page scroll */
+.grid2 > *, .grid3 > *, .grid4 > * { min-width: 0; }
+.card { min-width: 0; }
 
 /* ============================================================
    MODAL / TOAST / CONFETTI
@@ -586,6 +593,37 @@ input[type="date"], input[type="time"] { color-scheme: dark; }
 .tbl tr:hover td { background: rgba(20,25,55,.4); }
 .num { font-variant-numeric: tabular-nums; }
 .pos { color: #4ade80; } .neg { color: #f87171; }
+
+/* quick-action floating button */
+.fab {
+  position: fixed; right: 26px; bottom: 26px; z-index: 60;
+  width: 56px; height: 56px; border-radius: 50%;
+  border: none; cursor: pointer;
+  background: var(--grad-btn); color: #fff;
+  display: inline-flex; align-items: center; justify-content: center;
+  box-shadow: 0 8px 28px rgba(37, 132, 235, .45);
+  transition: transform .18s ease, box-shadow .18s ease;
+}
+.fab:hover { transform: translateY(-2px) scale(1.05); box-shadow: 0 12px 36px rgba(37, 132, 235, .6); }
+.fab:active { transform: scale(.96); }
+@media (max-width: 900px) { .fab { right: 16px; bottom: 16px; } }
+
+/* focus mode */
+.focus-stage {
+  min-height: 100vh; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; text-align: center;
+  padding: 30px 18px;
+  background:
+    radial-gradient(60% 120% at 50% -20%, rgba(6, 182, 212, .16), transparent 70%),
+    var(--bg);
+}
+.focus-timer {
+  font-size: clamp(4rem, 16vw, 7.5rem); font-weight: 800;
+  font-variant-numeric: tabular-nums; letter-spacing: .02em;
+  line-height: 1.1; margin: 18px 0 8px;
+}
+.focus-task { font-size: 1.2rem; color: var(--body); max-width: 520px; }
+.focus-ring { margin-top: 14px; width: min(420px, 80vw); }
 
 /* misc */
 hr.sep { border: none; border-top: 1px solid var(--line); margin: 16px 0; }
