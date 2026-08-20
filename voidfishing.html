@@ -3370,8 +3370,10 @@ input[type=range]::-moz-range-thumb {
       weight: function () { return VF.quests.at('heavens', 8) ? 150 : 26; },
       dur: [165, 280],
       blurb: 'things are coming down, and they are still lit when they land',
-      mods: { rare: 1.85, value: 1.45, trait: 1.25, bite: 0.78, treasure: 1.4 },
-      ember: 1, motes: 1, glow: 0.5,
+      // only bite, rare, treasure and secret are read off a condition — the
+      // other NEUTRAL keys have no consumer, so listing them would be a lie
+      mods: { rare: 1.85, bite: 0.78, treasure: 1.4, secret: 1.3 },
+      skyfall: 1,
       tint: '#ffd88a', minLoc: 3,
       test: function () { return VF.quests && VF.quests.reached('heavens', 8); } }
   ];
@@ -10918,6 +10920,8 @@ input[type=range]::-moz-range-thumb {
       }
     }
     if (flashT > 0) flashT = Math.max(0, flashT - dt);
+
+    updateSkyfall(dt);
   }
 
   let lightning = 12, flashT = 0, flashX = 0.5;
@@ -10936,6 +10940,78 @@ input[type=range]::-moz-range-thumb {
     ctx.globalCompositeOperation = 'lighter';
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, W, L.horizonY);
+    ctx.restore();
+  }
+
+  /* SKYFALL. Conditions have visual flags but nothing has ever read one except
+     `calm`, so this is the only place the event exists on screen: lights that
+     come down slowly, hit the water, and leave a ring. They are tracked here
+     rather than handed to the particle system because the whole point is what
+     happens when one lands. */
+  const falling = [];
+  const FALL_MAX = 26;
+
+  function updateSkyfall(dt) {
+    const k = VF.conditions ? VF.conditions.flag('skyfall') : 0;
+    if (k <= 0.01 && !falling.length) return;
+    const q = VF.state.data.settings.quality;
+    const scale = q === 'low' ? 0.35 : q === 'medium' ? 0.7 : 1;
+
+    if (k > 0.05 && falling.length < FALL_MAX * scale &&
+        Math.random() < dt * 5.2 * k * scale) {
+      const x = Math.random() * W;
+      falling.push({
+        x: x, y: -30 - Math.random() * H * 0.2,
+        vx: (Math.random() - 0.5) * 26,
+        vy: 105 + Math.random() * 130,
+        // where the water is under this one, so it lands on the surface
+        hit: L.horizonY + L.waterH * (0.06 + Math.random() * 0.72),
+        r: 1.1 + Math.random() * 1.9,
+        sway: Math.random() * 6.28
+      });
+    }
+
+    for (let i = falling.length - 1; i >= 0; i--) {
+      const f = falling[i];
+      f.vy += 34 * dt;
+      f.y += f.vy * dt;
+      f.x += (f.vx + Math.sin(f.y * 0.012 + f.sway) * 9) * dt;
+      if (f.y < f.hit) continue;
+      falling.splice(i, 1);
+      // it goes in, and the water says so
+      VF.fx.ripple(f.x, f.hit, W * (0.020 + f.r * 0.010), 1.5, [255, 226, 160], 1.2);
+      VF.particles.burst(f.x, f.hit, 5, {
+        color: [255, 232, 176], angle: -Math.PI / 2, spread: 1.5,
+        speedMin: 20, speedMax: 74, sizeMax: 1.7, grav: 190, lifeMax: 0.55
+      });
+      if (Math.random() < 0.22) VF.audio.splash(0.3);
+    }
+  }
+
+  function drawSkyfall() {
+    if (!falling.length) return;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    for (let i = 0; i < falling.length; i++) {
+      const f = falling[i];
+      const tail = Math.min(46, f.vy * 0.17);
+      const g = ctx.createLinearGradient(f.x, f.y - tail, f.x, f.y + f.r);
+      g.addColorStop(0, 'rgba(255,214,130,0)');
+      g.addColorStop(1, 'rgba(255,238,190,0.75)');
+      ctx.strokeStyle = g;
+      ctx.lineWidth = f.r * 0.9;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(f.x - Math.sin(f.y * 0.012 + f.sway) * 3, f.y - tail);
+      ctx.lineTo(f.x, f.y);
+      ctx.stroke();
+      const rg = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, f.r * 5);
+      rg.addColorStop(0, 'rgba(255,244,206,0.85)');
+      rg.addColorStop(0.4, 'rgba(255,214,130,0.22)');
+      rg.addColorStop(1, 'rgba(255,200,110,0)');
+      ctx.fillStyle = rg;
+      ctx.beginPath(); ctx.arc(f.x, f.y, f.r * 5, 0, TAU); ctx.fill();
+    }
     ctx.restore();
   }
 
@@ -10982,6 +11058,7 @@ input[type=range]::-moz-range-thumb {
     mark('fog', function () { drawFog(P, q); });
     mark('water', function () { drawWater(P, q); });
     mark('under', function () { drawUnderwater(P); });
+    mark('skyfall', function () { drawSkyfall(); });
     mark('ripples', function () { VF.fx.drawRipples(ctx, 0.26); });
     mark('line', function () { drawLineAndBobber(P); });
     mark('particles', function () { VF.particles.draw(ctx); });
