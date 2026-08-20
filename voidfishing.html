@@ -530,6 +530,46 @@ button:focus-visible, [tabindex]:focus-visible { outline: 1px solid var(--line-3
   .mg-track { height: 26px; }
 }
 
+/* ---------------------------------------------------------- the quest log */
+
+.quest {
+  border: 1px solid var(--line-2); border-radius: var(--r-lg);
+  background: var(--fill); padding: 14px 16px 15px; margin-bottom: 12px;
+}
+.quest.done { opacity: 0.62; }
+.quest-head { display: flex; align-items: baseline; gap: 9px; flex-wrap: wrap; }
+.quest-name { font-size: 15px; color: var(--ink); letter-spacing: 0.02em; }
+.quest-tag {
+  font-size: 9px; letter-spacing: 0.18em; padding: 2px 7px;
+  border: 1px solid currentColor; border-radius: 999px; opacity: 0.8;
+}
+.quest-of { margin-left: auto; font-family: var(--mono); font-size: 10px; color: var(--ink-3); }
+.quest-blurb { font-size: 12px; color: var(--ink-3); margin-top: 3px; }
+
+.quest-ch { margin-top: 13px; padding-top: 12px; border-top: 1px solid var(--line); }
+.quest-ch-name { font-size: 10px; letter-spacing: 0.19em; color: var(--accent); }
+.quest-text { font-size: 12.5px; color: var(--ink-2); line-height: 1.55; margin-top: 6px; }
+.quest-task {
+  margin-top: 9px; font-size: 13px; color: var(--ink);
+  display: flex; gap: 8px; align-items: baseline;
+}
+.quest-task::before { content: '▸'; color: var(--accent); font-size: 11px; }
+.quest-where { margin-top: 4px; font-size: 11.5px; color: var(--ink-3); padding-left: 18px; }
+
+.quest-track { margin-top: 10px; height: 6px; border-radius: 3px; background: rgba(255,255,255,0.06); overflow: hidden; }
+.quest-fill { height: 100%; width: 0%; border-radius: 3px; background: linear-gradient(90deg, #6d8fb8, #a8cdf0); }
+.quest.gold .quest-fill { background: linear-gradient(90deg, #c8a24e, #ffe6a8); }
+.quest-count { margin-top: 5px; font-size: 10px; letter-spacing: 0.14em; color: var(--ink-3); font-family: var(--mono); }
+
+.quest-list { margin-top: 11px; display: grid; gap: 7px; }
+.quest-item { display: flex; gap: 9px; align-items: baseline; font-size: 12px; }
+.quest-item .tick { width: 12px; flex: 0 0 12px; color: var(--ink-4); font-size: 11px; }
+.quest-item.on .tick { color: var(--good); }
+.quest-item .who { color: var(--ink-2); min-width: 118px; }
+.quest-item.on .who { color: var(--ink); }
+.quest-item .want { color: var(--ink-3); }
+.quest-done-line { margin-top: 11px; font-size: 12px; color: var(--good); letter-spacing: 0.04em; }
+
 /* ------------------------------------------------------------- prompts */
 
 .prompt {
@@ -1626,6 +1666,7 @@ input[type=range]::-moz-range-thumb {
       secrets: {},            // secret id -> discovery timestamp
       journal: [],            // { id, title, text, at, kind }
       npcs: {},               // npc id -> { met, stage, heard: [] }
+      quests: {},             // quest id -> { started, step, done, flags: {}, counts: {} }
       cosmetics: [],          // owned cosmetic ids
       equipped: {},           // cosmetic slot -> id
       cases: {},              // case id -> times opened
@@ -1734,7 +1775,8 @@ input[type=range]::-moz-range-thumb {
         // free-form maps (fishdex, baitCounts, achievements, flags) copy wholesale
         if (k === 'fishdex' || k === 'baitCounts' || k === 'achievements' || k === 'flags' ||
             k === 'mutations' || k === 'traits' || k === 'traitsSeen' || k === 'treasures' ||
-            k === 'secrets' || k === 'npcs' || k === 'equipped' || k === 'cases') {
+            k === 'secrets' || k === 'npcs' || k === 'equipped' || k === 'cases' ||
+            k === 'quests') {
           target[k] = sv;
         } else {
           merge(tv, sv);
@@ -1770,6 +1812,14 @@ input[type=range]::-moz-range-thumb {
     for (let i = 0; i < 5; i++) {
       if (d.charmSlots[i] && d.charms.indexOf(d.charmSlots[i]) < 0) d.charmSlots[i] = null;
       if (d.charmSlots[i] === undefined) d.charmSlots[i] = null;
+    }
+    if (!d.quests || typeof d.quests !== 'object' || Array.isArray(d.quests)) d.quests = {};
+    for (const qid in d.quests) {
+      const q = d.quests[qid];
+      if (!q || typeof q !== 'object') { delete d.quests[qid]; continue; }
+      q.step = Math.max(0, Math.floor(q.step) || 0);
+      if (!q.flags || typeof q.flags !== 'object') q.flags = {};
+      if (!q.counts || typeof q.counts !== 'object') q.counts = {};
     }
     if (!Array.isArray(d.cosmetics)) d.cosmetics = [];
     if (!Array.isArray(d.journal)) d.journal = [];
@@ -2094,7 +2144,9 @@ input[type=range]::-moz-range-thumb {
      eyes   0..6      glow 0..1
      ex[]   tentacles halo rings crystals antenna horns runes spine bubbles
             fracture chains stars teeth lantern mask threads wings
-   locs/baits/time/weather are preference tags. Empty array = "anywhere". */
+   locs/baits/time/weather are preference tags. Empty array = "anywhere".
+   event  optional: the species is only in the pool while that event is running.
+   strict optional: it never strays — only where locs says, never one spot over. */
 (function (VF) {
   'use strict';
 
@@ -2579,7 +2631,64 @@ input[type=range]::-moz-range-thumb {
   { id: 'g_applause', name: 'Distant Applause', rarity: 'glitch', value: 33000000, kg: [0, 0.05], m: [0, 0.05], diff: 0.90,
     desc: 'Not a thing. Not an object. It is on the hook regardless, and it is getting louder.',
     locs: [], baits: [], time: [], weather: [],
-    art: { body: 'fractal', fin: 'none', eyes: 3, glow: 1, c1: '#ffd166', c2: '#2a1a00', c3: '#ff5fa2', ex: ['rings', 'halo', 'eyes_extra'] } }
+    art: { body: 'fractal', fin: 'none', eyes: 3, glow: 1, c1: '#ffd166', c2: '#2a1a00', c3: '#ff5fa2', ex: ['rings', 'halo', 'eyes_extra'] } },
+
+  /* ======================= THE FALLEN STAR =======================
+     Two extra tags are used down here and nowhere else:
+       event   the species only exists while that event is running
+       strict  it does not stray — it is only ever where its locs say  */
+
+  { id: 'moonlit', name: 'Moonlit Fish', rarity: 'rare', value: 2600, kg: [0.8, 14.0], m: [0.3, 1.1], diff: 0.44,
+    desc: 'Rises only on nights when the moon has nothing in front of it. Some of them carry a scale that is not theirs.',
+    locs: ['basin', 'flats', 'cradle'], baits: ['prism', 'star', 'minnow'], time: ['night'], weather: ['clear'],
+    art: { body: 'round', fin: 'veil', eyes: 2, glow: 0.72, c1: '#9fb4d8', c2: '#1b2440', c3: '#f2f7ff', ex: ['halo', 'stars'] } },
+
+  { id: 'sky_ember', name: 'Sky Ember', rarity: 'uncommon', value: 900, kg: [0.1, 2.2], m: [0.1, 0.4], diff: 0.30, event: 'skyfall', evWeight: 34,
+    desc: 'Still warm from the fall. It goes out about a minute after you land it, and then it is an ordinary small fish.',
+    locs: [], baits: [], time: [], weather: [],
+    art: { body: 'torpedo', fin: 'spiky', eyes: 1, glow: 0.68, c1: '#e8a860', c2: '#3a2010', c3: '#ffe0a0', ex: ['stars'] } },
+
+  { id: 'fallen_light', name: 'Fallen Light', rarity: 'rare', value: 5200, kg: [0.4, 9.0], m: [0.2, 0.8], diff: 0.52, event: 'skyfall', evWeight: 26,
+    desc: 'It came down as a streak and it is still, faintly, going in that direction.',
+    locs: [], baits: [], time: [], weather: [],
+    art: { body: 'ribbon', fin: 'long', eyes: 2, glow: 0.85, c1: '#cfd8f2', c2: '#1a2038', c3: '#ffffff', ex: ['threads', 'stars'] } },
+
+  { id: 'meteor_carp', name: 'Meteor Carp', rarity: 'epic', value: 22000, kg: [12.0, 240.0], m: [1.0, 4.0], diff: 0.72, event: 'skyfall', evWeight: 30,
+    desc: 'Pitted all over on one side and perfectly smooth on the other. It has only ever been hit from above.',
+    locs: [], baits: [], time: [], weather: [],
+    art: { body: 'round', fin: 'frill', eyes: 2, glow: 0.55, c1: '#8f7a5e', c2: '#2a2018', c3: '#ffcf8a', ex: ['crystals', 'fracture'] } },
+
+  { id: 'celestial_guardian', name: 'Celestial Guardian', rarity: 'mythic', value: 420000, kg: [140, 2600], m: [5, 22], diff: 0.93, event: 'skyfall', evWeight: 300,
+    desc: 'It was not falling. It was coming down deliberately, and it waited to be caught. There is writing inside its largest scale.',
+    locs: [], baits: [], time: [], weather: [],
+    art: { body: 'serpent', fin: 'wing', eyes: 4, glow: 1, c1: '#e3caa0', c2: '#241a10', c3: '#fff3cc', ex: ['halo', 'rings', 'runes', 'wings'] } },
+
+  { id: 'celestial_leviathan', name: 'The Celestial Leviathan', rarity: 'void', value: 3400000, kg: [9000, 120000], m: [40, 180], diff: 0.99, event: 'trial',
+    desc: 'The thing the rod was made to catch, still waiting where the rod was dropped. Four hundred years is not a long time to it.',
+    locs: [], baits: [], time: [], weather: [],
+    art: { body: 'whale', fin: 'wing', eyes: 6, glow: 1, c1: '#f0d79c', c2: '#20180c', c3: '#fffbe8', ex: ['halo', 'rings', 'stars', 'wings', 'runes'] } },
+
+  /* --- and what lives above the clouds, once you can get up there --- */
+
+  { id: 'cloudrunner', name: 'Cloudrunner', rarity: 'rare', value: 7400, kg: [0.6, 11.0], m: [0.3, 1.0], diff: 0.50, strict: true,
+    desc: 'Swims through cloud the way everything else swims through water. It has never once been wet.',
+    locs: ['the_heavens'], baits: [], time: [], weather: [],
+    art: { body: 'ray', fin: 'wing', eyes: 2, glow: 0.6, c1: '#dfe8f5', c2: '#2a3350', c3: '#ffffff', ex: ['threads'] } },
+
+  { id: 'stratus_ray', name: 'Stratus Ray', rarity: 'epic', value: 34000, kg: [20, 420], m: [1.5, 6.0], diff: 0.70, strict: true,
+    desc: 'Flat and enormous and entirely silent. From below it is the reason the light changed.',
+    locs: ['the_heavens'], baits: [], time: [], weather: [],
+    art: { body: 'ray', fin: 'veil', eyes: 2, glow: 0.7, c1: '#c3d2ea', c2: '#1e2740', c3: '#fff4d8', ex: ['halo', 'threads'] } },
+
+  { id: 'sunspear', name: 'Sunspear', rarity: 'legendary', value: 128000, kg: [40, 900], m: [2.5, 11.0], diff: 0.88, strict: true,
+    desc: 'A single straight line of light with a mouth at one end. It hunts by being where the light already was.',
+    locs: ['the_heavens'], baits: [], time: [], weather: [],
+    art: { body: 'eel', fin: 'spiky', eyes: 1, glow: 1, c1: '#ffd98a', c2: '#3a2a0e', c3: '#fff8e0', ex: ['stars', 'spine'] } },
+
+  { id: 'astra_koi', name: "Astra's Koi", rarity: 'mythic', value: 620000, kg: [90, 1800], m: [4, 16], diff: 0.95, strict: true,
+    desc: 'Kept, once, by somebody who fished up here. Still circling the place the pond used to be.',
+    locs: ['the_heavens'], baits: [], time: [], weather: [],
+    art: { body: 'serpent', fin: 'veil', eyes: 3, glow: 0.95, c1: '#f0dcb0', c2: '#2a2012', c3: '#fff6dc', ex: ['halo', 'rings', 'stars'] } }
   ];
 
   const BY_ID = VF.util.byId(F);
@@ -2655,6 +2764,12 @@ input[type=range]::-moz-range-thumb {
       cast: 1.02, reel: 1.86, line: 6.10, rare: 3.70, luck: 1.26,
       desc: 'Visible only when it is under load. Otherwise you are holding a suggestion.',
       art: { c1: '#bfe8f5', c2: '#6f9db0', grip: '#3f5f6e', tip: '#ffffff', len: 1.28, curve: 0.05, glow: 0.78, style: 'glass' } },
+
+    /* Not for sale at any price. It arrives, once, at the end of a long thread. */
+    { id: 'heavens', name: 'Heavens Rod', cost: 0, level: 0, quest: 'heavens',
+      cast: 1.00, reel: 1.95, line: 7.20, rare: 4.10, luck: 1.45,
+      desc: 'Made by somebody who could fish anywhere, and dropped from a height four hundred years ago. It is warm, and it has been waiting.',
+      art: { c1: '#f2d78a', c2: '#8a6620', grip: '#5a4214', tip: '#fff6d0', len: 1.30, curve: 0.05, glow: 1.0, style: 'heavens' } },
 
     { id: 'void', name: 'Void Rod', cost: 40000000, level: 52,
       cast: 1.12, reel: 2.20, line: 7.60, rare: 4.60, luck: 1.65,
@@ -3245,7 +3360,20 @@ input[type=range]::-moz-range-thumb {
     { id: 'lowtide', name: 'Low Water', weight: 14, dur: [130, 260],
       blurb: 'the level has dropped and left things exposed',
       mods: { treasure: 3.0, secret: 1.8, rare: 0.9 },
-      tint: '#c8b890' }
+      tint: '#c8b890' },
+
+    /* Not in the rotation until the sky has been given a reason to answer.
+       `test` is the gate; everything above it has none and is always eligible. */
+    /* Common while somebody is waiting on one, and an occasional event
+       afterwards — the sky is not on a schedule, but it is not cruel either. */
+    { id: 'skyfall', name: 'Skyfall',
+      weight: function () { return VF.quests.at('heavens', 8) ? 150 : 26; },
+      dur: [165, 280],
+      blurb: 'things are coming down, and they are still lit when they land',
+      mods: { rare: 1.85, value: 1.45, trait: 1.25, bite: 0.78, treasure: 1.4 },
+      ember: 1, motes: 1, glow: 0.5,
+      tint: '#ffd88a', minLoc: 3,
+      test: function () { return VF.quests && VF.quests.reached('heavens', 8); } }
   ];
 
   const BY_ID = VF.util.byId(LIST);
@@ -3413,6 +3541,22 @@ input[type=range]::-moz-range-thumb {
     thinplace: { title: 'thin places', kind: 'event',
       text: 'the water gets uncommitted. you can see through it to somewhere that is not the bottom. the drifter calls these thin places and says they move, and that they are looking for something too.' },
 
+    /* --- the fallen star --- */
+    astra: { title: 'what elias said', kind: 'lore',
+      text: 'long ago something came down out of the sky and went into the water, and it was not a meteor. it was a rod. it belonged to a fisherman called astra, who is supposed to have been able to fish anywhere at all, including places with no water in them. elias was told this by somebody who was old when elias was young.' },
+    scales: { title: 'three scales', kind: 'find',
+      text: 'laid out side by side on the stone they stop being three scales and start being three points. elias put a finger between them and drew the rest of it from memory, and then sat down, which he does not do.' },
+    compass: { title: 'the celestial compass', kind: 'lore',
+      text: 'brass, glass, and five pieces that were separated on purpose by somebody who thought it was better off broken. assembled, the needle does not lie down. it stands up.' },
+    guardian: { title: 'the writing in the scale', kind: 'event',
+      text: 'the guardian was not falling. it came down on purpose and it waited. inside the largest scale, not on it, there is a line of text: "only the fisherman who can control the heavens may claim what fell from them." the astronomer read it once and went very quiet.' },
+    heavensrod: { title: 'the rod that came back down', kind: 'event',
+      text: 'the light went out of everything for about two seconds. then a single column of it, and the rod at the bottom of the column, coming down slowly enough to catch. the astronomer said you had not found it. he said you had proved you were worthy of it, and then he asked you to leave, politely, because he needed to sit down.' },
+    theheavens: { title: 'above the weather', kind: 'lore', hint: 1,
+      text: 'there is water above the cloud. flat, lit from underneath, going out further than the sea does. the rod knows the way up and does not appear to need you to agree.' },
+    callofdeep: { title: 'what elias said afterwards', kind: 'lore', hint: 1,
+      text: 'he looked at the rod for a long time and did not touch it. "so it finally chose someone," he said, and then: "if the heavens have chosen you, the ocean will come looking for you." he would not say any more than that and he has gone back to facing away.' },
+
     beneath: { title: 'below the nowhere sea', kind: 'lore', hint: 1,
       text: 'the charts stop at the nowhere sea because the people drawing them stopped. it goes further. the old fisherman has been once and will not say how, only that you have to already know it is there.' },
     thelast: { title: 'the last water', kind: 'lore', hint: 2,
@@ -3526,6 +3670,23 @@ input[type=range]::-moz-range-thumb {
         return VF.charms.owned('lantern') && VF.locations.index(d.location) >= 4;
       } },
 
+    /* Above the clouds. Never rolled for — the fallen star quest hands it over
+       when the rod arrives, and `test` exists only so tryFind ignores it. */
+    { id: 'the_heavens', name: 'THE HEAVENS', level: 0, chance: 0, journal: 'theheavens',
+      loc: { id: 'the_heavens', name: 'THE HEAVENS', level: 0,
+        tag: 'above the weather, and there is water up here',
+        desc: 'A flat calm sheet of light lying on top of the cloud, going out further than the sea does. ' +
+              'The rod knows the way. You did not, and it did not need you to.',
+        hint: 'above all of it',
+        rarityBoost: 3.40, valueBoost: 4.00, xpBoost: 48.0, biteBoost: 0.90,
+        sky: ['#2a1c3e', '#f0c07a'], water: ['#e8d6b0', '#8a6f52'], glow: '#ffe6a8',
+        fog: '#c8a878', fogAmt: 0.30, stars: 1.0, starTint: '#fff4d8',
+        horizon: 'ring', silhouette: 'none', depth: 0.34,
+        weather: ['clear', 'aurora', 'meteor'],
+        music: { root: 60, scale: [0, 4, 7, 9, 11], tempo: 0.15, pad: 0.55 } },
+      found: 'water lying on top of the cloud, with nothing under it but weather.',
+      test: function () { return false; } },
+
     /* The end of the game. Not a level unlock — you have to have been told. */
     { id: 'the_last_water', name: 'THE LAST WATER', level: 0, chance: 1,
       loc: { id: 'the_last_water', name: 'THE LAST WATER', level: 0,
@@ -3562,7 +3723,7 @@ input[type=range]::-moz-range-thumb {
     d.stats.secretsFound++;
     if (d.unlockedLocations.indexOf(s.loc.id) < 0) d.unlockedLocations.push(s.loc.id);
     VF.locations.register(s.loc);
-    VF.journal.add(s.final ? 'thelast' : 'beneath');
+    VF.journal.add(s.journal || (s.final ? 'thelast' : 'beneath'));
     VF.bus.emit('secret:found', s);
     VF.save.save();
     return true;
@@ -3613,7 +3774,13 @@ input[type=range]::-moz-range-thumb {
   'use strict';
 
   /* Each NPC has stages. A stage unlocks when its `at` test passes, and the
-     player has to actually go and talk to them to hear it. */
+     player has to actually go and talk to them to hear it.
+
+     `quest[]` is a second, independent track. Lore stages are strictly ordered
+     and stop at the first one the player has not earned — which is right for
+     lore and fatal for a quest, because an unrelated late-game lore gate would
+     silently make a quest step unreachable. Quest stages are counted
+     separately and are what somebody says first when they have both. */
   const LIST = [
     { id: 'keeper', name: 'The Keeper', role: 'shop', color: '#c8a870',
       where: 'behind the counter, always',
@@ -3634,6 +3801,13 @@ input[type=range]::-moz-range-thumb {
                   'the archivist will want to hear about it. i would rather you did not tell me.'] },
         { at: function (d) { return VF.secrets.found('the_last_water'); },
           lines: ['so you found it.', 'close the door behind you on the way out. it will not matter, but close it anyway.'] }
+      ],
+      quest: [
+        { at: function (d) { return VF.quests.reached('heavens', 6) && d.ownedRods.length >= 6; },
+          lines: ['the third shelf. i said not to ask about the third shelf.',
+                  'yes, i have a piece of it. brass, curved, no use to anybody. it came in with a box of tackle forty years ago and i could never sell it.',
+                  'six rods you have bought off me. that makes you a customer, and i do favours for customers. take it and stop looking at the shelf.'],
+          quest: { id: 'heavens', flag: 'compass_keeper' } }
       ] },
 
     { id: 'archivist', name: 'The Archivist', role: 'lore', color: '#8fb8e8',
@@ -3656,6 +3830,13 @@ input[type=range]::-moz-range-thumb {
           journal: 'firstvoid' },
         { at: function (d) { return VF.charms.owned('eye'); },
           lines: ['take it out of here.', 'i am not being dramatic. i am being specific. take it out of this room.'] }
+      ],
+      quest: [
+        { at: function (d) { return VF.quests.reached('heavens', 6) && Object.keys(d.fishdex).length >= 40; },
+          lines: ['forty species. forty. i have been asking people to do that for a very long time and they keep going fishing instead.',
+                  'the glass wedge from the compass, yes. it is catalogued under objects that point at things. it is the only entry in that category.',
+                  'i am giving it to you because you filled in the record, not because of what you intend to do with it. i want that on the record as well.'],
+          quest: { id: 'heavens', flag: 'compass_archivist' } }
       ] },
 
     { id: 'fisherman', name: 'The Old Fisherman', role: 'clue', color: '#a8c890',
@@ -3680,6 +3861,37 @@ input[type=range]::-moz-range-thumb {
           lines: ['one more, then. under everything, where the map is not a map of anything but a lid.',
                   'you will not find it by going deeper. you find it by already knowing it is there. i have told you. now you know.'],
           journal: 'thelast' }
+      ],
+      alt: function () { return VF.quests.started('heavens') ? 'Elias' : null; },
+      quest: [
+        { at: function () { return VF.quests.started('heavens'); },
+          lines: ['you have caught plenty of fish. you have never once caught anything that came from the sky.',
+                  'no, sit down. long ago something fell out of the heavens and went into the ocean, and it was not a meteor. it was a rod.',
+                  'a fisherman called astra made it. they say he could fish anywhere at all — over the trench, over the cloud, over places with no water in them to speak of. then he dropped it, or it was taken off him, and it came down.',
+                  'my name is elias, by the way. you have never asked, and i have been sat here a long time.',
+                  'the sky does not give up its secrets easily. start by catching what swims beneath the moon.'],
+          quest: { id: 'heavens', advance: true }, journal: 'astra' },
+
+        { at: function () { return VF.quests.reached('heavens', 2); },
+          lines: ['put them on the stone. side by side. no — that way up.',
+                  '...that is it. that is it, i have not seen that shape since i was a boy and a man who is dead now drew it in the sand for me.',
+                  'it is not a picture of anything in the water. it is a bearing, and i cannot read it. i know exactly one person who can and i have not spoken to him in fifty years.',
+                  'the astronomer. up where the ground runs out. tell him elias sent you and then stand well back.'],
+          quest: { id: 'heavens', advance: true }, journal: 'scales' },
+
+        { at: function (d) { return VF.quests.reached('heavens', 6) && d.stats.legendaryCatches >= 3; },
+          lines: ['a piece of the compass. yes. i have had it in a tin since before you were born.',
+                  'i was not keeping it from you. i was keeping it from the version of you that had never held anything that fought back.',
+                  'three legendaries. that version of you is gone. here.'],
+          quest: { id: 'heavens', flag: 'compass_fisherman' } },
+
+        { at: function () { return VF.quests.complete('heavens'); },
+          lines: ['so it finally chose someone.',
+                  'do not look at me like that. i have been waiting to find out who, that is all.',
+                  'if the heavens have chosen you...',
+                  'then the ocean will come looking for you. it is not a threat. it is a schedule.',
+                  'go home. rest the arm. it will not be long.'],
+          journal: 'callofdeep' }
       ] },
 
     { id: 'drifter', name: 'The Drifter', role: 'wander', color: '#b8a8e8',
@@ -3702,6 +3914,56 @@ input[type=range]::-moz-range-thumb {
           journal: 'firstwrong' },
         { at: function (d) { return VF.secrets.found('the_last_water'); },
           lines: ['ah.', 'i will not be coming with you. i have been. that is why i drift.'] }
+      ],
+      quest: [
+        { at: function (d) { return VF.quests.reached('heavens', 6) && VF.charms.owned('lantern'); },
+          lines: ['you have got it. the lantern. i wondered where that had ended up and now i know, which is worse.',
+                  'i was not going to say a word about the compass. not to you, not to anybody. i have been not saying a word about it for a very long time.',
+                  'but you went and found the one thing of mine that proves i was there when it was broken. so.',
+                  'the needle. i have the needle. take it and do not tell the astronomer i was the one who had it.'],
+          quest: { id: 'heavens', flag: 'compass_drifter' } }
+      ] },
+
+    /* Only turns up in the list once elias has said the name out loud. Every
+       stage after the first is a chapter of the fallen star, so his dialogue
+       and the quest cannot get out of step with one another. */
+    { id: 'astronomer', name: 'The Astronomer', role: 'quest', color: '#ffd88a',
+      where: 'up where the ground runs out, under a roof that opens',
+      blurb: 'Watches the one part of the sky nothing is supposed to come out of.',
+      stages: [
+        { at: function () { return VF.quests.reached('heavens', 3); },
+          lines: ['no. i know what elias told you and the answer is no.',
+                  'the heavens rod is not a treasure. it is a test, and i have watched it fail people who were better at this than you are.',
+                  'so. three things. patience, precision, and fortune — and fortune is not luck, it is what you do with a spot you did not choose.',
+                  'land one without ever letting it out of the bar. land one on a bar barely wide enough to be called one. and land something rare where i tell you to, not where you would rather.'],
+          quest: { id: 'heavens', advance: true }, journal: 'astra' },
+
+        { at: function () { return VF.quests.reached('heavens', 5); },
+          lines: ['three. good. i did not expect three.',
+                  'your scales are a constellation and the constellation is a bearing, and the bearing is to a place called the skyfall depths.',
+                  'no, you cannot get there. nobody can. that is not pessimism, it is arithmetic — you need the celestial compass and the celestial compass was broken on purpose, into five pieces, by somebody who thought that was the responsible thing to do.',
+                  'five people have them. i am not going to tell you which five. you already know all of them.'],
+          quest: { id: 'heavens', advance: true } },
+
+        { at: function () { return VF.quests.reached('heavens', 7); },
+          lines: ['put them on the table. do not hand them to me.',
+                  '...',
+                  'it is not pointing north. it is not pointing at anything on the water at all.',
+                  'it is pointing up. wait for a skyfall — the sky answers occasionally, and only in the deep water. fish through it. something will come down that did not fall.'],
+          quest: { id: 'heavens', advance: true }, journal: 'compass' },
+
+        { at: function () { return VF.quests.reached('heavens', 9); },
+          lines: ['there is writing inside the scale. inside it. not on it.',
+                  '"only the fisherman who can control the heavens may claim what fell from them."',
+                  'i have read that sentence for forty years as a riddle. it is not a riddle. it is an instruction.',
+                  'go and cast. it will find you — the storm first, then the lightning, then the void, and then the heavens themselves. four of them, and it does not stop between.'],
+          quest: { id: 'heavens', advance: true } },
+
+        { at: function () { return VF.quests.complete('heavens'); },
+          lines: ['you did not find the heavens rod.',
+                  'you proved you were worthy of it. those are not the same sentence and i would like you to remember which one this was.',
+                  'there is water above the cloud now. the rod knows the way and it will not explain it to you. i have stopped asking things to explain themselves.',
+                  'go on. i need to sit down.'] }
       ] },
 
     { id: 'collector', name: 'The Collector', role: 'cosmetic', color: '#e8a0c8',
@@ -3721,6 +3983,14 @@ input[type=range]::-moz-range-thumb {
           lines: ['at this point you have better taste than i do, which is professionally humiliating.',
                   'take this one. it was never for sale.'],
           gives: 'cosmetic' }
+      ],
+      quest: [
+        { at: function (d) { return VF.quests.reached('heavens', 6) && d.cosmetics.length >= 16; },
+          lines: ['a compass piece. yes. it is the most useless object i own and i own a great deal of competition.',
+                  'it does nothing. it points nowhere. it is a piece of a thing that has been broken longer than it was ever whole. i adore it.',
+                  'sixteen useless things in your wardrobe. you understand the appeal now, which means i can part with it without feeling that it has gone somewhere unappreciative.',
+                  'take it. do not put it back together in front of me.'],
+          quest: { id: 'heavens', flag: 'compass_collector' } }
       ] }
   ];
 
@@ -3742,22 +4012,34 @@ input[type=range]::-moz-range-thumb {
     return d.npcs[id];
   }
 
-  /* The highest stage whose condition is satisfied. */
-  function availableStage(npc) {
+  /* The highest entry in a track whose condition is satisfied. */
+  function availableIn(list) {
     const d = VF.state.data;
     let n = -1;
-    for (let i = 0; i < npc.stages.length; i++) {
+    for (let i = 0; i < list.length; i++) {
       let ok = false;
-      try { ok = npc.stages[i].at(d); } catch (e) { ok = false; }
+      try { ok = list[i].at(d); } catch (e) { ok = false; }
       if (ok) n = i; else break;
     }
     return n;
   }
+  function availableStage(npc) { return availableIn(npc.stages || []); }
+  function availableQuest(npc) { return npc.quest ? availableIn(npc.quest) : -1; }
 
   function hasNew(id) {
     const npc = BY_ID[id];
     if (!npc) return false;
-    return availableStage(npc) > peek(id).stage - 1;
+    const r = peek(id);
+    if (availableQuest(npc) > (r.qstage | 0) - 1) return true;
+    return availableStage(npc) > r.stage - 1;
+  }
+
+  /* Some people are introduced before they are named. */
+  function nameOf(id) {
+    const npc = BY_ID[id];
+    if (!npc) return '';
+    if (npc.alt) { try { return npc.alt(VF.state.data) || npc.name; } catch (e) { /* ignore */ } }
+    return npc.name;
   }
 
   function anyNew() {
@@ -3773,24 +4055,35 @@ input[type=range]::-moz-range-thumb {
     const npc = BY_ID[id];
     if (!npc) return null;
     const r = rec(id);
-    const avail = availableStage(npc);
+    // a thread that is actually running is what they lead with
+    const qa = availableQuest(npc);
+    const onQuest = qa >= (r.qstage | 0);
+    const list = onQuest ? npc.quest : (npc.stages || []);
+    const avail = onQuest ? qa : availableStage(npc);
     if (avail < 0) return null;
-    const stage = Math.min(avail, r.stage);
-    const def = npc.stages[stage];
-    const first = stage >= r.stage;
+    const cur = onQuest ? (r.qstage | 0) : r.stage;
+    const stage = Math.min(avail, cur);
+    const def = list[stage];
+    if (!def) return null;
+    const first = stage >= cur;
     r.met++;
     let done = false;
     function commit() {
       if (done || !first) return;
       done = true;
       if (def.journal) VF.journal.add(def.journal);
+      if (def.quest && VF.quests) VF.quests.fromNpc(def.quest);
       if (def.gives) VF.bus.emit('npc:gives', { npc: npc, gives: def.gives });
       VF.bus.emit('npc:advanced', { npc: npc, stage: stage });
       VF.save.save();
     }
     if (first) {
-      r.stage = stage + 1;
-      if (r.heard.indexOf(stage) < 0) r.heard.push(stage);
+      if (onQuest) {
+        r.qstage = stage + 1;
+      } else {
+        r.stage = stage + 1;
+        if (r.heard.indexOf(stage) < 0) r.heard.push(stage);
+      }
     }
     const res = { npc: npc, stage: stage, lines: def.lines, fresh: first, commit: commit };
     if (!(opts && opts.defer)) commit();
@@ -3799,7 +4092,8 @@ input[type=range]::-moz-range-thumb {
 
   function unlocked(id) {
     const npc = BY_ID[id];
-    return !!npc && availableStage(npc) >= 0;
+    if (!npc) return false;
+    return availableStage(npc) >= 0 || availableQuest(npc) >= 0 || peek(id).met > 0;
   }
 
   VF.npcs = {
@@ -3807,7 +4101,289 @@ input[type=range]::-moz-range-thumb {
     get: function (id) { return BY_ID[id] || null; },
     rec: rec, peek: peek, talk: talk, hasNew: hasNew, anyNew: anyNew,
     met: function (id) { return peek(id).met > 0; },
-    unlocked: unlocked, availableStage: availableStage
+    name: nameOf,
+    unlocked: unlocked, availableStage: availableStage, availableQuest: availableQuest
+  };
+})(window.VF = window.VF || {});
+
+/* js/data/quests.js */
+/* VOID FISHING — the long threads.
+   A quest is an ordered list of chapters. A chapter is either somewhere to go
+   and someone to talk to, or something to do out on the water; the engine in
+   js/systems/quests.js decides which and watches for it.
+
+   Nothing here blocks anything. A quest is a reason to go somewhere you were
+   already able to go, and the fish do not know it is happening. */
+(function (VF) {
+  'use strict';
+
+  /* The five who hold the compass. Each wants something different, and none of
+     them will discuss it until they have it — the requirement is the whole
+     conversation, so the player finds out what it was by satisfying it. */
+  const COMPASS = [
+    { npc: 'keeper',
+      want: 'six rods on your rack. he does favours for customers, not for strangers',
+      test: function (d) { return d.ownedRods.length >= 6; } },
+    { npc: 'archivist',
+      want: 'forty species in the record. she trades in what is written down',
+      test: function (d) { return Object.keys(d.fishdex).length >= 40; } },
+    { npc: 'fisherman',
+      want: 'three legendary catches. he wants to see you hold something that fights',
+      test: function (d) { return d.stats.legendaryCatches >= 3; } },
+    { npc: 'drifter',
+      want: 'the lantern he left somewhere. he will not say one word until you have it',
+      test: function (d) { return VF.charms.owned('lantern'); } },
+    { npc: 'collector',
+      want: 'sixteen useless things in the wardrobe. he deals only in those',
+      test: function (d) { return d.cosmetics.length >= 16; } }
+  ];
+
+  function compassHave(d) {
+    let n = 0;
+    for (let i = 0; i < COMPASS.length; i++) if (d.quests.heavens &&
+      d.quests.heavens.flags['compass_' + COMPASS[i].npc]) n++;
+    return n;
+  }
+
+  /* The three the Astronomer sets. Each is a way of catching a fish rather
+     than a fish to catch, so they are read off the fight that just ended. */
+  const TRIALS = [
+    { id: 'patience', name: 'Patience',
+      task: 'land a fish without ever letting it out of the white bar' },
+    { id: 'precision', name: 'Precision',
+      task: 'land a fish whose white bar is a fifth of the track or narrower' },
+    { id: 'fortune', name: 'Fortune',
+      task: 'land something rare at a spot he picks for you' }
+  ];
+
+  const PRECISION_BAR = 0.20;
+
+  const LIST = [
+    {
+      id: 'heavens',
+      name: 'The Fallen Star',
+      giver: 'fisherman',
+      blurb: 'Something fell out of the sky a long time ago, and it was not a meteor.',
+      difficulty: 'extreme',
+      /* Offered once there is enough behind the player that the old fisherman
+         will bother telling them. */
+      start: function (d) {
+        return d.level >= 22 && d.stats.catches >= 120 &&
+               (d.npcs.fisherman && d.npcs.fisherman.stage >= 2);
+      },
+
+      chapters: [
+        /* ------------------------------------------------------- 0 */
+        { id: 'elias', name: 'The Old Fisherman',
+          talk: 'fisherman',
+          task: 'go and see the old fisherman',
+          text: 'He has been at the far end of the shore for as long as anyone remembers, ' +
+                'and today he is facing the water instead of away from it.' },
+
+        /* ------------------------------------------------------- 1 */
+        { id: 'moonlit', name: 'Fishing Under The Moon',
+          task: 'gather three celestial scales from moonlit fish',
+          where: 'moonlit fish rise on clear nights, in water that has a moon over it',
+          text: 'Elias says the sky does not give up its secrets easily, and to start ' +
+                'with what swims beneath the moon. Not every moonlit fish is carrying a scale. ' +
+                'Most are not.',
+          goal: function (q) { return { have: q.counts.scales | 0, need: 3, unit: 'celestial scales' }; },
+          onCatch: function (q, c) {
+            if (c.kind !== 'fish' || c.id !== 'moonlit') return;
+            q.counts.moonlit = (q.counts.moonlit | 0) + 1;
+            // roughly one in two carries one, and the tenth is a mercy
+            const sure = (q.counts.moonlit | 0) >= 10 && (q.counts.scales | 0) < 3;
+            if (sure || VF.rng.g() < 0.52) {
+              q.counts.scales = Math.min(3, (q.counts.scales | 0) + 1);
+              VF.bus.emit('quest:item', { quest: 'heavens', name: 'Celestial Scale',
+                have: q.counts.scales, need: 3,
+                note: 'it is warm, and it is not reflecting anything that is here' });
+            } else {
+              VF.bus.emit('quest:note', { text: 'no scale on this one' });
+            }
+          },
+          done: function (q) { return (q.counts.scales | 0) >= 3; } },
+
+        /* ------------------------------------------------------- 2 */
+        { id: 'constellation', name: 'The Constellation',
+          talk: 'fisherman',
+          task: 'take the three scales back to elias',
+          text: 'Laid side by side on the stone, the scales are not three scales. ' +
+                'They are three points of one shape.' },
+
+        /* ------------------------------------------------------- 3 */
+        { id: 'astronomer', name: 'The Astronomer',
+          talk: 'astronomer',
+          task: 'find the astronomer',
+          where: 'up where the ground runs out, under a roof that opens',
+          text: 'Elias has not said that name out loud in fifty years. He says it now ' +
+                'the way you say the name of somebody you owe money to.' },
+
+        /* ------------------------------------------------------- 4 */
+        { id: 'trials', name: 'Three Proofs',
+          task: 'pass the astronomer’s three trials',
+          text: 'He does not believe the rod is a treasure. He believes it is a test, ' +
+                'and he is not going to help somebody who would fail it.',
+          onEnter: function (q, d) {
+            /* Fortune is fortune: the spot is drawn when the trial is set, and
+               it is drawn from water the player can actually reach. */
+            const open = d.unlockedLocations.filter(function (id) {
+              return VF.locations.isRegistered(id);
+            });
+            q.flags.fortuneLoc = open.length ? VF.rng.g.pick(open) : 'shore';
+          },
+          goal: function (q) {
+            let n = 0;
+            for (let i = 0; i < TRIALS.length; i++) if (q.flags['trial_' + TRIALS[i].id]) n++;
+            return { have: n, need: TRIALS.length, unit: 'trials passed' };
+          },
+          checklist: function (q) {
+            return TRIALS.map(function (t) {
+              let task = t.task;
+              if (t.id === 'fortune') {
+                const l = VF.locations.get(q.flags.fortuneLoc);
+                task = 'land something rare at ' + (l ? l.name : 'the shore');
+              }
+              return { label: t.name, task: task, done: !!q.flags['trial_' + t.id] };
+            });
+          },
+          onCatch: function (q, c, fight, d) {
+            if (c.kind !== 'fish') return;
+            function pass(id) {
+              if (q.flags['trial_' + id]) return;
+              q.flags['trial_' + id] = Date.now();
+              const t = VF.util.byId(TRIALS)[id];
+              VF.bus.emit('quest:trial', { quest: 'heavens', id: id, name: t ? t.name : id });
+            }
+            // patience: it never once left the bar
+            if (fight.perfect) pass('patience');
+            // precision: the bar was a fifth of the track or narrower
+            if (fight.barW && fight.barW <= PRECISION_BAR) pass('precision');
+            // fortune: something rare, at the spot the sky picked
+            if (VF.rarities.rank(c.rarity) >= 2 && c.location === q.flags.fortuneLoc) pass('fortune');
+          },
+          done: function (q) {
+            for (let i = 0; i < TRIALS.length; i++) if (!q.flags['trial_' + TRIALS[i].id]) return false;
+            return true;
+          } },
+
+        /* ------------------------------------------------------- 5 */
+        { id: 'skyfalldepths', name: 'The Skyfall Depths',
+          talk: 'astronomer',
+          task: 'hear what the constellation points at',
+          text: 'Three proofs, and he still has not said he will help. He has only ' +
+                'stopped saying he will not.' },
+
+        /* ------------------------------------------------------- 6 */
+        { id: 'compass', name: 'The Broken Compass',
+          task: 'recover the five pieces of the celestial compass',
+          text: 'It was broken on purpose, by somebody who thought it should stay broken. ' +
+                'The pieces went to five people who each had a reason to keep one, and none ' +
+                'of them will hand it over for the asking.',
+          goal: function (q, d) { return { have: compassHave(d), need: 5, unit: 'compass pieces' }; },
+          checklist: function (q, d) {
+            return COMPASS.map(function (c) {
+              const npc = VF.npcs.get(c.npc);
+              return { label: npc ? VF.npcs.name(c.npc) : c.npc, task: c.want,
+                       done: !!q.flags['compass_' + c.npc] };
+            });
+          },
+          done: function (q, d) { return compassHave(d) >= 5; } },
+
+        /* ------------------------------------------------------- 7 */
+        { id: 'itpointsup', name: 'It Points Up',
+          talk: 'astronomer',
+          task: 'take the five pieces to the astronomer',
+          text: 'Five pieces of brass and glass, and the needle in the middle of them ' +
+                'has not had anywhere to point for four hundred years.' },
+
+        /* ------------------------------------------------------- 8 */
+        { id: 'skyfall', name: 'Skyfall',
+          task: 'fish through a skyfall and land the celestial guardian',
+          where: 'skyfall comes to the deeper water, and it does not last long',
+          onEnter: function () { if (VF.conditions) VF.conditions.hasten(40); },
+          text: 'The compass does not point across the water. It points at the sky, ' +
+                'and the astronomer says the sky answers — occasionally, and on its own schedule.',
+          goal: function (q) { return { have: q.counts.guardian | 0, need: 1, unit: 'celestial guardian' }; },
+          onCatch: function (q, c) {
+            if (c.kind === 'fish' && c.id === 'celestial_guardian') {
+              q.counts.guardian = 1;
+              VF.journal.add('guardian');
+            }
+          },
+          done: function (q) { return (q.counts.guardian | 0) >= 1; } },
+
+        /* ------------------------------------------------------- 9 */
+        { id: 'message', name: 'The Message In The Scale',
+          talk: 'astronomer',
+          task: 'take the guardian’s scale to the astronomer',
+          text: 'There is writing inside the scale. It is not on the scale. It is inside it.' },
+
+        /* ------------------------------------------------------ 10 */
+        { id: 'trial', name: 'Heaven’s Trial',
+          task: 'cast, and hold on through all four phases',
+          where: 'anywhere. it will find you',
+          text: '“Only the fisherman who can control the heavens may claim what fell ' +
+                'from them.” Four phases. The storm, the lightning, the void, and then ' +
+                'the heavens themselves. Nothing else is on the end of the line until it is over.',
+          armsTrial: true,
+          goal: function (q) { return { have: q.counts.leviathan | 0, need: 1, unit: 'celestial leviathan' }; },
+          onCatch: function (q, c) {
+            if (c.kind === 'fish' && c.id === 'celestial_leviathan') q.counts.leviathan = 1;
+          },
+          done: function (q) { return (q.counts.leviathan | 0) >= 1; } }
+      ],
+
+      /* Heaven's Trial. Four phases, gated on the meter rather than a clock,
+         and it does not stop between them. The numbers here are the shape of
+         each phase; js/systems/loot.js applies the player's rod and charms on
+         top, so the loadout still counts for something at the very top. */
+      trial: {
+        fish: 'celestial_leviathan',
+        phases: [
+          /* the bar is wide and the fish is slow: this phase is here to be
+             survived while the player works out what the fight is */
+          { at: 0.00, name: 'The Storm',     start: 0.30,
+            barW: 0.235, barSpeed: 1.15, fishSpeed: 0.55, fishTurn: 0.70, dart: 0.30,
+            fill: 0.200, drain: 0.235 },
+          /* it stops drifting and starts jumping */
+          { at: 0.30, name: 'The Lightning',
+            barW: 0.205, barSpeed: 1.30, fishSpeed: 0.70, fishTurn: 0.30, dart: 0.65,
+            fill: 0.190, drain: 0.260 },
+          /* the zone closes to two thirds of what it was */
+          { at: 0.56, name: 'The Void',
+            barW: 0.150, barSpeed: 1.40, fishSpeed: 0.76, fishTurn: 0.42, dart: 0.48,
+            fill: 0.178, drain: 0.285 },
+          /* everything at once, and it reads the bar — but the meter climbs
+             fastest here, so the last fifth is a sprint rather than a wall */
+          { at: 0.80, name: 'The Heavens',
+            barW: 0.128, barSpeed: 1.55, fishSpeed: 0.90, fishTurn: 0.24, dart: 0.70,
+            evade: 0.18, fill: 0.250, drain: 0.330 }
+        ]
+      },
+
+      /* The rod does not get handed over. It arrives. */
+      onComplete: function () {
+        const d = VF.state.data;
+        if (d.ownedRods.indexOf('heavens') < 0) d.ownedRods.push('heavens');
+        d.rod = 'heavens';
+        VF.bus.emit('gear:changed');
+        VF.secrets.discover('the_heavens');
+        d.flags.heavensRod = true;
+        VF.journal.add('heavensrod');
+        VF.achievements.check();
+      }
+    }
+  ];
+
+  const BY_ID = VF.util.byId(LIST);
+
+  VF.questData = {
+    list: LIST,
+    get: function (id) { return BY_ID[id] || null; },
+    COMPASS: COMPASS,
+    TRIALS: TRIALS,
+    PRECISION_BAR: PRECISION_BAR
   };
 })(window.VF = window.VF || {});
 
@@ -4197,6 +4773,15 @@ input[type=range]::-moz-range-thumb {
       test: function (d) { return d.stats.perfectReels >= 10; } },
     { id: 'snapped', name: 'It Happens', desc: 'Lose one to a fish that ran clean out of the bar. Everyone does eventually.', reward: 50,
       test: function (d) { return d.stats.linesSnapped >= 1; } },
+    { id: 'chosen_stars', name: 'Chosen by the Stars', desc: 'Take the Heavens Rod out of the sky it fell from.',
+      hidden: true, reward: 250000,
+      test: function (d) { return !!(d.quests.heavens && d.quests.heavens.done); } },
+    { id: 'above_weather', name: 'Above the Weather', desc: 'Land something in the water above the clouds.',
+      hidden: true, reward: 120000,
+      test: function (d) {
+        return !!(d.fishdex.cloudrunner || d.fishdex.stratus_ray ||
+                  d.fishdex.sunspear || d.fishdex.astra_koi);
+      } },
     { id: 'encounters', name: 'Something Is Below You', desc: 'Survive 5 legendary encounters.', reward: 30000,
       test: function (d) { return d.stats.encounters >= 5; } },
     { id: 'patient', name: 'Patient', desc: 'Spend two hours at the water.', reward: 5000,
@@ -4655,14 +5240,21 @@ input[type=range]::-moz-range-thumb {
 
   function available() {
     const li = VF.locations.index(VF.state.data.location);
+    const d = VF.state.data;
     return VF.conditionData.list.filter(function (c) {
-      return !c.minLoc || li >= c.minLoc;
+      if (c.minLoc && li < c.minLoc) return false;
+      // some water does not do a thing until it has been given a reason to
+      if (c.test) { try { return !!c.test(d); } catch (e) { return false; } }
+      return true;
     });
   }
 
   function start(id) {
     const pool = available();
-    const c = id ? VF.conditionData.get(id) : VF.rng.weighted(pool, function (x) { return x.weight; }, VF.rng.g);
+    const c = id ? VF.conditionData.get(id)
+      : VF.rng.weighted(pool, function (x) {
+          return typeof x.weight === 'function' ? x.weight() : x.weight;
+        }, VF.rng.g);
     if (!c) return false;
     active = c;
     remain = VF.rng.g.range(c.dur[0], c.dur[1]);
@@ -4710,8 +5302,16 @@ input[type=range]::-moz-range-thumb {
 
   function reset() { active = null; remain = 0; blend = 0; idle = 90; }
 
+  /* Bring the next roll forward without forcing a particular condition — the
+     sky still decides, it just decides sooner. */
+  function hasten(sec) {
+    if (active) return false;
+    idle = Math.min(idle, Math.max(8, sec || 30));
+    return true;
+  }
+
   VF.conditions = {
-    tick: tick, mods: mods, start: start, end: end, reset: reset,
+    tick: tick, mods: mods, start: start, end: end, reset: reset, hasten: hasten,
     current: function () { return active; },
     name: function () { return active ? active.name : null; },
     strength: function () { return active ? U.smoothstep(blend) : 0; },
@@ -4720,6 +5320,12 @@ input[type=range]::-moz-range-thumb {
   };
 
   VF.bus.on('location:changed', reset);
+
+  /* A skyfall that came and went without giving up what somebody was waiting
+     for should not mean another hour of ordinary water. */
+  VF.bus.on('condition:end', function (c) {
+    if (c && c.id === 'skyfall' && VF.quests && VF.quests.at('heavens', 8)) hasten(75);
+  });
 })(window.VF = window.VF || {});
 
 /* js/systems/economy.js */
@@ -4822,9 +5428,14 @@ input[type=range]::-moz-range-thumb {
     if (!f.locs.length) return 1;                 // "anywhere" species
     let best = 99;
     for (let i = 0; i < f.locs.length; i++) {
+      // a spot nobody has discovered yet is not a spot: locations.index()
+      // answers 0 for an unknown id, which would put its fish on the shore
+      if (!VF.locations.isRegistered(f.locs[i])) continue;
       const d = Math.abs(VF.locations.index(f.locs[i]) - locIdx);
       if (d < best) best = d;
     }
+    if (best === 99) return 0;
+    if (f.strict) return best === 0 ? 1 : 0;      // never one spot over
     return best < STRAY.length ? STRAY[best] : 0;
   }
 
@@ -4890,17 +5501,18 @@ input[type=range]::-moz-range-thumb {
     const rp = rarityPower(opts);
     const minRank = opts.minRank || 0;
 
-    const candidates = minRank
-      ? p.pool.filter(function (e) { return VF.rarities.rank(e.f.rarity) >= minRank; })
-      : p.pool;
+    // event species are not in the water unless their event is happening, so
+    // the pool is filtered per cast rather than per location
+    const candidates = p.pool.filter(function (e) {
+      if (e.f.event && !(VF.quests && VF.quests.eventActive(e.f.event))) return false;
+      if (minRank && VF.rarities.rank(e.f.rarity) < minRank) return false;
+      return true;
+    });
     if (!candidates.length) return VF.fish.byId('smallmouth') || VF.fish.list[0];
 
-    let counts = p.perRarity;
-    if (minRank) {
-      counts = Object.create(null);
-      for (let i = 0; i < candidates.length; i++) {
-        counts[candidates[i].f.rarity] = (counts[candidates[i].f.rarity] || 0) + candidates[i].stray;
-      }
+    const counts = Object.create(null);
+    for (let i = 0; i < candidates.length; i++) {
+      counts[candidates[i].f.rarity] = (counts[candidates[i].f.rarity] || 0) + candidates[i].stray;
     }
     const means = prefMeans(p, loc.id);
 
@@ -4910,7 +5522,10 @@ input[type=range]::-moz-range-thumb {
       const mean = means[e.f.rarity] || 1;
       // presence < 1 means this tier only drifts in from elsewhere — damp it
       const presence = Math.min(1, n);
-      return (VF.rarities.weightAt(r, rp) * presence * e.stray / n) * (prefBonus(e.f) / mean);
+      let w = (VF.rarities.weightAt(r, rp) * presence * e.stray / n) * (prefBonus(e.f) / mean);
+      // an event is only an event if the things it brings actually turn up
+      if (e.f.event && e.f.evWeight) w *= e.f.evWeight;
+      return w;
     }, VF.rng.g);
 
     return chosen ? chosen.f : candidates[0].f;
@@ -4989,10 +5604,52 @@ input[type=range]::-moz-range-thumb {
        the fish   species difficulty, rarity rank, how big this one is, traits
        the rod    line strength widens the white bar, reel force steadies it
        the charms barSize and barSpeed, straight off the worn loadout          */
-  function fightParams(c) {
+  /* What the rod and the worn charms are worth to the white bar, pulled out on
+     its own so a scripted fight can apply the same loadout to numbers it wrote
+     itself. Gear has to matter in the heaven's trial too, or the trial is not
+     a test of the player, it is a test of a constant. */
+  function loadout() {
     const rod = VF.rods.get(VF.state.data.rod);
     const b = (VF.build ? VF.build.stats() : null) ||
               { line: 1, reel: 1, barSize: 1, barSpeed: 1 };
+    const q = U.clamp((rod.reel * b.reel - 0.40) / 2.70, 0, 1.25);
+    const lineTotal = Math.max(0.25, rod.line * b.line);
+    return {
+      q: q,
+      rodBar: 1 + 0.155 * (Math.log(lineTotal) / Math.LN2),
+      barSize: b.barSize,
+      barMul: U.clamp(b.barSpeed * (1 - 0.20 * q), 0.30, 2.2),
+      fillMul: 1 + 0.35 * q
+    };
+  }
+
+  /* One phase of a scripted fight. The phase writes the shape of it; the
+     loadout still moves the numbers, on exactly the same terms as a normal
+     fight, so a better rod is a better rod all the way to the top. */
+  function trialParams(ph) {
+    const L = loadout();
+    const stiff = ph.fishStiff || 24;
+    const barTop = Math.max(0.80, ph.fishSpeed * 1.45) * (ph.barSpeed || 1);
+    return {
+      diff: 1.15,
+      barW: U.clamp(ph.barW * L.rodBar * L.barSize, 0.050, 0.46),
+      barSpeed: Math.max(ph.fishSpeed * 1.20, barTop * L.barMul),
+      barTau: 0.170 / (1 + 0.60 * L.q),
+      fishSpeed: ph.fishSpeed,
+      fishStiff: stiff,
+      fishDrag: 1.10 * Math.sqrt(stiff),
+      fishTurn: ph.fishTurn,
+      dart: ph.dart,
+      evade: ph.evade || 0,
+      wobble: ph.wobble || 0.045,
+      fill: ph.fill * L.fillMul,
+      drain: ph.drain,
+      start: ph.start || 0.30
+    };
+  }
+
+  function fightParams(c) {
+    const L = loadout();
     const f = c.fish;
     const rank = VF.rarities.rank(c.rarity);
     const tf = VF.traits.fight(c.traits);
@@ -5001,15 +5658,6 @@ input[type=range]::-moz-range-thumb {
        in the catalogue. Traits push past 1, which is the point of them. */
     const raw = f.diff * 0.55 + rank * 0.100 + c.pct * 0.16;
     const D = U.clamp(((raw - 0.05) / 1.25) * Math.pow(tf.power, 0.55), 0, 1.15);
-
-    /* Rod quality, 0 at the wooden rod and 1 at the top of the shop. Reel force
-       is what the fight reads; charms that touch `reel` fold in here. */
-    const q = U.clamp((rod.reel * b.reel - 0.40) / 2.70, 0, 1.25);
-
-    /* Line strength is what makes the bar wide, but the rod list spans 12x —
-       through a log so the last rod is an upgrade, not the whole track. */
-    const lineTotal = Math.max(0.25, rod.line * b.line);
-    const rodBar = 1 + 0.155 * (Math.log(lineTotal) / Math.LN2);
 
     const stam = U.clamp(tf.stamina, 0.7, 1.7);
     const surge = U.clamp(tf.surge, 0.6, 2.2);
@@ -5021,7 +5669,6 @@ input[type=range]::-moz-range-thumb {
        of them must never drop it below the fish it has to chase, or the fight
        stops being a question of control and becomes one of arithmetic. */
     const barTop = Math.max(0.74, fishSpeed * 1.45);
-    const barMul = U.clamp(b.barSpeed * (1 - 0.20 * q), 0.30, 2.2);
 
     return {
       diff: D,
@@ -5031,9 +5678,9 @@ input[type=range]::-moz-range-thumb {
          the minigame: a rarer fish is harder to *hold*, never impossible to
          *reach*, so losing one is a mistake the player made rather than a
          race the numbers had already decided. */
-      barW: U.clamp((0.300 - 0.195 * D) * rodBar * b.barSize, 0.055, 0.52),
-      barSpeed: Math.max(fishSpeed * 1.20, barTop * barMul),       // track widths / second
-      barTau: 0.170 / (1 + 0.60 * q),                              // seconds to reach it
+      barW: U.clamp((0.300 - 0.195 * D) * L.rodBar * L.barSize, 0.055, 0.52),
+      barSpeed: Math.max(fishSpeed * 1.20, barTop * L.barMul),     // track widths / second
+      barTau: 0.170 / (1 + 0.60 * L.q),                            // seconds to reach it
 
       /* --- the fish --- */
       fishSpeed: fishSpeed,                             // top speed of the indicator
@@ -5045,7 +5692,7 @@ input[type=range]::-moz-range-thumb {
       wobble: 0.020 + 0.040 * D,
 
       /* --- the progress bar --- */
-      fill: (0.400 - 0.170 * D) / stam * (1 + 0.35 * q),
+      fill: (0.400 - 0.170 * D) / stam * L.fillMul,
       drain: 0.230 + 0.260 * D,
       start: 0.33,
 
@@ -5056,6 +5703,8 @@ input[type=range]::-moz-range-thumb {
     roll: roll,
     pickFish: pickFish,
     fightParams: fightParams,
+    trialParams: trialParams,
+    loadout: loadout,
     rarityPower: rarityPower,
     invalidatePool: function () { for (const k in poolCache) delete poolCache[k]; prefKey = ''; }
   };
@@ -5102,6 +5751,7 @@ input[type=range]::-moz-range-thumb {
     fight: null,
 
     lastResult: null,
+    lastFight: null,     // how the last fight went, for anything watching
     encounterActive: false
   };
 
@@ -5165,6 +5815,8 @@ input[type=range]::-moz-range-thumb {
               (1 - U.clamp(rod.cast * 0.12, 0, 0.22)) *
               (1 - U.clamp(S.castPower * 0.10, 0, 0.10));
     S.biteWait = U.clamp(base * k, 1.6, 22);
+    // it is already there. it has been there for four hundred years.
+    if (VF.quests && VF.quests.anyArmed()) S.biteWait = Math.min(S.biteWait, 2.6);
     S.nibbleTimer = VF.rng.g.range(1.0, 2.4);
     S.nibble = 0;
     setState('waiting');
@@ -5175,6 +5827,21 @@ input[type=range]::-moz-range-thumb {
 
   function triggerBite(opts) {
     opts = opts || {};
+
+    /* A quest that has put something specific in the water gets first refusal:
+       no treasure, no roll, and the window is generous — losing the heaven's
+       trial to a slow hand on the hookset would be a poor way to lose it. */
+    const armed = VF.quests && VF.quests.anyArmed();
+    if (armed && armed.trial && !opts.minRank) {
+      S.pending = VF.loot.roll({ forceFish: armed.trial.fish });
+      S.pending.kind = 'fish';
+      S.pending.trial = armed.trial;
+      S.biteWindow = BITE_WINDOW_BIG;
+      setState('bite');
+      VF.bus.emit('fishing:bite', S.pending);
+      return;
+    }
+
     if (S.sweet && !opts.minRank) opts = Object.assign({}, opts, { rareBoost: 1.12 });
 
     // an encounter is always a fish; otherwise the hook may have found an object
@@ -5216,7 +5883,10 @@ input[type=range]::-moz-range-thumb {
 
   function hook() {
     if (S.state !== 'bite' || !S.pending) return false;
-    const p = S.pending.kind === 'treasure' ? treasureFight() : VF.loot.fightParams(S.pending);
+    const spec = S.pending.trial || null;
+    const p = spec ? VF.loot.trialParams(spec.phases[0])
+            : S.pending.kind === 'treasure' ? treasureFight()
+            : VF.loot.fightParams(S.pending);
     S.fight = {
       c: S.pending,
       p: p,
@@ -5245,9 +5915,15 @@ input[type=range]::-moz-range-thumb {
 
       /* derived each frame for the scene, the angler and the audio */
       tension: 0.40, surge: 0, distance: 1, stamina: 1,
-      shakeAmt: 0, reeling: true
+      shakeAmt: 0, reeling: true,
+
+      /* a scripted fight walks its phases as the meter climbs, and never
+         walks back down them */
+      trial: spec ? { spec: spec, i: 0 } : null
     };
     S.pending = null;
+    if (spec) VF.bus.emit('fishing:phase', { fight: S.fight, index: 0,
+      name: spec.phases[0].name, of: spec.phases.length });
     setState('reeling');
     VF.bus.emit('fishing:hooked', S.fight);
     return true;
@@ -5311,6 +5987,23 @@ input[type=range]::-moz-range-thumb {
      Slicing it keeps the fight identical at 144Hz and at 15fps. */
   const MAX_STEP = 1 / 60;
 
+  /* Phases are gated on the meter rather than on a clock, so the fight is as
+     long as the player makes it, and they only ever go one way — losing ground
+     inside the void does not put you back in the storm. */
+  function advancePhase(f) {
+    const ph = f.trial.spec.phases;
+    let want = f.trial.i;
+    for (let i = f.trial.i + 1; i < ph.length; i++) if (f.progress >= ph[i].at) want = i;
+    if (want === f.trial.i) return;
+    f.trial.i = want;
+    const np = VF.loot.trialParams(ph[want]);
+    f.p = np;
+    f.barW = np.barW;
+    // the walls move; the bar stays where the player left it
+    f.bar = U.clamp(f.bar, np.barW / 2, 1 - np.barW / 2);
+    VF.bus.emit('fishing:phase', { fight: f, index: want, name: ph[want].name, of: ph.length });
+  }
+
   function updateFight(dt) {
     if (!S.fight) { hardReset(); return; }
     let left = dt;
@@ -5323,6 +6016,7 @@ input[type=range]::-moz-range-thumb {
 
   function stepFight(dt) {
     const f = S.fight;
+    if (f.trial) advancePhase(f);
     const p = f.p;
     f.elapsed += dt;
 
@@ -5409,6 +6103,11 @@ input[type=range]::-moz-range-thumb {
     const f = S.fight;
     const c = f.c;
     const d = VF.state.data;
+
+    // the fight is about to be thrown away; anything that wants to know how it
+    // went — the quest trials, mostly — reads it from here
+    S.lastFight = { perfect: f.perfect, barW: f.barW, diff: f.p.diff,
+                    elapsed: f.elapsed, trial: !!f.trial };
 
     if (c.kind === 'treasure') { landTreasure(c, f); return; }
 
@@ -6227,6 +6926,213 @@ input[type=range]::-moz-range-thumb {
     talking: function () { return S.phase === 'talk'; },
     npc: function () { return S.npc; }
   };
+})(window.VF = window.VF || {});
+
+/* js/systems/quests.js */
+/* VOID FISHING — running the long threads.
+
+   The engine knows nothing about any particular quest. It keeps a record per
+   quest, offers a quest when its `start` test passes, and walks the chapters:
+   a chapter with `talk` waits for that conversation, a chapter with `done`
+   waits for the water. Chapters do their own thinking through `onCatch`,
+   `onEnter` and `onDone`, so adding a quest means adding data, not code.
+
+   Everything it touches is inside d.quests[id], which is a free-form map in
+   the save — an old save simply has none, and the first tick builds it. */
+(function (VF) {
+  'use strict';
+
+  function rec(id) {
+    const d = VF.state.data;
+    if (!d.quests[id]) d.quests[id] = { started: 0, step: 0, done: 0, flags: {}, counts: {} };
+    const q = d.quests[id];
+    if (!q.flags) q.flags = {};
+    if (!q.counts) q.counts = {};
+    return q;
+  }
+
+  /* Read-only: asking about a quest must not start one. */
+  function peek(id) { return VF.state.data.quests[id] || null; }
+
+  function started(id) { const q = peek(id); return !!(q && q.started); }
+  function complete(id) { const q = peek(id); return !!(q && q.done); }
+  function step(id) { const q = peek(id); return q ? q.step : -1; }
+
+  /* Monotone, which is what the NPC stage tests need: once the quest has been
+     this far it has always been this far, so a stage never becomes unavailable
+     again and the conversation order cannot go backwards. */
+  function reached(id, n) {
+    const q = peek(id);
+    return !!q && !!q.started && q.step >= n;
+  }
+  function at(id, n) { return !complete(id) && step(id) === n; }
+
+  function chapter(id) {
+    const def = VF.questData.get(id), q = peek(id);
+    if (!def || !q || !q.started || q.done) return null;
+    return def.chapters[q.step] || null;
+  }
+
+  /* What the journal draws: where the player is and what is left of it. */
+  function objective(id) {
+    const ch = chapter(id);
+    if (!ch) return null;
+    const q = peek(id), d = VF.state.data;
+    const out = { chapter: ch, task: ch.task, where: ch.where || null, text: ch.text || null,
+                  goal: null, checklist: null, talk: ch.talk || null };
+    if (ch.goal) { try { out.goal = ch.goal(q, d); } catch (e) { /* a bad quest must not eat the panel */ } }
+    if (ch.checklist) { try { out.checklist = ch.checklist(q, d); } catch (e) { /* ditto */ } }
+    return out;
+  }
+
+  /* ------------------------------------------------------------- driving */
+
+  function offer(def) {
+    const d = VF.state.data;
+    if (d.quests[def.id] && d.quests[def.id].started) return false;
+    let ok = false;
+    try { ok = def.start ? def.start(d) : true; } catch (e) { ok = false; }
+    if (!ok) return false;
+    const q = rec(def.id);
+    q.started = Date.now();
+    q.step = 0;
+    const first = def.chapters[0];
+    if (first && first.onEnter) { try { first.onEnter(q, d); } catch (e) { /* ignore */ } }
+    VF.bus.emit('quest:started', def);
+    VF.save.save();
+    return true;
+  }
+
+  function advance(id) {
+    const def = VF.questData.get(id), q = rec(id);
+    if (!def || q.done) return;
+    const d = VF.state.data;
+    const ch = def.chapters[q.step];
+    if (ch && ch.onDone) { try { ch.onDone(q, d); } catch (e) { /* ignore */ } }
+    q.step++;
+    if (q.step >= def.chapters.length) {
+      q.step = def.chapters.length;
+      q.done = Date.now();
+      if (def.onComplete) { try { def.onComplete(); } catch (e) { console.error('[quest]', e); } }
+      VF.bus.emit('quest:complete', def);
+    } else {
+      const nx = def.chapters[q.step];
+      if (nx && nx.onEnter) { try { nx.onEnter(q, d); } catch (e) { /* ignore */ } }
+      VF.bus.emit('quest:step', { quest: def, step: q.step, chapter: nx });
+    }
+    VF.save.save();
+  }
+
+  /* A chapter that is waiting on the water finishes itself. One that is
+     waiting on a conversation does not — being able to hear it is not the
+     same as having heard it. */
+  function evaluate(id) {
+    const def = VF.questData.get(id), q = peek(id);
+    if (!def || !q || !q.started || q.done) return;
+    let guard = 0;
+    while (guard++ < 16) {
+      const ch = def.chapters[q.step];
+      if (!ch || ch.talk || !ch.done) return;
+      let ok = false;
+      try { ok = ch.done(q, VF.state.data); } catch (e) { ok = false; }
+      if (!ok) return;
+      advance(id);
+      if (q.done) return;
+    }
+  }
+
+  /* Called by npcs.talk once the conversation has actually been had. */
+  function fromNpc(spec) {
+    if (!spec || !spec.id) return;
+    const q = rec(spec.id);
+    if (spec.flag && !q.flags[spec.flag]) {
+      q.flags[spec.flag] = Date.now();
+      VF.bus.emit('quest:flag', { quest: VF.questData.get(spec.id), flag: spec.flag });
+    }
+    if (spec.count) q.counts[spec.count] = (q.counts[spec.count] | 0) + 1;
+    if (spec.advance) {
+      const def = VF.questData.get(spec.id);
+      const ch = def && def.chapters[q.step];
+      if (ch && ch.talk) advance(spec.id);
+    }
+    evaluate(spec.id);
+    VF.save.save();
+  }
+
+  /* ------------------------------------------------------------- the water */
+
+  function onCatch(c) {
+    for (let i = 0; i < VF.questData.list.length; i++) {
+      const def = VF.questData.list[i];
+      const q = peek(def.id);
+      if (!q || !q.started || q.done) continue;
+      const ch = def.chapters[q.step];
+      if (!ch || !ch.onCatch) continue;
+      try { ch.onCatch(q, c, VF.fishing.S.lastFight || {}, VF.state.data); }
+      catch (e) { console.error('[quest]', e); }
+      evaluate(def.id);
+    }
+  }
+
+  /* Species tagged with an `event` only exist while that event is happening. */
+  function eventActive(tag) {
+    if (tag === 'skyfall') return !!(VF.conditions && VF.conditions.has('skyfall'));
+    return false;
+  }
+
+  /* Is the current chapter the one that puts something enormous on the line? */
+  function armed(id) {
+    const ch = chapter(id);
+    return !!(ch && ch.armsTrial);
+  }
+  function anyArmed() {
+    for (let i = 0; i < VF.questData.list.length; i++) {
+      if (armed(VF.questData.list[i].id)) return VF.questData.list[i];
+    }
+    return null;
+  }
+
+  /* Quests the player can see: started ones first, then finished ones. */
+  function visible() {
+    const out = [];
+    for (let i = 0; i < VF.questData.list.length; i++) {
+      const def = VF.questData.list[i];
+      const q = peek(def.id);
+      if (q && q.started) out.push({ def: def, q: q, done: !!q.done });
+    }
+    out.sort(function (a, b) { return (a.done ? 1 : 0) - (b.done ? 1 : 0); });
+    return out;
+  }
+  function activeCount() {
+    let n = 0;
+    const v = visible();
+    for (let i = 0; i < v.length; i++) if (!v[i].done) n++;
+    return n;
+  }
+
+  /* Offers are cheap to test and the tests read stats that change constantly,
+     so this runs on a slow beat rather than every frame. */
+  let acc = 0;
+  function tick(dt) {
+    acc += dt;
+    if (acc < 1.5) return;
+    acc = 0;
+    for (let i = 0; i < VF.questData.list.length; i++) {
+      const def = VF.questData.list[i];
+      if (!started(def.id)) offer(def);
+      else evaluate(def.id);
+    }
+  }
+
+  VF.quests = {
+    tick: tick, rec: rec, peek: peek, objective: objective, chapter: chapter,
+    started: started, complete: complete, step: step, reached: reached, at: at,
+    fromNpc: fromNpc, onCatch: onCatch, advance: advance, evaluate: evaluate,
+    eventActive: eventActive, armed: armed, anyArmed: anyArmed,
+    visible: visible, activeCount: activeCount
+  };
+
+  VF.bus.on('fishing:landed', onCatch);
 })(window.VF = window.VF || {});
 
 /* js/render/palette.js */
@@ -8032,6 +8938,62 @@ input[type=range]::-moz-range-thumb {
         ctx.restore();
         break;
       }
+      /* Rings of light standing off the blank, sparks running up it, and a
+         burst of feathered gold where the hand goes. It is not subtle. It is
+         not supposed to be. */
+      case 'heavens': {
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+
+        for (let i = 0; i < 5; i++) {
+          const k = 0.30 + i * 0.155;
+          const p = at(k);
+          const q = at(Math.min(0.999, k + 0.02));
+          const ang = Math.atan2(q.y - p.y, q.x - p.x);
+          const puls = 0.62 + 0.38 * Math.sin(t * 2.1 - i * 0.9);
+          const r = Math.max(2.2, (5.6 - i * 0.5) * scale) * puls;
+          ctx.strokeStyle = U.rgbToCss(tipRgb, 0.55 * puls);
+          ctx.lineWidth = Math.max(0.7, 1.5 * scale);
+          ctx.beginPath();
+          ctx.ellipse(p.x, p.y, r, r * 0.34, ang, 0, TAU);
+          ctx.stroke();
+        }
+
+        // sparks travelling toward the tip
+        for (let i = 0; i < 6; i++) {
+          const k = ((t * 0.30 + i / 6) % 1) * 0.74 + 0.24;
+          const p = at(k);
+          const a = 0.6 * Math.sin(k * Math.PI);
+          const r = Math.max(0.9, 2.0 * scale);
+          const grd = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r * 3.2);
+          grd.addColorStop(0, U.rgbToCss(tipRgb, a));
+          grd.addColorStop(1, U.rgbToCss(tipRgb, 0));
+          ctx.fillStyle = grd;
+          ctx.beginPath(); ctx.arc(p.x, p.y, r * 3.2, 0, TAU); ctx.fill();
+        }
+
+        // the burst at the butt
+        const b = at(0.16);
+        const br = Math.max(5, 11 * scale);
+        const bg = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, br);
+        bg.addColorStop(0, U.rgbToCss(tipRgb, 0.55));
+        bg.addColorStop(0.45, U.rgbToCss(tipRgb, 0.16));
+        bg.addColorStop(1, U.rgbToCss(tipRgb, 0));
+        ctx.fillStyle = bg;
+        ctx.beginPath(); ctx.arc(b.x, b.y, br, 0, TAU); ctx.fill();
+        ctx.strokeStyle = U.rgbToCss(tipRgb, 0.42);
+        ctx.lineWidth = Math.max(0.6, 1.1 * scale);
+        for (let i = 0; i < 7; i++) {
+          const a2 = (i / 7) * TAU + t * 0.25;
+          const l = br * (0.62 + 0.38 * Math.sin(t * 1.7 + i * 2.1));
+          ctx.beginPath();
+          ctx.moveTo(b.x + Math.cos(a2) * br * 0.28, b.y + Math.sin(a2) * br * 0.28);
+          ctx.lineTo(b.x + Math.cos(a2) * l, b.y + Math.sin(a2) * l);
+          ctx.stroke();
+        }
+        ctx.restore();
+        break;
+      }
       case 'glitch': {
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
@@ -9017,13 +9979,14 @@ input[type=range]::-moz-range-thumb {
      stoop:  how far the spine folds forward
      hat:    'cap' | 'brim' | 'hood' | 'tall' | null
      coat:   'apron' | 'robe' | 'oilskin' | 'rags' | 'tails'
-     prop:   'book' | 'rod' | 'case' | 'lantern' | null      */
+     prop:   'book' | 'rod' | 'case' | 'scope' | null       */
   const KIND = {
     keeper:    { h: 0.94, build: 1.22, stoop: 0.10, hat: 'cap',  coat: 'apron',   prop: null,      arms: 'crossed' },
     archivist: { h: 1.06, build: 0.86, stoop: 0.05, hat: null,   coat: 'robe',    prop: 'book',    arms: 'hold' },
     fisherman: { h: 0.92, build: 1.05, stoop: 0.30, hat: 'brim', coat: 'oilskin', prop: 'rod',     arms: 'shoulder' },
     drifter:   { h: 1.00, build: 0.95, stoop: 0.00, hat: 'hood', coat: 'rags',    prop: null,      arms: 'down', drift: 1 },
-    collector: { h: 1.02, build: 0.92, stoop: 0.02, hat: 'tall', coat: 'tails',   prop: 'case',    arms: 'one' }
+    collector: { h: 1.02, build: 0.92, stoop: 0.02, hat: 'tall', coat: 'tails',   prop: 'case',    arms: 'one' },
+    astronomer:{ h: 1.04, build: 0.88, stoop: 0.14, hat: 'hood', coat: 'robe',    prop: 'scope',   arms: 'one' }
   };
 
   function tone(rgb, k) {
@@ -9379,6 +10342,28 @@ input[type=range]::-moz-range-thumb {
         ctx.moveTo(hand.x - face * H * 0.20, hand.y + H * 0.30);
         ctx.quadraticCurveTo(hand.x, hand.y - H * 0.06, hand.x + face * H * 0.22, hand.y - H * 0.34);
         ctx.stroke();
+        break;
+      }
+      /* A short refractor, carried muzzle-up the way you carry something you
+         have already decided not to put down. */
+      case 'scope': {
+        ctx.save();
+        ctx.translate(hand.x, hand.y);
+        ctx.rotate(face * -0.62 + Math.sin(t * 0.5) * 0.02);
+        const L = H * 0.20, w = H * 0.026;
+        ctx.fillStyle = U.rgbToCss(U.mixRgb(cloth, accent, 0.28));
+        if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(-w * 0.5, -L * 0.62, w, L, w * 0.4); ctx.fill(); }
+        else ctx.fillRect(-w * 0.5, -L * 0.62, w, L);
+        // the wider objective at the sky end
+        ctx.fillStyle = U.rgbToCss(U.mixRgb(accent, [255, 255, 255], 0.35), 0.85);
+        if (ctx.roundRect) { ctx.beginPath(); ctx.roundRect(-w * 0.78, -L * 0.70, w * 1.56, L * 0.16, w * 0.3); ctx.fill(); }
+        else ctx.fillRect(-w * 0.78, -L * 0.70, w * 1.56, L * 0.16);
+        ctx.strokeStyle = U.rgbToCss(U.mixRgb(accent, [255, 255, 255], 0.5), 0.30);
+        ctx.lineWidth = Math.max(0.5, H * 0.004);
+        ctx.beginPath();
+        ctx.moveTo(-w * 0.5, -L * 0.20); ctx.lineTo(w * 0.5, -L * 0.20);
+        ctx.stroke();
+        ctx.restore();
         break;
       }
       case 'case': {
@@ -11706,6 +12691,7 @@ input[type=range]::-moz-range-thumb {
   const D = {};
   let shownMoney = 0;
   let pressed = false;
+  let shownBarW = -1;
   let hintTimer = 0;
   let promptTimer = 0;
 
@@ -11890,9 +12876,24 @@ input[type=range]::-moz-range-thumb {
         VF.toast.plain('It shook the hook loose', 'warn', 2600);
         showPrompt('It got away', '#ffc36a', 1.0);
       }
+      if (VF.quests.anyArmed()) {
+        VF.toast.plain('it goes back up, and it waits. cast again.', null, 4200);
+      }
       VF.achievements.check();
     });
-    VF.bus.on('fishing:landed', function () { VF.audio.reelStop(); });
+    VF.bus.on('fishing:landed', function () {
+      VF.audio.reelStop();
+      // the heavens rod does not land a fish quietly
+      if (VF.state.data.rod !== 'heavens') return;
+      const b = VF.scene.L.bobber;
+      VF.fx.ripple(b.x, b.y, VF.scene.L.w * 0.085, 1.9, [255, 232, 176], 1.8);
+      VF.fx.ripple(b.x, b.y, VF.scene.L.w * 0.045, 1.2, [255, 246, 214], 1.2);
+      VF.fx.pulse(0.30);
+      VF.particles.burst(b.x, b.y, 26, {
+        color: [255, 230, 168], angle: -Math.PI / 2, spread: 2.2,
+        speedMin: 40, speedMax: 210, sizeMax: 2.6, grav: 120, lifeMax: 1.5
+      });
+    });
     VF.bus.on('fishing:reelin', function () { VF.audio.reelStop(); });
 
     VF.bus.on('money:changed', function () { /* animated in tick */ });
@@ -11912,6 +12913,88 @@ input[type=range]::-moz-range-thumb {
     VF.bus.on('bait:bought', refreshGear);
     VF.bus.on('bait:changed', refreshGear);
     VF.bus.on('gear:changed', refreshGear);
+
+    /* ------------------------------------------------------- the long threads */
+
+    VF.bus.on('quest:started', function (def) {
+      VF.audio.discover();
+      VF.fx.pulse(0.4);
+      VF.toast.show('<strong>' + U.esc(def.name) + '</strong><br><span style="color:var(--ink-3)">' +
+        U.esc(def.blurb) + '</span>', null, 7000);
+      flashMenu('journal');
+    });
+
+    VF.bus.on('quest:step', function (e) {
+      VF.audio.click();
+      VF.toast.show('<strong>' + U.esc(e.quest.name) + '</strong><br><span style="color:var(--ink-3)">' +
+        U.esc(e.chapter.task) + '</span>', null, 6000);
+      flashMenu('journal');
+    });
+
+    VF.bus.on('quest:item', function (o) {
+      VF.audio.discover();
+      VF.fx.pulse(0.35);
+      VF.toast.show('<strong>' + U.esc(o.name) + '</strong> ' + o.have + ' / ' + o.need +
+        (o.note ? '<br><span style="color:var(--ink-3)">' + U.esc(o.note) + '</span>' : ''), 'good', 5200);
+      flashMenu('journal');
+    });
+
+    VF.bus.on('quest:flag', function (o) {
+      VF.audio.discover();
+      VF.toast.plain('a piece of the celestial compass', 'good', 4200);
+      flashMenu('journal');
+    });
+
+    VF.bus.on('quest:trial', function (o) {
+      VF.audio.achievement();
+      VF.fx.pulse(0.45);
+      showPrompt(o.name, '#ffd88a', 1.2);
+      VF.toast.plain('trial passed — ' + o.name.toLowerCase(), 'good', 4000);
+      flashMenu('journal');
+    });
+
+    VF.bus.on('quest:note', function (o) { VF.toast.plain(o.text, null, 2200); });
+
+    /* Four phases, and each one announces itself before it starts hurting. */
+    VF.bus.on('fishing:phase', function (e) {
+      VF.audio.surge();
+      VF.fx.shake(4.5 + e.index * 1.6, 4);
+      VF.fx.pulse(0.5 + e.index * 0.12);
+      VF.fx.flash(e.index >= 3 ? 'rgba(255,228,160,0.22)' : 'rgba(190,215,255,0.13)', 0.26, 1.6);
+      showPrompt(e.name, e.index >= 3 ? '#ffe6a8' : '#cfe0ff', 1.1);
+      if (D.fightName) {
+        D.fightName.textContent = 'heaven’s trial · ' + e.name.toLowerCase() +
+                                  ' · ' + (e.index + 1) + ' of ' + e.of;
+        D.fightName.style.color = '#ffd88a';
+      }
+    });
+
+    /* The light goes out, and then it comes back in one column. */
+    VF.bus.on('quest:complete', function (def) {
+      VF.audio.stinger('void', 7);
+      VF.fx.flash('rgba(0,0,0,0.96)', 1.0, 0.9);
+      D.hud.classList.add('dimmed');
+      setTimeout(function () {
+        VF.fx.flash('rgba(255,240,200,0.85)', 1.0, 1.1);
+        VF.fx.pulse(1);
+        VF.fx.shake(9, 3);
+        VF.audio.stinger('grand', 6);
+        const L = VF.scene.L;
+        VF.particles.burst(L.w * 0.5, L.h * 0.28, 90, {
+          color: [255, 232, 176], angle: Math.PI / 2, spread: 0.5,
+          speedMin: 40, speedMax: 320, sizeMax: 3.2, grav: -30, lifeMax: 2.4
+        });
+        showPrompt('the heavens rod', '#ffe6a8', 3.0);
+      }, 1500);
+      setTimeout(function () {
+        D.hud.classList.remove('dimmed');
+        VF.toast.show('<strong>' + U.esc(def.name) + '</strong> — complete<br>' +
+          '<span style="color:var(--ink-3)">one ancient power has awakened. something beneath ' +
+          'the ocean has noticed.</span>', 'good', 12000);
+        flashMenu('journal');
+        refreshGear();
+      }, 3400);
+    });
 
     VF.bus.on('ui:toast', function (o) { VF.toast.plain(o.text, o.kind); });
     VF.bus.on('ui:whisper', function () {
@@ -12099,7 +13182,7 @@ input[type=range]::-moz-range-thumb {
     const npc = V.npc();
     if (line !== capLine || npc !== capNpc) {
       capLine = line; capNpc = npc; capReady = false;
-      document.getElementById('captionWho').textContent = npc ? npc.name.toLowerCase() : '';
+      document.getElementById('captionWho').textContent = npc ? VF.npcs.name(npc.id).toLowerCase() : '';
       document.getElementById('captionWho').style.color = npc ? npc.color : 'var(--ink-3)';
       const txt = document.getElementById('captionText');
       txt.textContent = line;
@@ -12280,9 +13363,9 @@ input[type=range]::-moz-range-thumb {
         : VF.traits.prefix(f.c.traits) + f.c.fish.name;
       D.fightName.style.color = col;
       D.mgFish.style.setProperty('--fishcol', col);
-      // the bar is sized once: it is a property of this fish and this loadout,
-      // and resizing it mid-fight would move the walls under the player
-      D.mgBar.style.width = (f.barW * 100).toFixed(2) + '%';
+      // sized here and then only when the fight itself moves the walls, which
+      // ordinarily never happens and in the heaven's trial happens four times
+      shownBarW = -1;
       // a phone has no space bar, and the same press model reaches the screen
       const key = touchOnly() ? 'hold' : 'hold <b>space</b>';
       D.fightHint.innerHTML = VF.state.data.stats.catches < 5
@@ -12291,6 +13374,10 @@ input[type=range]::-moz-range-thumb {
     }
 
     /* the bar and the fish */
+    if (f.barW !== shownBarW) {
+      shownBarW = f.barW;
+      D.mgBar.style.width = (f.barW * 100).toFixed(2) + '%';
+    }
     D.mgBar.style.left = ((f.bar - f.barW * 0.5) * 100).toFixed(3) + '%';
     D.mgFish.style.left = (f.fish * 100).toFixed(3) + '%';
     D.mgFish.classList.toggle('left', f.fishV < -0.02);
@@ -12491,7 +13578,8 @@ input[type=range]::-moz-range-thumb {
       case 'map': return buildMap();
       case 'cases': return buildCases();
       case 'wardrobe': return buildWardrobe(tab || 'all');
-      case 'journal': return buildJournal(tab || 'entries');
+      // a running quest is what the journal is for while there is one
+      case 'journal': return buildJournal(tab || (VF.quests.activeCount() ? 'quests' : 'entries'));
       default: return shell('—');
     }
   }
@@ -12515,6 +13603,8 @@ input[type=range]::-moz-range-thumb {
       const list = U.el('div', 'list');
       VF.rods.list.forEach(function (rod) {
         const owned = d.ownedRods.indexOf(rod.id) >= 0;
+        // a rod that is earned is never on the shelf; it turns up once it is yours
+        if (rod.quest && !owned) return;
         const levelOk = d.level >= rod.level;
         const voidOk = !rod.requiresVoidCatch || d.stats.voidCatches >= 1;
         const locked = !levelOk || !voidOk;
@@ -13038,14 +14128,24 @@ input[type=range]::-moz-range-thumb {
     const d = VF.state.data;
     const p = shell('Journal', d.journal.length + ' entries · ' +
                     Object.keys(d.secrets).length + ' hidden places found');
+    const qn = VF.quests.activeCount();
     p.appendChild(tabs([
+      { id: 'quests', label: 'quests' + (qn ? ' ' + qn : '') },
       { id: 'entries', label: 'entries' },
       { id: 'people', label: 'people' + (VF.npcs.anyNew() ? ' •' : '') },
       { id: 'records', label: 'records' }
     ], tab, function (t) { refresh(t); }));
     const b = body();
 
-    if (tab === 'entries') {
+    if (tab === 'quests') {
+      const open = VF.quests.visible();
+      if (!open.length) {
+        b.appendChild(U.el('div', 'empty',
+          'nothing is asking anything of you yet. keep fishing, and talk to people.'));
+      } else {
+        open.forEach(function (v) { b.appendChild(questCard(v)); });
+      }
+    } else if (tab === 'entries') {
       if (!d.journal.length) {
         b.appendChild(U.el('div', 'empty', 'nothing written down yet. keep fishing.'));
       } else {
@@ -13067,7 +14167,7 @@ input[type=range]::-moz-range-thumb {
         mark.style.background = known ? n.color : 'var(--line-2)';
         el.appendChild(mark);
         const main = U.el('div');
-        const nm = U.el('div', 'npc-name', known ? n.name : '?????');
+        const nm = U.el('div', 'npc-name', known ? VF.npcs.name(n.id) : '?????');
         main.appendChild(nm);
         main.appendChild(U.el('div', 'npc-where', known ? n.where : 'you have not run into them yet'));
         if (known) main.appendChild(U.el('div', 'npc-blurb', n.blurb));
@@ -13133,6 +14233,70 @@ input[type=range]::-moz-range-thumb {
     }
     p.appendChild(b);
     return p;
+  }
+
+  /* One quest, and where in it the player currently is. Everything drawn here
+     comes off the quest definition, so a second quest needs no new UI. */
+  function questCard(v) {
+    const def = v.def, q = v.q;
+    const card = U.el('div', 'quest' + (v.done ? ' done' : '') + (def.id === 'heavens' ? ' gold' : ''));
+
+    const head = U.el('div', 'quest-head');
+    head.appendChild(U.el('span', 'quest-name', def.name));
+    if (def.difficulty) {
+      const t = U.el('span', 'quest-tag', def.difficulty);
+      t.style.color = v.done ? 'var(--good)' : '#ffd88a';
+      head.appendChild(t);
+    }
+    head.appendChild(U.el('span', 'quest-of', v.done ? 'complete'
+      : 'chapter ' + (q.step + 1) + ' / ' + def.chapters.length));
+    card.appendChild(head);
+    card.appendChild(U.el('div', 'quest-blurb', def.blurb));
+
+    if (v.done) {
+      card.appendChild(U.el('div', 'quest-done-line', 'finished. it is in the journal.'));
+      return card;
+    }
+
+    const o = VF.quests.objective(def.id);
+    if (!o) return card;
+
+    const ch = U.el('div', 'quest-ch');
+    ch.appendChild(U.el('div', 'quest-ch-name', o.chapter.name));
+    if (o.text) ch.appendChild(U.el('div', 'quest-text', o.text));
+    ch.appendChild(U.el('div', 'quest-task', o.task));
+    if (o.talk) {
+      const who = VF.npcs.name(o.talk);
+      const ready = VF.npcs.hasNew(o.talk);
+      ch.appendChild(U.el('div', 'quest-where',
+        ready ? who.toLowerCase() + ' is waiting to say it' : 'you need ' + who.toLowerCase() + ' first'));
+    } else if (o.where) {
+      ch.appendChild(U.el('div', 'quest-where', o.where));
+    }
+
+    if (o.goal) {
+      const tr = U.el('div', 'quest-track');
+      const fl = U.el('div', 'quest-fill');
+      fl.style.width = Math.round(U.clamp(o.goal.have / Math.max(1, o.goal.need), 0, 1) * 100) + '%';
+      tr.appendChild(fl);
+      ch.appendChild(tr);
+      ch.appendChild(U.el('div', 'quest-count', o.goal.have + ' / ' + o.goal.need + ' ' + o.goal.unit));
+    }
+
+    if (o.checklist && o.checklist.length) {
+      const list = U.el('div', 'quest-list');
+      o.checklist.forEach(function (it) {
+        const row = U.el('div', 'quest-item' + (it.done ? ' on' : ''));
+        row.appendChild(U.el('span', 'tick', it.done ? '\u2713' : '\u25cb'));
+        row.appendChild(U.el('span', 'who', it.label));
+        row.appendChild(U.el('span', 'want', it.done ? 'given' : it.task));
+        list.appendChild(row);
+      });
+      ch.appendChild(list);
+    }
+
+    card.appendChild(ch);
+    return card;
   }
 
   /* Talking is not a card any more — the panel closes and the two of you go
@@ -14589,6 +15753,7 @@ input[type=range]::-moz-range-thumb {
         VF.fishing.tick(dt);
         VF.conditions.tick(dt);
         VF.encounters.tick(dt);
+        VF.quests.tick(dt);
         VF.wrong.tick(dt);
         VF.achievements.tick(dt);
         VF.state.data.stats.playSeconds += dt;
