@@ -6978,6 +6978,13 @@ input[type=range]::-moz-range-thumb {
     const loc = VF.locations.current();
     const build = VF.build ? VF.build.stats() : null;
     const cond = VF.conditions ? VF.conditions.mods() : null;
+    /* The rod and the bait are counted here AND inside build.rare, which is
+       `rod.rare * bait.rare * charms`. That double-count is almost certainly
+       not what was meant — but the whole catalogue's rarity feel, and every
+       tier weight and `pow` in js/data/rarities.js, has been tuned on top of
+       it. Removing it drops rarity power by about a fifth at every stage,
+       which is a balance decision rather than a repair, so it stays until
+       somebody decides to retune the tiers with it. */
     const sum = Math.max(0,
       (rod.rare - 1) +
       (bait.rare - 1) +
@@ -7178,6 +7185,10 @@ input[type=range]::-moz-range-thumb {
        the fish   species difficulty, rarity rank, how big this one is, traits
        the rod    line strength widens the white bar, reel force steadies it
        the charms barSize and barSpeed, straight off the worn loadout          */
+  /* However slow a loadout asks the bar to be, it still has to be able to run
+     the fish down. This is that guarantee, as a multiple of the fish's speed. */
+  const BAR_FLOOR = 1.08;
+
   /* What the rod and the worn charms are worth to the white bar, pulled out on
      its own so a scripted fight can apply the same loadout to numbers it wrote
      itself. Gear has to matter in the heaven's trial too, or the trial is not
@@ -7210,11 +7221,11 @@ input[type=range]::-moz-range-thumb {
   function trialParams(ph) {
     const L = loadout();
     const stiff = ph.fishStiff || 24;
-    const barTop = Math.max(0.80, ph.fishSpeed * 1.45) * (ph.barSpeed || 1);
+    const barTop = Math.max(0.80, ph.fishSpeed * 1.55) * (ph.barSpeed || 1);
     return {
       diff: 1.15,
       barW: U.clamp(ph.barW * L.rodBar * L.barSize, 0.050, 0.46),
-      barSpeed: Math.max(ph.fishSpeed * 1.20, barTop * L.barMul),
+      barSpeed: Math.max(ph.fishSpeed * BAR_FLOOR, barTop * L.barMul),
       barTau: 0.170 / (1 + 0.60 * L.q),
       fishSpeed: ph.fishSpeed,
       fishStiff: stiff,
@@ -7246,10 +7257,17 @@ input[type=range]::-moz-range-thumb {
     const fishSpeed = 0.30 + 0.66 * D;
     const stiff = 9 + 17 * D;
 
-    /* The bar's top speed. Charms that slow it make it steadier — but a stack
-       of them must never drop it below the fish it has to chase, or the fight
-       stops being a question of control and becomes one of arithmetic. */
-    const barTop = Math.max(0.74, fishSpeed * 1.45);
+    /* The bar's top speed. Charms and rods that slow it make it steadier — but
+       it must never drop below the fish it has to chase, or the fight stops
+       being a question of control and becomes one of arithmetic.
+
+       The headroom between the two matters as much as the floor does. At a
+       1.45 baseline against a 1.20 floor everything below 0.83 collapsed onto
+       the floor, so fifty-three of the wanderer's rods moved the bar at
+       exactly the same speed as each other on any rare-or-better fish and the
+       whole slow-versus-fast axis they are built around did nothing. A wider
+       gap gives the reductions room to be real. */
+    const barTop = Math.max(0.74, fishSpeed * 1.55);
 
     return {
       diff: D,
@@ -7260,7 +7278,7 @@ input[type=range]::-moz-range-thumb {
          *reach*, so losing one is a mistake the player made rather than a
          race the numbers had already decided. */
       barW: U.clamp((0.300 - 0.195 * D) * L.rodBar * L.barSize, 0.055, 0.52),
-      barSpeed: Math.max(fishSpeed * 1.20, barTop * L.barMul),     // track widths / second
+      barSpeed: Math.max(fishSpeed * BAR_FLOOR, barTop * L.barMul), // track widths / second
       barTau: 0.170 / (1 + 0.60 * L.q),                            // seconds to reach it
 
       /* --- the fish --- */
@@ -7513,18 +7531,17 @@ input[type=range]::-moz-range-thumb {
   /* Objects do not fight back. They are heavy and awkward and they sit still,
      so the bar is generous and the thing on the end of it barely moves. */
   function treasureFight() {
-    const rod = VF.rods.get(VF.state.data.rod);
-    const b = (VF.build ? VF.build.stats() : null) ||
-              { line: 1, reel: 1, barSize: 1, barSpeed: 1 };
-    const q = VF.util.clamp((rod.reel * b.reel - 0.40) / 2.70, 0, 1.25);
+    // the same loadout as any other fight: salvage was the one place the rod's
+    // own bar stats did nothing while the charms' identical stats still worked
+    const L = VF.loot.loadout();
     return {
       diff: 0.12,
-      barW: U.clamp(0.34 * b.barSize, 0.12, 0.52),
-      barSpeed: 0.78 * U.clamp(b.barSpeed * (1 - 0.20 * q), 0.30, 2.2),
-      barTau: 0.170 / (1 + 0.60 * q),
+      barW: U.clamp(0.34 * L.rodBar * L.barSize, 0.12, 0.52),
+      barSpeed: 0.78 * L.barMul,
+      barTau: 0.170 / (1 + 0.60 * L.q),
       fishSpeed: 0.16, fishStiff: 6, fishDrag: 1.10 * Math.sqrt(6),
       fishTurn: 1.5, dart: 0.05, evade: 0, wobble: 0.015,
-      fill: 0.42 * (1 + 0.35 * q), drain: 0.20, start: 0.40
+      fill: 0.42 * L.fillMul, drain: 0.20, start: 0.40
     };
   }
 
@@ -15778,9 +15795,15 @@ input[type=range]::-moz-range-thumb {
     const q = U.clamp((rod.reel - 0.40) / 2.70, 0, 1.25);
     const bar = (1 + 0.155 * (Math.log(Math.max(0.25, rod.line)) / Math.LN2)) * (rod.barSize || 1);
     const wider = Math.round((bar - 1) * 100);
-    const move = Math.round(((1 - 0.20 * q) * (rod.barSpeed || 1) - 1) * 100);
+    // and it cannot promise more slowing than the fairness floor allows, which
+    // on a hard fish caps the reduction at whatever the headroom is
+    const capped = Math.max(1.08 / 1.55, (1 - 0.20 * q) * (rod.barSpeed || 1));
+    const move = Math.round((capped - 1) * 100);
     const sharper = Math.round(60 * q);
-    const fill = Math.round(((rod.barFill || 1) - 1) * 100);
+    // reel force drives the meter as well as the key, so this has to carry the
+    // same (1 + 0.35q) the fight applies — without it a rod with a stated −3%
+    // drawback advertised a penalty while actually reeling nearly a fifth faster
+    const fill = Math.round(((1 + 0.35 * q) * (rod.barFill || 1) - 1) * 100);
     if (wider <= 0 && !move && !fill) {
       return 'white bar: the baseline every other rod is measured against';
     }
