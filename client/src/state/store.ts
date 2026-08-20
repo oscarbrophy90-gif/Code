@@ -47,6 +47,7 @@ import {
 } from './accounts.ts';
 
 import { boardPositionOf, invalidateBoard } from './board.ts';
+import { applyCoinGrants } from './grants.ts';
 
 export const PROFILE_VERSION = 1;
 export const MAX_SLOTS = 4;
@@ -344,6 +345,7 @@ class Store {
   /** Rolls the season over and refreshes the challenge board on load. */
   private migrate(): void {
     const now = Date.now();
+    let grantPaid = false;
     // Saves made before online play have no record on them. Defaulted rather
     // than version-bumped, because bumping the version throws the whole profile
     // away and nobody should lose their player to gain a rank of Bronze 3.
@@ -364,6 +366,12 @@ class Store {
     if (typeof rec.rp !== 'number') rec.rp = (rec.wins ?? 0) * 20;
     if (typeof rec.peakRp !== 'number') rec.peakRp = Math.max(rec.rp, (rec.peakWins ?? 0) * 20);
     if (this.profile.seasonReport === undefined) this.profile.seasonReport = null;
+    // One-off grants to named accounts. Written through immediately rather
+    // than left to the debounce: the ledger entry is the only thing stopping a
+    // grant paying twice, so it has to survive the tab being closed on the
+    // very next tick. Inside migrate so every way into a profile — launch,
+    // account switch, import — goes through the same rule.
+    if (applyCoinGrants(this.profile)) grantPaid = true;
     // Saves made before the Online hub have no social state.
     if (!this.profile.social) this.profile.social = freshSocial();
     for (const key of ['friends', 'outgoing', 'incoming', 'notices'] as const) {
@@ -413,6 +421,8 @@ class Store {
 
     this.profile.challenges = syncChallengeStates(generateChallenges(now), this.profile.challenges);
     this.profile.settings = { ...defaultSettings(), ...this.profile.settings };
+
+    if (grantPaid) this.saveNow();
   }
 
   /** True once a build exists and one of them is equipped. Play is locked

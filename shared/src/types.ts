@@ -219,6 +219,14 @@ export interface MyPlayer {
    * ten of them and open them when you feel like it.
    */
   crates: Record<string, number>;
+  /**
+   * Ids of one-off grants already paid into this build.
+   *
+   * A grant is looked up every time the profile loads, so without a record of
+   * what has already been paid it would pay again on every launch. Written on
+   * the build rather than the profile because the coins are the build's.
+   */
+  grants?: string[];
 }
 
 export interface Profile {
