@@ -3932,7 +3932,8 @@ input[type=range]::-moz-range-thumb {
     { id: 'astronomer', name: 'The Astronomer', role: 'quest', color: '#ffd88a',
       where: 'up where the ground runs out, under a roof that opens',
       blurb: 'Watches the one part of the sky nothing is supposed to come out of.',
-      stages: [
+      stages: [],
+      quest: [
         { at: function () { return VF.quests.reached('heavens', 3); },
           lines: ['no. i know what elias told you and the answer is no.',
                   'the heavens rod is not a treasure. it is a test, and i have watched it fail people who were better at this than you are.',
@@ -4050,9 +4051,15 @@ input[type=range]::-moz-range-thumb {
   }
 
   /* Talking is what actually advances things — being eligible is not enough.
-     The stage advances the moment the conversation starts, but what comes out
-     of it — a journal entry, a key, a gift — is handed over by `commit`, which
-     the visit calls once the last line has been read. */
+
+     Consuming the stage and handing over what it carries — a journal entry, a
+     key, a quest step — happen together, in `commit`, which the visit calls
+     once the conversation is over (or the moment the player walks away from
+     it). They used to be separate: the counter moved when the conversation
+     STARTED and the payload arrived at the end, so closing the tab halfway
+     through burned the stage and delivered nothing. On a quest step that is
+     unrecoverable — the log says go and see them and they have nothing left
+     to say — and the autosave writes the broken state within eight seconds. */
   function talk(id, opts) {
     const npc = BY_ID[id];
     if (!npc) return null;
@@ -4073,19 +4080,17 @@ input[type=range]::-moz-range-thumb {
     function commit() {
       if (done || !first) return;
       done = true;
-      if (def.journal) VF.journal.add(def.journal);
-      if (def.quest && VF.quests) VF.quests.fromNpc(def.quest);
-      if (def.gives) VF.bus.emit('npc:gives', { npc: npc, gives: def.gives });
-      VF.bus.emit('npc:advanced', { npc: npc, stage: stage });
-      VF.save.save();
-    }
-    if (first) {
       if (onQuest) {
         r.qstage = stage + 1;
       } else {
         r.stage = stage + 1;
         if (r.heard.indexOf(stage) < 0) r.heard.push(stage);
       }
+      if (def.journal) VF.journal.add(def.journal);
+      if (def.quest && VF.quests) VF.quests.fromNpc(def.quest);
+      if (def.gives) VF.bus.emit('npc:gives', { npc: npc, gives: def.gives });
+      VF.bus.emit('npc:advanced', { npc: npc, stage: stage });
+      VF.save.save();
     }
     const res = { npc: npc, stage: stage, lines: def.lines, fresh: first, commit: commit };
     if (!(opts && opts.defer)) commit();
@@ -7112,6 +7117,31 @@ input[type=range]::-moz-range-thumb {
     return n;
   }
 
+  /* If a quest is waiting on a conversation then that conversation has to be
+     available, or the log is telling the player to do something they cannot
+     do. They can fall out of step: any build before the stage counter and its
+     payload were made atomic could consume a stage without advancing the
+     quest, and the autosave would write that down. Roll the counter back so
+     the conversation can be had again — it costs a player who is fine
+     nothing, and it is the only way somebody already stuck gets unstuck. */
+  function reconcile() {
+    for (let i = 0; i < VF.questData.list.length; i++) {
+      const def = VF.questData.list[i];
+      const q = peek(def.id);
+      if (!q || !q.started || q.done) continue;
+      const ch = def.chapters[q.step];
+      if (!ch || !ch.talk) continue;
+      const npc = VF.npcs.get(ch.talk);
+      if (!npc) continue;
+      const avail = VF.npcs.availableQuest(npc);
+      const cur = VF.npcs.peek(ch.talk).qstage | 0;
+      if (avail < 0 || cur <= avail) continue;
+      VF.npcs.rec(ch.talk).qstage = avail;
+      VF.bus.emit('quest:repaired', { quest: def, npc: npc });
+      VF.save.save();
+    }
+  }
+
   /* Offers are cheap to test and the tests read stats that change constantly,
      so this runs on a slow beat rather than every frame. */
   let acc = 0;
@@ -7119,6 +7149,7 @@ input[type=range]::-moz-range-thumb {
     acc += dt;
     if (acc < 1.5) return;
     acc = 0;
+    reconcile();
     for (let i = 0; i < VF.questData.list.length; i++) {
       const def = VF.questData.list[i];
       if (!started(def.id)) offer(def);
@@ -7130,6 +7161,7 @@ input[type=range]::-moz-range-thumb {
     tick: tick, rec: rec, peek: peek, objective: objective, chapter: chapter,
     started: started, complete: complete, step: step, reached: reached, at: at,
     fromNpc: fromNpc, onCatch: onCatch, advance: advance, evaluate: evaluate,
+    reconcile: reconcile,
     eventActive: eventActive, armed: armed, anyArmed: anyArmed,
     visible: visible, activeCount: activeCount
   };
