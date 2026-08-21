@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>VOID FISHING</title>
+<meta name="description" content="A quiet fishing game at the edge of an endless void.">
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/hud.css">
+<link rel="stylesheet" href="css/panels.css">
+</head>
+<body>
+<div id="app">
+  <canvas id="scene" aria-label="Fishing scene"></canvas>
+
+  <!-- ambient screen treatment -->
+  <div id="vignette" aria-hidden="true"></div>
+  <div id="vigPulse" aria-hidden="true"></div>
+  <div id="grain" aria-hidden="true"></div>
+  <div id="edgeGlow" aria-hidden="true"></div>
+
+  <!-- boot / title -->
+  <div id="boot">
+    <div class="boot-inner">
+      <h1 class="title">VOID<span>FISHING</span></h1>
+      <p class="tagline">Somewhere quiet, at the edge of everything.</p>
+      <button id="bootStart" class="btn btn-primary btn-lg">Begin</button>
+      <p class="boot-note">Sound recommended</p>
+    </div>
+  </div>
+
+  <!-- heads-up display -->
+  <div id="hud" class="hidden">
+    <div class="hud-top">
+      <div class="hud-tl">
+        <div class="money-row" title="Brophys">
+          <span class="coin">&#9671;</span><span id="moneyVal" class="money">0</span><span class="money-unit">Brophys</span>
+        </div>
+        <div class="level-row">
+          <span id="levelVal" class="lv">LV 1</span>
+          <div class="xp-track"><div id="xpFill" class="xp-fill"></div></div>
+          <span id="xpText" class="xp-text">0 / 0</span>
+        </div>
+      </div>
+
+      <div class="hud-tr">
+        <div class="chips">
+          <button id="chipLoc" class="chip chip-btn" title="Change location">
+            <span class="chip-k">SPOT</span><span id="locName" class="chip-v">The Quiet Shore</span>
+          </button>
+          <div class="chip"><span class="chip-k">SKY</span><span id="wxName" class="chip-v">Clear</span></div>
+          <div class="chip"><span class="chip-k">TIME</span><span id="timeName" class="chip-v">Night</span></div>
+          <div id="chipCond" class="chip cond-chip hidden"><span class="chip-k">WATER</span><span id="condName" class="chip-v"></span></div>
+        </div>
+        <nav class="menu-row" aria-label="Menus">
+          <button class="mbtn" data-panel="shop">Shop</button>
+          <button class="mbtn" data-panel="fishdex">Fishdex</button>
+          <button class="mbtn" data-panel="bag">Bag</button>
+          <button class="mbtn" data-panel="wardrobe">Wardrobe</button>
+          <button class="mbtn" data-panel="journal">Journal</button>
+          <button class="mbtn" data-panel="stats">Stats</button>
+          <button class="mbtn mbtn-icon" data-panel="settings" title="Settings" aria-label="Settings">
+            <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true"><path fill="currentColor" d="M8 5.4A2.6 2.6 0 1 0 8 10.6 2.6 2.6 0 0 0 8 5.4zm0 4.1a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3z"/><path fill="currentColor" d="M14 8c0-.3 0-.6-.1-.9l1.3-1-1.5-2.6-1.6.6c-.5-.4-1-.7-1.5-.9L10.3 1.5H7.7l-.3 1.7c-.6.2-1.1.5-1.5.9l-1.6-.6L2.8 6.1l1.3 1c0 .3-.1.6-.1.9s0 .6.1.9l-1.3 1 1.5 2.6 1.6-.6c.4.4 1 .7 1.5.9l.3 1.7h2.6l.3-1.7c.6-.2 1.1-.5 1.5-.9l1.6.6 1.5-2.6-1.3-1c.1-.3.1-.6.1-.9z" opacity=".55"/></svg>
+          </button>
+        </nav>
+      </div>
+    </div>
+
+    <div class="hud-bottom">
+      <div class="gear-row">
+        <button id="gearRod" class="gear-card" title="Change rod">
+          <span class="gear-k">ROD</span>
+          <span id="rodName" class="gear-v">Old Wooden Rod</span>
+        </button>
+        <button id="gearBait" class="gear-card" title="Change bait">
+          <span class="gear-k">BAIT</span>
+          <span id="baitName" class="gear-v">Worm</span>
+          <span id="baitCount" class="gear-n">&#8734;</span>
+        </button>
+      </div>
+
+      <div class="action-col">
+        <div id="castMeter" class="cast-meter" aria-hidden="true">
+          <div class="cast-track">
+            <div id="castFill" class="cast-fill"></div>
+            <div class="cast-sweet"></div>
+          </div>
+        </div>
+        <button id="actionBtn" class="action-btn">
+          <span id="actionLabel">Cast</span>
+          <span id="actionHint" class="action-hint">hold&nbsp;space</span>
+        </button>
+      </div>
+
+      <div class="side-col">
+        <div id="hintBox" class="hint-box"></div>
+      </div>
+    </div>
+
+    <!-- the fight: hold to drive the white bar right, release and it runs left -->
+    <div id="fightUI" class="fight hidden">
+      <div class="fight-head">
+        <span id="fightName" class="fight-name">&nbsp;</span>
+        <span id="fightWarn" class="fight-warn"></span>
+      </div>
+      <div id="mgTrack" class="mg-track">
+        <div class="mg-inner">
+          <div id="mgBar" class="mg-bar"><span class="mg-bar-arrow"></span></div>
+          <div id="mgFish" class="mg-fish"></div>
+        </div>
+      </div>
+      <div id="mgProg" class="mg-prog"><div id="mgProgFill" class="mg-prog-fill"></div></div>
+      <div class="fight-foot">
+        <span id="fightHint" class="fight-hint">hold <b>space</b> &mdash; keep it in the bar</span>
+        <span id="fightPct" class="fight-pct">&mdash;</span>
+      </div>
+    </div>
+    </div>
+
+    <!-- centred prompts -->
+    <div id="prompt" class="prompt" aria-live="polite"></div>
+  </div>
+
+  <!-- conversations happen out on the shore, with the words down here -->
+  <div id="caption" class="caption hidden" aria-live="polite">
+    <div class="caption-inner">
+      <div id="captionWho" class="caption-who"></div>
+      <div id="captionText" class="caption-text"></div>
+      <div id="captionMore" class="caption-more">click to continue</div>
+    </div>
+  </div>
+
+  <!-- the two sequences: letterbox, one line, and a way out of it -->
+  <div id="cutscene" class="cutscene hidden" aria-live="polite">
+    <div class="cut-bar cut-top"></div>
+    <div class="cut-bar cut-bot"></div>
+    <div class="cut-inner">
+      <div id="cutsceneText" class="cut-text"></div>
+      <div id="cutsceneMore" class="cut-more">click to continue</div>
+    </div>
+  </div>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <div id="encounter" class="encounter hidden"><div class="enc-inner"><div id="encText" class="enc-text"></div></div></div>
+  <div id="overlay" class="overlay hidden"></div>
+  <div id="modal" class="modal-host hidden"></div>
+</div>
+
+<!-- core -->
+<script src="js/core/util.js"></script>
+<script src="js/core/rng.js"></script>
+<script src="js/core/bus.js"></script>
+<script src="js/core/state.js"></script>
+<script src="js/core/save.js"></script>
+<!-- data -->
+<script src="js/data/rarities.js"></script>
+<script src="js/data/traits.js"></script>
+<script src="js/data/fish.js"></script>
+<script src="js/data/rods.js"></script>
+<script src="js/data/merchantRods.js"></script>
+<script src="js/data/bait.js"></script>
+<script src="js/data/locations.js"></script>
+<script src="js/data/weather.js"></script>
+<script src="js/data/charms.js"></script>
+<script src="js/data/conditions.js"></script>
+<script src="js/data/treasure.js"></script>
+<script src="js/data/journal.js"></script>
+<script src="js/data/secrets.js"></script>
+<script src="js/data/npcs.js"></script>
+<script src="js/data/quests.js"></script>
+<script src="js/data/cosmetics.js"></script>
+<script src="js/data/cases.js"></script>
+<script src="js/data/achievements.js"></script>
+<!-- systems -->
+<script src="js/systems/time.js"></script>
+<script src="js/systems/weather.js"></script>
+<script src="js/systems/progression.js"></script>
+<script src="js/systems/build.js"></script>
+<script src="js/systems/conditions.js"></script>
+<script src="js/systems/economy.js"></script>
+<script src="js/systems/loot.js"></script>
+<script src="js/systems/fishing.js"></script>
+<script src="js/systems/catches.js"></script>
+<script src="js/systems/achievements.js"></script>
+<script src="js/systems/encounters.js"></script>
+<script src="js/systems/wrong.js"></script>
+<script src="js/systems/caseOpen.js"></script>
+<script src="js/systems/visit.js"></script>
+<script src="js/systems/quests.js"></script>
+<script src="js/systems/merchant.js"></script>
+<script src="js/systems/cutscene.js"></script>
+<!-- render -->
+<script src="js/render/palette.js"></script>
+<script src="js/render/particles.js"></script>
+<script src="js/render/fx.js"></script>
+<script src="js/render/fishArt.js"></script>
+<script src="js/render/rodArt.js"></script>
+<script src="js/render/treasureArt.js"></script>
+<script src="js/render/anglerArt.js"></script>
+<script src="js/render/npcArt.js"></script>
+<script src="js/render/cosmeticArt.js"></script>
+<script src="js/render/scene.js"></script>
+<!-- audio -->
+<script src="js/audio/audio.js"></script>
+<!-- ui -->
+<script src="js/ui/toast.js"></script>
+<script src="js/ui/hud.js"></script>
+<script src="js/ui/panels.js"></script>
+<script src="js/ui/catch.js"></script>
+<script src="js/ui/tutorial.js"></script>
+<!-- boot -->
+<script src="js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+node_modules/
+package-lock.json
+
+# generated screenshots from the tools/ scripts
+tools/*.png
+
+# generated build output
+dist/

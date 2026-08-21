@@ -1,0 +1,190 @@
+/* VOID FISHING — foundations: reset, tokens, typography, shared controls. */
+
+*, *::before, *::after { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; padding: 0; }
+
+:root {
+  --ink:        #e9eff6;
+  --ink-2:      rgba(233, 239, 246, 0.62);
+  --ink-3:      rgba(233, 239, 246, 0.36);
+  --ink-4:      rgba(233, 239, 246, 0.18);
+
+  --line:       rgba(255, 255, 255, 0.085);
+  --line-2:     rgba(255, 255, 255, 0.16);
+  --line-3:     rgba(255, 255, 255, 0.28);
+
+  --pane:       rgba(8, 11, 17, 0.74);
+  --pane-2:     rgba(12, 16, 24, 0.92);
+  --fill:       rgba(255, 255, 255, 0.032);
+  --fill-2:     rgba(255, 255, 255, 0.065);
+
+  --accent:     #7fa8c8;
+  --accent-dim: rgba(127, 168, 200, 0.30);
+
+  --good:       #6fd8a4;
+  --warn:       #ffc36a;
+  --bad:        #ff6b6b;
+
+  --r-sm: 3px;
+  --r:    5px;
+  --r-lg: 9px;
+
+  --font: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, "JetBrains Mono", Menlo,
+          Consolas, "Liberation Mono", monospace;
+
+  --ease: cubic-bezier(0.22, 0.68, 0.28, 1);
+  --dur: 220ms;
+}
+
+body {
+  background: #04060a;
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 14px;
+  line-height: 1.45;
+  /* the whole interface is lowercase — content stays cased in the DOM so it
+     copies out normally, this is presentation only */
+  text-transform: lowercase;
+  overflow: hidden;
+  overscroll-behavior: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+#app { position: fixed; inset: 0; overflow: hidden; }
+
+#scene {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  display: block;
+  touch-action: none;
+}
+
+/* Vignette, pulse and grain are static compositing layers rather than per-frame
+   canvas fills. Full-screen translucent fillRects were the dominant raster cost;
+   as CSS layers the compositor handles them once. */
+#vignette, #vigPulse, #grain {
+  position: absolute; inset: 0;
+  pointer-events: none; z-index: 2;
+}
+#vignette {
+  background: radial-gradient(ellipse 78% 82% at 50% 52%,
+              rgba(0,0,0,0) 28%, rgba(0,0,0,0.30) 66%, rgba(0,0,0,0.62) 100%);
+}
+#vigPulse {
+  background: radial-gradient(ellipse 62% 68% at 50% 52%,
+              rgba(0,0,0,0) 18%, rgba(0,0,0,0.42) 72%, rgba(0,0,0,0.72) 100%);
+  opacity: 0;
+  transition: opacity 180ms linear;
+}
+#grain {
+  inset: -28px;
+  opacity: 0.042;
+  background-repeat: repeat;
+  animation: grainDrift 5.5s steps(5) infinite;
+}
+@keyframes grainDrift {
+  0%   { transform: translate3d(0, 0, 0); }
+  20%  { transform: translate3d(-9px, 6px, 0); }
+  40%  { transform: translate3d(7px, -10px, 0); }
+  60%  { transform: translate3d(-6px, -5px, 0); }
+  80%  { transform: translate3d(10px, 8px, 0); }
+  100% { transform: translate3d(0, 0, 0); }
+}
+body.q-low #grain { display: none; }
+
+/* Coloured bleed at the screen edges, tinted by the current location. */
+#edgeGlow {
+  position: absolute; inset: 0;
+  pointer-events: none; z-index: 3;
+  box-shadow: inset 0 0 160px -20px var(--accent-dim);
+  opacity: 0.34;
+  transition: box-shadow 900ms var(--ease), opacity 600ms var(--ease);
+}
+
+.hidden { display: none !important; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+
+/* ------------------------------------------------------------------ boot */
+
+#boot {
+  position: absolute; inset: 0; z-index: 60;
+  display: flex; align-items: center; justify-content: center;
+  background: radial-gradient(ellipse at 50% 58%, rgba(6,9,16,0.38), rgba(2,3,6,0.86) 74%);
+  backdrop-filter: blur(2px);
+  transition: opacity 700ms var(--ease), visibility 700ms;
+}
+#boot.gone { opacity: 0; visibility: hidden; pointer-events: none; }
+
+.boot-inner { text-align: center; animation: bootIn 1100ms var(--ease) both; }
+@keyframes bootIn { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+
+.title {
+  margin: 0 0 14px;
+  font-size: clamp(30px, 6.2vw, 62px);
+  font-weight: 200;
+  letter-spacing: 0.34em;
+  text-indent: 0.34em;
+  color: var(--ink);
+  text-shadow: 0 0 42px rgba(160, 200, 255, 0.30);
+}
+.title span { display: block; font-weight: 500; font-size: 0.62em; letter-spacing: 0.52em; text-indent: 0.52em; color: var(--ink-2); margin-top: 6px; }
+.tagline { margin: 0 0 30px; color: var(--ink-3); font-size: 13px; letter-spacing: 0.06em; }
+.boot-note { margin: 16px 0 0; color: var(--ink-4); font-size: 11px; letter-spacing: 0.14em; text-transform: lowercase; }
+
+/* -------------------------------------------------------------- controls */
+
+/* form controls do not inherit text-transform from the UA stylesheet, so the
+   lowercase treatment has to be handed to them explicitly */
+button, input, select, textarea {
+  font: inherit; color: inherit; text-transform: inherit;
+  background: none; border: none;
+}
+button { cursor: pointer; }
+button:focus-visible, [tabindex]:focus-visible { outline: 1px solid var(--line-3); outline-offset: 2px; }
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 8px 16px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  background: var(--fill);
+  color: var(--ink-2);
+  font-size: 12px; letter-spacing: 0.10em; text-transform: lowercase;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease),
+              border-color var(--dur) var(--ease), transform 90ms var(--ease);
+  white-space: nowrap;
+}
+.btn:hover { background: var(--fill-2); color: var(--ink); border-color: var(--line-3); }
+.btn:active { transform: translateY(1px); }
+.btn[disabled] { opacity: 0.35; cursor: not-allowed; }
+.btn[disabled]:hover { background: var(--fill); color: var(--ink-2); border-color: var(--line-2); }
+
+.btn-primary { color: var(--ink); border-color: var(--line-3); background: rgba(255,255,255,0.07); }
+.btn-primary:hover { background: rgba(255,255,255,0.12); }
+.btn-lg { padding: 12px 34px; font-size: 13px; letter-spacing: 0.20em; }
+.btn-sm { padding: 5px 10px; font-size: 10.5px; }
+.btn-danger { color: #ffb0b0; border-color: rgba(255,110,110,0.32); }
+.btn-danger:hover { background: rgba(255,90,90,0.14); color: #ffd0d0; border-color: rgba(255,110,110,0.5); }
+
+/* ------------------------------------------------------------- utilities */
+
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.k {
+  font-size: 10px; letter-spacing: 0.19em; text-transform: lowercase;
+  color: var(--ink-3);
+}
+
+.scroll { overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+.scroll::-webkit-scrollbar { width: 8px; height: 8px; }
+.scroll::-webkit-scrollbar-track { background: transparent; }
+.scroll::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 4px; }
+.scroll::-webkit-scrollbar-thumb:hover { background: var(--line-3); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+  #grain { animation: none; }
+}
