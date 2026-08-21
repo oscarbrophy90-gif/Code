@@ -1039,8 +1039,60 @@
     shadows.push(Object.assign({ life: 9, max: 9, x: -0.1, y: 0.5, sp: 0.06, size: 1, alpha: 0.5 }, opts));
   }
 
+  /* The shadow of something rare crossing the water toward the hook, in the
+     seconds before it takes it. Nothing below the void tier gets one: the
+     whole value of it is that seeing one means something. */
+  function drawApproach() {
+    const A = VF.fishing.S.approach;
+    if (!A) return;
+    const b = L.bobber;
+    if (!b.visible) return;
+    const wh = L.waterH;
+    const k = U.clamp(A.t / Math.max(0.5, A.dur), 0, 1);
+    const e = U.smoothstep(k);
+
+    // out of the deep water on the far side, in toward the line
+    const fromX = W * 1.06, fromY = L.horizonY + wh * 0.10;
+    const x = U.lerp(fromX, b.x, e);
+    const y = U.lerp(fromY, b.y + wh * 0.10, e * e);
+    const sc = scaleAt(y) * U.lerp(0.55, 2.35, e);
+    // it fades up out of nothing and thins again as it reaches the hook
+    const a = U.clamp(Math.sin(Math.min(1, k * 1.12) * Math.PI) * 1.45, 0, 1);
+    if (a <= 0.01) return;
+
+    const col = U.hexToRgb(VF.rarities.color(A.rarity));
+    const wob = Math.sin(t * 1.7) * wh * 0.012 * (1 - e * 0.6);
+
+    ctx.save();
+    // the shape itself
+    ctx.globalAlpha = a * 0.82;
+    ctx.fillStyle = '#000';
+    ctx.beginPath();
+    ctx.ellipse(x, y + wob, W * 0.085 * sc, wh * 0.030 * sc,
+                Math.sin(t * 0.5) * 0.10 - (1 - e) * 0.18, 0, TAU);
+    ctx.fill();
+    // a second, smaller mass behind it, so it reads as long rather than round
+    ctx.globalAlpha = a * 0.5;
+    ctx.beginPath();
+    ctx.ellipse(x + W * 0.070 * sc, y + wob * 0.6, W * 0.040 * sc, wh * 0.017 * sc,
+                Math.sin(t * 0.5 + 1) * 0.14, 0, TAU);
+    ctx.fill();
+
+    // and the colour of whatever tier it is, bleeding up through the water
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = a * (0.22 + 0.16 * Math.sin(t * 2.4));
+    const g = ctx.createRadialGradient(x, y + wob, 0, x, y + wob, W * 0.20 * sc);
+    g.addColorStop(0, U.rgbToCss(col, 0.55));
+    g.addColorStop(0.45, U.rgbToCss(col, 0.13));
+    g.addColorStop(1, U.rgbToCss(col, 0));
+    ctx.fillStyle = g;
+    ctx.fillRect(x - W * 0.20 * sc, y - W * 0.20 * sc, W * 0.40 * sc, W * 0.40 * sc);
+    ctx.restore();
+  }
+
   function drawUnderwater(P) {
     const hy = L.horizonY, wh = L.waterH;
+    drawApproach();
     for (let i = shadows.length - 1; i >= 0; i--) {
       const s = shadows[i];
       s.life -= 1 / 60;
@@ -1485,13 +1537,15 @@
        centred inside its own silhouette: she is nearly all neck above hers,
        he is a person and splits about evenly. So the frame is worked out from
        the parts that have to be in shot rather than from the middle. */
-    const isNessie = C.id === 'nessie';
-    const TOP = isNessie ? 1.00 : 0.90;    // reach above centre, in half-heights
-    const BOT = isNessie ? 0.50 : 0.95;    // reach below it
-    const box = isNessie ? Math.min(H * 1.10, W * 1.15) : Math.min(H * 0.76, W * 0.55);
+    const F = C.frame || { box: [0.76, 0.55], top: 0.90, bot: 0.95, surf: 0.58 };
+    const TOP = F.top;                     // reach above centre, in half-heights
+    const BOT = F.bot;                     // reach below it
+    const box = Math.min(H * F.box[0], W * F.box[1]);
     const size = VF.fishArt.fitSize(fish, box);
-    const half = size * 2 * VF.fishArt.bodyRatio('being', fish.art.being);
-    const surface = L.horizonY + L.waterH * (isNessie ? 0.62 : 0.58);
+    // whatever body it has — a being, an object or an ordinary fish
+    const half = size * 2 * VF.fishArt.bodyRatio(fish.art.body,
+                                                 fish.art.being || fish.art.object);
+    const surface = L.horizonY + L.waterH * F.surf;
     const k = U.smootherstep(U.clamp(C.rise, 0, 1));
 
     /* The letterbox bars are DOM, drawn over the canvas, so the renderer has
@@ -1503,11 +1557,15 @@
     /* She sits at her own waterline; he stands on the surface. Either way the
        figure is pushed down far enough to clear the top bar — a reveal you
        cannot see the head of is not a reveal. */
+    /* Something that sits in the water rests at its own waterline; something
+       that stands on it clears the surface entirely. `sink` is how much of it
+       stays under when it has finished coming up. */
     const cyEnd = Math.max(ceiling,
-                           isNessie ? surface - half * 0.36 : surface - half * BOT);
+                           F.sink !== undefined ? surface - half * F.sink
+                                                : surface - half * BOT);
     const cyStart = surface + half * (BOT + 1.30);
     const cy = U.lerp(cyStart, cyEnd, k);
-    const cx = W * (isNessie ? 0.50 : 0.50);
+    const cx = W * 0.5;
 
     ctx.save();
     // clip at the surface so nothing floats above water it has not left yet

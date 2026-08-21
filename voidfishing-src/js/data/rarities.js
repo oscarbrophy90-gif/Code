@@ -13,7 +13,11 @@
     { id: 'epic',      name: 'Epic',      rank: 3, weight: 22,    pow: 1.72, color: '#b06bff', glow: '#dcb4ff', xp: 430,   shake: 3,   stinger: 'bright' },
     { id: 'legendary', name: 'Legendary', rank: 4, weight: 3.5,   pow: 2.25, color: '#ffb03a', glow: '#ffdc9a', xp: 1100,  shake: 6,   stinger: 'grand' },
     { id: 'mythic',    name: 'Mythic',    rank: 5, weight: 0.55,  pow: 2.80, color: '#ff5c9e', glow: '#ffb0d2', xp: 3100,  shake: 9,   stinger: 'grand' },
-    { id: 'void',      name: 'Void',      rank: 6, weight: 0.075, pow: 3.40, color: '#8a5cff', glow: '#c9a8ff', xp: 9200,  shake: 13,  stinger: 'void' },
+    /* Thinned deliberately. At 0.075 the deepest water gave one up every
+       seventeen casts, which is not what the tier is for — and every one of
+       them now stops the frame to show you, so they have to be worth stopping
+       for. About one in forty-five at the bottom of the map. */
+    { id: 'void',      name: 'Void',      rank: 6, weight: 0.030, pow: 3.40, color: '#8a5cff', glow: '#c9a8ff', xp: 9200,  shake: 13,  stinger: 'void' },
     { id: 'glitch',    name: '!@#$%^&$#', rank: 7, weight: 0.012, pow: 2.80, color: '#ff2d55', glow: '#66ffe0', xp: 31000, shake: 18,  stinger: 'glitch' },
 
     /* One tier above the last one, and it is not listed anywhere until you have

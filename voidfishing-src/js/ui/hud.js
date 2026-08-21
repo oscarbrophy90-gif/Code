@@ -182,6 +182,18 @@
         speedMin: 30, speedMax: 110 * (sc.shard ? 1.7 : 1), sizeMax: 2.2, grav: 240, lifeMax: 0.7
       });
     });
+    /* Something big enough to be seen coming. The cue is deliberately quiet —
+       the shadow is the announcement, this only makes you look up. */
+    VF.bus.on('fishing:approach', function (a) {
+      VF.audio.surge();
+      VF.audio.duck(0.6);
+      VF.fx.pulse(0.34);
+      VF.fx.shake(1.6);
+      showPrompt(a.rank >= 8 ? 'something is coming'
+               : a.rank >= 7 ? 'the water is wrong' : 'something is coming',
+                 VF.rarities.color(a.rarity), 1.1);
+    });
+
     VF.bus.on('fishing:nibble', function () {
       const b = VF.scene.L.bobber;
       VF.audio.nibble();

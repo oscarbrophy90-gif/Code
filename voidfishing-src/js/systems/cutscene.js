@@ -20,6 +20,11 @@
   const SCENES = {
     nessie: {
       audio: 'void',
+      /* box  how much of the frame the figure may fill, [of height, of width]
+         top  reach above its own centre, in half-heights — what must be in shot
+         bot  reach below it
+         surf where its waterline sits down the water band                    */
+      frame: { box: [1.10, 1.15], top: 1.00, bot: 0.50, surf: 0.62, sink: 0.36 },
       beats: [
         { dur: 2.0, dark: 0.55, shadow: 0.0, rise: 0,
           text: 'the water goes flat. all the way out to the horizon, flat.' },
@@ -35,6 +40,7 @@
     },
     oscar: {
       audio: 'grand',
+      frame: { box: [0.76, 0.55], top: 0.90, bot: 0.95, surf: 0.58 },
       beats: [
         { dur: 2.0, dark: 0.50, shadow: 0, rise: 0,
           text: 'the line comes up light. far too light for what it is holding.' },
@@ -50,6 +56,44 @@
       ]
     }
   };
+
+  /* Everything from the void tier up comes up in front of you rather than
+     straight onto the card. These run every time one is landed, so they are
+     short, and they are written to fit any species in their tier — the name
+     beat takes the name off whatever was actually caught. */
+  SCENES.voidcatch = {
+    audio: 'void',
+    frame: { box: [0.66, 0.56], top: 0.88, bot: 0.88, surf: 0.60 },
+    beats: [
+      { dur: 1.5, dark: 0.56, shadow: 0.42, rise: 0,
+        text: 'the water goes quiet in a circle around the line.' },
+      { dur: 2.1, dark: 0.44, shadow: 0.12, rise: 0.92, lit: 0.55, shake: 1,
+        text: 'it does not thrash. it arrives.' },
+      { dur: 2.0, dark: 0.24, shadow: 0, rise: 1, lit: 1, flash: 1, name: 1 }
+    ]
+  };
+
+  SCENES.glitchcatch = {
+    audio: 'glitch',
+    frame: { box: [0.62, 0.54], top: 0.86, bot: 0.86, surf: 0.58 },
+    beats: [
+      { dur: 1.4, dark: 0.64, shadow: 0.30, rise: 0,
+        text: 'the line reads a weight. nothing else agrees.' },
+      { dur: 2.0, dark: 0.48, shadow: 0.10, rise: 0.94, lit: 0.5, shake: 1,
+        text: 'it is on the stone before it is out of the water.' },
+      { dur: 2.0, dark: 0.22, shadow: 0, rise: 1, lit: 1, flash: 1, name: 1 }
+    ]
+  };
+
+  /* Which sequence a catch gets when the species does not name its own. */
+  function forCatch(c) {
+    if (!c || c.kind !== 'fish' || !c.fish) return null;
+    if (c.fish.cutscene) return c.fish.cutscene;
+    const rank = VF.rarities.rank(c.rarity);
+    if (rank >= 7) return 'glitchcatch';
+    if (rank >= 6) return 'voidcatch';
+    return null;
+  }
 
   const S = {
     id: null, def: null, i: 0, t: 0, elapsed: 0,
@@ -92,7 +136,9 @@
     const b = S.def.beats[n];
     if (!b) return;
     if (textEl) {
-      textEl.textContent = b.text;
+      // a name beat with no line of its own says what was actually landed
+      textEl.textContent = b.text ||
+        (b.name && S.fish && S.fish.fish ? S.fish.fish.name : '');
       /* The rest of the game is lowercase on purpose. A name is the one place
          that reads as a shrug rather than a style, so the two reveal beats
          opt out of it. */
@@ -161,11 +207,11 @@
 
   VF.cutscene = {
     play: play, tick: tick, skip: skip, active: active,
-    scenes: SCENES,
+    scenes: SCENES, forCatch: forCatch,
     /* What the renderer reads. */
     state: function () {
-      return S.id ? { id: S.id, fish: S.fish, dark: S.dark, shadow: S.shadow,
-                      rise: S.rise, lit: S.lit, t: S.elapsed } : null;
+      return S.id ? { id: S.id, fish: S.fish, frame: S.def.frame, dark: S.dark,
+                      shadow: S.shadow, rise: S.rise, lit: S.lit, t: S.elapsed } : null;
     }
   };
 })(window.VF = window.VF || {});

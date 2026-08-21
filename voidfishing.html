@@ -2036,7 +2036,11 @@ input[type=range]::-moz-range-thumb {
     { id: 'epic',      name: 'Epic',      rank: 3, weight: 22,    pow: 1.72, color: '#b06bff', glow: '#dcb4ff', xp: 430,   shake: 3,   stinger: 'bright' },
     { id: 'legendary', name: 'Legendary', rank: 4, weight: 3.5,   pow: 2.25, color: '#ffb03a', glow: '#ffdc9a', xp: 1100,  shake: 6,   stinger: 'grand' },
     { id: 'mythic',    name: 'Mythic',    rank: 5, weight: 0.55,  pow: 2.80, color: '#ff5c9e', glow: '#ffb0d2', xp: 3100,  shake: 9,   stinger: 'grand' },
-    { id: 'void',      name: 'Void',      rank: 6, weight: 0.075, pow: 3.40, color: '#8a5cff', glow: '#c9a8ff', xp: 9200,  shake: 13,  stinger: 'void' },
+    /* Thinned deliberately. At 0.075 the deepest water gave one up every
+       seventeen casts, which is not what the tier is for — and every one of
+       them now stops the frame to show you, so they have to be worth stopping
+       for. About one in forty-five at the bottom of the map. */
+    { id: 'void',      name: 'Void',      rank: 6, weight: 0.030, pow: 3.40, color: '#8a5cff', glow: '#c9a8ff', xp: 9200,  shake: 13,  stinger: 'void' },
     { id: 'glitch',    name: '!@#$%^&$#', rank: 7, weight: 0.012, pow: 2.80, color: '#ff2d55', glow: '#66ffe0', xp: 31000, shake: 18,  stinger: 'glitch' },
 
     /* One tier above the last one, and it is not listed anywhere until you have
@@ -8301,8 +8305,15 @@ input[type=range]::-moz-range-thumb {
 
     lastResult: null,
     lastFight: null,     // how the last fight went, for anything watching
+    approach: null,      // { rank, rarity, t, dur } while something rare closes in
     encounterActive: false
   };
+
+  /* How long before the bite the roll happens. Anything from the void tier up
+     is visible on its way in, so what is on the end of the line has to be
+     decided before the line knows about it. */
+  const APPROACH_LEAD = 5.5;
+  const APPROACH_MIN = 4.2;    // and the wait stretches so there is time to see it
 
   /* ---------------------------------------------------------------- casting */
 
@@ -8374,7 +8385,11 @@ input[type=range]::-moz-range-thumb {
     if (VF.secrets) VF.secrets.tryFind();
   }
 
-  function triggerBite(opts) {
+  /* What is on the end of the line. Decided here rather than at the moment of
+     the bite, because something rare enough is seen coming before it arrives
+     and that is only possible if the roll has already happened. Returns the
+     record and changes nothing. */
+  function rollBite(opts) {
     opts = opts || {};
 
     /* A quest that has put something specific in the water gets first refusal:
@@ -8382,13 +8397,11 @@ input[type=range]::-moz-range-thumb {
        trial to a slow hand on the hookset would be a poor way to lose it. */
     const armed = VF.quests && VF.quests.anyArmed();
     if (armed && armed.trial && !opts.minRank) {
-      S.pending = VF.loot.roll({ forceFish: armed.trial.fish });
-      S.pending.kind = 'fish';
-      S.pending.trial = armed.trial;
-      S.biteWindow = BITE_WINDOW_BIG;
-      setState('bite');
-      VF.bus.emit('fishing:bite', S.pending);
-      return;
+      const c = VF.loot.roll({ forceFish: armed.trial.fish });
+      c.kind = 'fish';
+      c.trial = armed.trial;
+      c.wide = true;
+      return c;
     }
 
     if (S.sweet && !opts.minRank) opts = Object.assign({}, opts, { rareBoost: 1.12 });
@@ -8397,28 +8410,48 @@ input[type=range]::-moz-range-thumb {
     if (!opts.minRank && VF.rng.g() < VF.treasureData.chance()) {
       const t = VF.treasureData.roll();
       if (t) {
-        S.pending = { kind: 'treasure', treasure: t, rarity: t.rarity,
-                      rarityDef: VF.rarities.get(t.rarity), traits: [],
-                      fish: { name: t.name, diff: 0.2, art: null } };
-        S.biteWindow = BITE_WINDOW;
-        setState('bite');
-        VF.bus.emit('fishing:bite', S.pending);
-        return;
+        return { kind: 'treasure', treasure: t, rarity: t.rarity,
+                 rarityDef: VF.rarities.get(t.rarity), traits: [],
+                 fish: { name: t.name, diff: 0.2, art: null } };
       }
     }
 
-    S.pending = VF.loot.roll(opts);
-    S.pending.kind = 'fish';
-    S.biteWindow = opts.minRank ? BITE_WINDOW_BIG : BITE_WINDOW;
+    const c = VF.loot.roll(opts);
+    c.kind = 'fish';
+    if (opts.minRank) c.wide = true;
     /* A species can carry its own scripted fight. It runs on exactly the same
        machinery the heaven's trial does, so the phase announcements and the
        loadout maths come along with it and nothing here has to know which
        species it is. Losing one of these to a slow hand on the hookset would
        be a miserable way to lose it, so the window opens wide. */
-    if (S.pending.fish && S.pending.fish.trial) {
-      S.pending.trial = S.pending.fish.trial;
-      S.biteWindow = BITE_WINDOW_BIG;
-    }
+    if (c.fish && c.fish.trial) { c.trial = c.fish.trial; c.wide = true; }
+    return c;
+  }
+
+  /* The shadow crossing the water toward the hook. Only the top of the
+     catalogue gets one — below that a bite should still be a surprise. */
+  function beginApproach(c) {
+    if (!c || c.kind !== 'fish') return false;
+    const rank = VF.rarities.rank(c.rarity);
+    if (rank < 6) return false;
+    // stretch the wait if there is not enough of it left to see anything
+    S.biteWait = Math.max(S.biteWait, APPROACH_MIN);
+    S.approach = { rank: rank, rarity: c.rarity, t: 0, dur: S.biteWait };
+    VF.bus.emit('fishing:approach', S.approach);
+    return true;
+  }
+
+  function endApproach() {
+    if (!S.approach) return;
+    S.approach = null;
+    VF.bus.emit('fishing:approach:end');
+  }
+
+  function triggerBite(opts) {
+    if (!S.pending) S.pending = rollBite(opts || S.pendingOpts);
+    S.pendingOpts = null;
+    S.biteWindow = S.pending.wide ? BITE_WINDOW_BIG : BITE_WINDOW;
+    endApproach();
     setState('bite');
     VF.bus.emit('fishing:bite', S.pending);
   }
@@ -8766,6 +8799,7 @@ input[type=range]::-moz-range-thumb {
   function reelIn() {
     if (S.state === 'waiting' || S.state === 'bite') {
       S.pending = null;
+      endApproach();
       setState('idle');
       VF.bus.emit('fishing:reelin');
       return true;
@@ -8815,11 +8849,16 @@ input[type=range]::-moz-range-thumb {
           VF.bus.emit('fishing:nibble');
         }
         S.nibble = Math.max(0, S.nibble - dt * 1.8);
-        if (S.biteWait <= 0) {
-          const opts = S.pendingOpts;
+        /* The roll happens a few seconds early so anything from the void tier
+           up can be watched on its way in. Everything else is rolled and
+           bitten in the same breath, exactly as before. */
+        if (!S.pending && S.biteWait <= APPROACH_LEAD) {
+          S.pending = rollBite(S.pendingOpts);
           S.pendingOpts = null;
-          triggerBite(opts);
+          beginApproach(S.pending);
         }
+        if (S.approach) S.approach.t += dt;
+        if (S.biteWait <= 0) triggerBite(null);
         break;
 
       case 'bite':
@@ -8847,6 +8886,9 @@ input[type=range]::-moz-range-thumb {
   /* Encounters force the next bite to be something enormous. */
   function queueEncounter(opts) {
     if (S.state !== 'waiting') return false;
+    // whatever was already rolled for this cast is not what is coming now
+    S.pending = null;
+    endApproach();
     S.encounterActive = true;
     S.pendingOpts = opts;
     S.biteWait = Math.min(S.biteWait, opts.delay || 3.2);
@@ -8858,6 +8900,7 @@ input[type=range]::-moz-range-thumb {
     S.charging = false;
     S.charge = 0;
     S.pending = null;
+    endApproach();
     S.pendingOpts = null;
     S.fight = null;
     S.lastResult = null;
@@ -9889,6 +9932,11 @@ input[type=range]::-moz-range-thumb {
   const SCENES = {
     nessie: {
       audio: 'void',
+      /* box  how much of the frame the figure may fill, [of height, of width]
+         top  reach above its own centre, in half-heights — what must be in shot
+         bot  reach below it
+         surf where its waterline sits down the water band                    */
+      frame: { box: [1.10, 1.15], top: 1.00, bot: 0.50, surf: 0.62, sink: 0.36 },
       beats: [
         { dur: 2.0, dark: 0.55, shadow: 0.0, rise: 0,
           text: 'the water goes flat. all the way out to the horizon, flat.' },
@@ -9904,6 +9952,7 @@ input[type=range]::-moz-range-thumb {
     },
     oscar: {
       audio: 'grand',
+      frame: { box: [0.76, 0.55], top: 0.90, bot: 0.95, surf: 0.58 },
       beats: [
         { dur: 2.0, dark: 0.50, shadow: 0, rise: 0,
           text: 'the line comes up light. far too light for what it is holding.' },
@@ -9919,6 +9968,44 @@ input[type=range]::-moz-range-thumb {
       ]
     }
   };
+
+  /* Everything from the void tier up comes up in front of you rather than
+     straight onto the card. These run every time one is landed, so they are
+     short, and they are written to fit any species in their tier — the name
+     beat takes the name off whatever was actually caught. */
+  SCENES.voidcatch = {
+    audio: 'void',
+    frame: { box: [0.66, 0.56], top: 0.88, bot: 0.88, surf: 0.60 },
+    beats: [
+      { dur: 1.5, dark: 0.56, shadow: 0.42, rise: 0,
+        text: 'the water goes quiet in a circle around the line.' },
+      { dur: 2.1, dark: 0.44, shadow: 0.12, rise: 0.92, lit: 0.55, shake: 1,
+        text: 'it does not thrash. it arrives.' },
+      { dur: 2.0, dark: 0.24, shadow: 0, rise: 1, lit: 1, flash: 1, name: 1 }
+    ]
+  };
+
+  SCENES.glitchcatch = {
+    audio: 'glitch',
+    frame: { box: [0.62, 0.54], top: 0.86, bot: 0.86, surf: 0.58 },
+    beats: [
+      { dur: 1.4, dark: 0.64, shadow: 0.30, rise: 0,
+        text: 'the line reads a weight. nothing else agrees.' },
+      { dur: 2.0, dark: 0.48, shadow: 0.10, rise: 0.94, lit: 0.5, shake: 1,
+        text: 'it is on the stone before it is out of the water.' },
+      { dur: 2.0, dark: 0.22, shadow: 0, rise: 1, lit: 1, flash: 1, name: 1 }
+    ]
+  };
+
+  /* Which sequence a catch gets when the species does not name its own. */
+  function forCatch(c) {
+    if (!c || c.kind !== 'fish' || !c.fish) return null;
+    if (c.fish.cutscene) return c.fish.cutscene;
+    const rank = VF.rarities.rank(c.rarity);
+    if (rank >= 7) return 'glitchcatch';
+    if (rank >= 6) return 'voidcatch';
+    return null;
+  }
 
   const S = {
     id: null, def: null, i: 0, t: 0, elapsed: 0,
@@ -9961,7 +10048,9 @@ input[type=range]::-moz-range-thumb {
     const b = S.def.beats[n];
     if (!b) return;
     if (textEl) {
-      textEl.textContent = b.text;
+      // a name beat with no line of its own says what was actually landed
+      textEl.textContent = b.text ||
+        (b.name && S.fish && S.fish.fish ? S.fish.fish.name : '');
       /* The rest of the game is lowercase on purpose. A name is the one place
          that reads as a shrug rather than a style, so the two reveal beats
          opt out of it. */
@@ -10030,11 +10119,11 @@ input[type=range]::-moz-range-thumb {
 
   VF.cutscene = {
     play: play, tick: tick, skip: skip, active: active,
-    scenes: SCENES,
+    scenes: SCENES, forCatch: forCatch,
     /* What the renderer reads. */
     state: function () {
-      return S.id ? { id: S.id, fish: S.fish, dark: S.dark, shadow: S.shadow,
-                      rise: S.rise, lit: S.lit, t: S.elapsed } : null;
+      return S.id ? { id: S.id, fish: S.fish, frame: S.def.frame, dark: S.dark,
+                      shadow: S.shadow, rise: S.rise, lit: S.lit, t: S.elapsed } : null;
     }
   };
 })(window.VF = window.VF || {});
@@ -17294,8 +17383,60 @@ input[type=range]::-moz-range-thumb {
     shadows.push(Object.assign({ life: 9, max: 9, x: -0.1, y: 0.5, sp: 0.06, size: 1, alpha: 0.5 }, opts));
   }
 
+  /* The shadow of something rare crossing the water toward the hook, in the
+     seconds before it takes it. Nothing below the void tier gets one: the
+     whole value of it is that seeing one means something. */
+  function drawApproach() {
+    const A = VF.fishing.S.approach;
+    if (!A) return;
+    const b = L.bobber;
+    if (!b.visible) return;
+    const wh = L.waterH;
+    const k = U.clamp(A.t / Math.max(0.5, A.dur), 0, 1);
+    const e = U.smoothstep(k);
+
+    // out of the deep water on the far side, in toward the line
+    const fromX = W * 1.06, fromY = L.horizonY + wh * 0.10;
+    const x = U.lerp(fromX, b.x, e);
+    const y = U.lerp(fromY, b.y + wh * 0.10, e * e);
+    const sc = scaleAt(y) * U.lerp(0.55, 2.35, e);
+    // it fades up out of nothing and thins again as it reaches the hook
+    const a = U.clamp(Math.sin(Math.min(1, k * 1.12) * Math.PI) * 1.45, 0, 1);
+    if (a <= 0.01) return;
+
+    const col = U.hexToRgb(VF.rarities.color(A.rarity));
+    const wob = Math.sin(t * 1.7) * wh * 0.012 * (1 - e * 0.6);
+
+    ctx.save();
+    // the shape itself
+    ctx.globalAlpha = a * 0.82;
+    ctx.fillStyle = '#000';
+    ctx.beginPath();
+    ctx.ellipse(x, y + wob, W * 0.085 * sc, wh * 0.030 * sc,
+                Math.sin(t * 0.5) * 0.10 - (1 - e) * 0.18, 0, TAU);
+    ctx.fill();
+    // a second, smaller mass behind it, so it reads as long rather than round
+    ctx.globalAlpha = a * 0.5;
+    ctx.beginPath();
+    ctx.ellipse(x + W * 0.070 * sc, y + wob * 0.6, W * 0.040 * sc, wh * 0.017 * sc,
+                Math.sin(t * 0.5 + 1) * 0.14, 0, TAU);
+    ctx.fill();
+
+    // and the colour of whatever tier it is, bleeding up through the water
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalAlpha = a * (0.22 + 0.16 * Math.sin(t * 2.4));
+    const g = ctx.createRadialGradient(x, y + wob, 0, x, y + wob, W * 0.20 * sc);
+    g.addColorStop(0, U.rgbToCss(col, 0.55));
+    g.addColorStop(0.45, U.rgbToCss(col, 0.13));
+    g.addColorStop(1, U.rgbToCss(col, 0));
+    ctx.fillStyle = g;
+    ctx.fillRect(x - W * 0.20 * sc, y - W * 0.20 * sc, W * 0.40 * sc, W * 0.40 * sc);
+    ctx.restore();
+  }
+
   function drawUnderwater(P) {
     const hy = L.horizonY, wh = L.waterH;
+    drawApproach();
     for (let i = shadows.length - 1; i >= 0; i--) {
       const s = shadows[i];
       s.life -= 1 / 60;
@@ -17740,13 +17881,15 @@ input[type=range]::-moz-range-thumb {
        centred inside its own silhouette: she is nearly all neck above hers,
        he is a person and splits about evenly. So the frame is worked out from
        the parts that have to be in shot rather than from the middle. */
-    const isNessie = C.id === 'nessie';
-    const TOP = isNessie ? 1.00 : 0.90;    // reach above centre, in half-heights
-    const BOT = isNessie ? 0.50 : 0.95;    // reach below it
-    const box = isNessie ? Math.min(H * 1.10, W * 1.15) : Math.min(H * 0.76, W * 0.55);
+    const F = C.frame || { box: [0.76, 0.55], top: 0.90, bot: 0.95, surf: 0.58 };
+    const TOP = F.top;                     // reach above centre, in half-heights
+    const BOT = F.bot;                     // reach below it
+    const box = Math.min(H * F.box[0], W * F.box[1]);
     const size = VF.fishArt.fitSize(fish, box);
-    const half = size * 2 * VF.fishArt.bodyRatio('being', fish.art.being);
-    const surface = L.horizonY + L.waterH * (isNessie ? 0.62 : 0.58);
+    // whatever body it has — a being, an object or an ordinary fish
+    const half = size * 2 * VF.fishArt.bodyRatio(fish.art.body,
+                                                 fish.art.being || fish.art.object);
+    const surface = L.horizonY + L.waterH * F.surf;
     const k = U.smootherstep(U.clamp(C.rise, 0, 1));
 
     /* The letterbox bars are DOM, drawn over the canvas, so the renderer has
@@ -17758,11 +17901,15 @@ input[type=range]::-moz-range-thumb {
     /* She sits at her own waterline; he stands on the surface. Either way the
        figure is pushed down far enough to clear the top bar — a reveal you
        cannot see the head of is not a reveal. */
+    /* Something that sits in the water rests at its own waterline; something
+       that stands on it clears the surface entirely. `sink` is how much of it
+       stays under when it has finished coming up. */
     const cyEnd = Math.max(ceiling,
-                           isNessie ? surface - half * 0.36 : surface - half * BOT);
+                           F.sink !== undefined ? surface - half * F.sink
+                                                : surface - half * BOT);
     const cyStart = surface + half * (BOT + 1.30);
     const cy = U.lerp(cyStart, cyEnd, k);
-    const cx = W * (isNessie ? 0.50 : 0.50);
+    const cx = W * 0.5;
 
     ctx.save();
     // clip at the surface so nothing floats above water it has not left yet
@@ -18821,6 +18968,18 @@ input[type=range]::-moz-range-thumb {
         speedMin: 30, speedMax: 110 * (sc.shard ? 1.7 : 1), sizeMax: 2.2, grav: 240, lifeMax: 0.7
       });
     });
+    /* Something big enough to be seen coming. The cue is deliberately quiet —
+       the shadow is the announcement, this only makes you look up. */
+    VF.bus.on('fishing:approach', function (a) {
+      VF.audio.surge();
+      VF.audio.duck(0.6);
+      VF.fx.pulse(0.34);
+      VF.fx.shake(1.6);
+      showPrompt(a.rank >= 8 ? 'something is coming'
+               : a.rank >= 7 ? 'the water is wrong' : 'something is coming',
+                 VF.rarities.color(a.rarity), 1.1);
+    });
+
     VF.bus.on('fishing:nibble', function () {
       const b = VF.scene.L.bobber;
       VF.audio.nibble();
@@ -21312,8 +21471,9 @@ input[type=range]::-moz-range-thumb {
       /* Two species stop the game to show you something first. The catch is
          already recorded by the time this runs, so the card is the same card
          whether the sequence is watched or skipped. */
-      if (c.fish && c.fish.cutscene && VF.cutscene) {
-        VF.cutscene.play(c.fish.cutscene, c, function () {
+      const scene = VF.cutscene && VF.cutscene.forCatch(c);
+      if (scene) {
+        VF.cutscene.play(scene, c, function () {
           setTimeout(function () { show(c); }, 260);
         });
         return;

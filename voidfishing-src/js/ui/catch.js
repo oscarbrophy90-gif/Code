@@ -16,8 +16,9 @@
       /* Two species stop the game to show you something first. The catch is
          already recorded by the time this runs, so the card is the same card
          whether the sequence is watched or skipped. */
-      if (c.fish && c.fish.cutscene && VF.cutscene) {
-        VF.cutscene.play(c.fish.cutscene, c, function () {
+      const scene = VF.cutscene && VF.cutscene.forCatch(c);
+      if (scene) {
+        VF.cutscene.play(scene, c, function () {
           setTimeout(function () { show(c); }, 260);
         });
         return;

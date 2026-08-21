@@ -39,8 +39,15 @@
 
     lastResult: null,
     lastFight: null,     // how the last fight went, for anything watching
+    approach: null,      // { rank, rarity, t, dur } while something rare closes in
     encounterActive: false
   };
+
+  /* How long before the bite the roll happens. Anything from the void tier up
+     is visible on its way in, so what is on the end of the line has to be
+     decided before the line knows about it. */
+  const APPROACH_LEAD = 5.5;
+  const APPROACH_MIN = 4.2;    // and the wait stretches so there is time to see it
 
   /* ---------------------------------------------------------------- casting */
 
@@ -112,7 +119,11 @@
     if (VF.secrets) VF.secrets.tryFind();
   }
 
-  function triggerBite(opts) {
+  /* What is on the end of the line. Decided here rather than at the moment of
+     the bite, because something rare enough is seen coming before it arrives
+     and that is only possible if the roll has already happened. Returns the
+     record and changes nothing. */
+  function rollBite(opts) {
     opts = opts || {};
 
     /* A quest that has put something specific in the water gets first refusal:
@@ -120,13 +131,11 @@
        trial to a slow hand on the hookset would be a poor way to lose it. */
     const armed = VF.quests && VF.quests.anyArmed();
     if (armed && armed.trial && !opts.minRank) {
-      S.pending = VF.loot.roll({ forceFish: armed.trial.fish });
-      S.pending.kind = 'fish';
-      S.pending.trial = armed.trial;
-      S.biteWindow = BITE_WINDOW_BIG;
-      setState('bite');
-      VF.bus.emit('fishing:bite', S.pending);
-      return;
+      const c = VF.loot.roll({ forceFish: armed.trial.fish });
+      c.kind = 'fish';
+      c.trial = armed.trial;
+      c.wide = true;
+      return c;
     }
 
     if (S.sweet && !opts.minRank) opts = Object.assign({}, opts, { rareBoost: 1.12 });
@@ -135,28 +144,48 @@
     if (!opts.minRank && VF.rng.g() < VF.treasureData.chance()) {
       const t = VF.treasureData.roll();
       if (t) {
-        S.pending = { kind: 'treasure', treasure: t, rarity: t.rarity,
-                      rarityDef: VF.rarities.get(t.rarity), traits: [],
-                      fish: { name: t.name, diff: 0.2, art: null } };
-        S.biteWindow = BITE_WINDOW;
-        setState('bite');
-        VF.bus.emit('fishing:bite', S.pending);
-        return;
+        return { kind: 'treasure', treasure: t, rarity: t.rarity,
+                 rarityDef: VF.rarities.get(t.rarity), traits: [],
+                 fish: { name: t.name, diff: 0.2, art: null } };
       }
     }
 
-    S.pending = VF.loot.roll(opts);
-    S.pending.kind = 'fish';
-    S.biteWindow = opts.minRank ? BITE_WINDOW_BIG : BITE_WINDOW;
+    const c = VF.loot.roll(opts);
+    c.kind = 'fish';
+    if (opts.minRank) c.wide = true;
     /* A species can carry its own scripted fight. It runs on exactly the same
        machinery the heaven's trial does, so the phase announcements and the
        loadout maths come along with it and nothing here has to know which
        species it is. Losing one of these to a slow hand on the hookset would
        be a miserable way to lose it, so the window opens wide. */
-    if (S.pending.fish && S.pending.fish.trial) {
-      S.pending.trial = S.pending.fish.trial;
-      S.biteWindow = BITE_WINDOW_BIG;
-    }
+    if (c.fish && c.fish.trial) { c.trial = c.fish.trial; c.wide = true; }
+    return c;
+  }
+
+  /* The shadow crossing the water toward the hook. Only the top of the
+     catalogue gets one — below that a bite should still be a surprise. */
+  function beginApproach(c) {
+    if (!c || c.kind !== 'fish') return false;
+    const rank = VF.rarities.rank(c.rarity);
+    if (rank < 6) return false;
+    // stretch the wait if there is not enough of it left to see anything
+    S.biteWait = Math.max(S.biteWait, APPROACH_MIN);
+    S.approach = { rank: rank, rarity: c.rarity, t: 0, dur: S.biteWait };
+    VF.bus.emit('fishing:approach', S.approach);
+    return true;
+  }
+
+  function endApproach() {
+    if (!S.approach) return;
+    S.approach = null;
+    VF.bus.emit('fishing:approach:end');
+  }
+
+  function triggerBite(opts) {
+    if (!S.pending) S.pending = rollBite(opts || S.pendingOpts);
+    S.pendingOpts = null;
+    S.biteWindow = S.pending.wide ? BITE_WINDOW_BIG : BITE_WINDOW;
+    endApproach();
     setState('bite');
     VF.bus.emit('fishing:bite', S.pending);
   }
@@ -504,6 +533,7 @@
   function reelIn() {
     if (S.state === 'waiting' || S.state === 'bite') {
       S.pending = null;
+      endApproach();
       setState('idle');
       VF.bus.emit('fishing:reelin');
       return true;
@@ -553,11 +583,16 @@
           VF.bus.emit('fishing:nibble');
         }
         S.nibble = Math.max(0, S.nibble - dt * 1.8);
-        if (S.biteWait <= 0) {
-          const opts = S.pendingOpts;
+        /* The roll happens a few seconds early so anything from the void tier
+           up can be watched on its way in. Everything else is rolled and
+           bitten in the same breath, exactly as before. */
+        if (!S.pending && S.biteWait <= APPROACH_LEAD) {
+          S.pending = rollBite(S.pendingOpts);
           S.pendingOpts = null;
-          triggerBite(opts);
+          beginApproach(S.pending);
         }
+        if (S.approach) S.approach.t += dt;
+        if (S.biteWait <= 0) triggerBite(null);
         break;
 
       case 'bite':
@@ -585,6 +620,9 @@
   /* Encounters force the next bite to be something enormous. */
   function queueEncounter(opts) {
     if (S.state !== 'waiting') return false;
+    // whatever was already rolled for this cast is not what is coming now
+    S.pending = null;
+    endApproach();
     S.encounterActive = true;
     S.pendingOpts = opts;
     S.biteWait = Math.min(S.biteWait, opts.delay || 3.2);
@@ -596,6 +634,7 @@
     S.charging = false;
     S.charge = 0;
     S.pending = null;
+    endApproach();
     S.pendingOpts = null;
     S.fight = null;
     S.lastResult = null;
