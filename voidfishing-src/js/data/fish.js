@@ -1127,10 +1127,76 @@
     locs: [], baits: [], time: [], weather: [],
     art: { body: 'serpent', fin: 'wing', eyes: 4, glow: 1, c1: '#e3caa0', c2: '#241a10', c3: '#fff3cc', ex: ['halo', 'rings', 'runes', 'wings'] } },
 
-  { id: 'celestial_leviathan', name: 'The Celestial Leviathan', rarity: 'void', value: 3400000, kg: [9000, 120000], m: [40, 180], diff: 0.99, event: 'trial',
+  /* --- the two celestials ---------------------------------------------------
+     Neither of these is in any water unless a Celestial Convergence is
+     overhead, and the convergence does not exist until the Heavens Rod has
+     been won. The questline hands you one leviathan under controlled
+     conditions with a fight tuned to be winnable; these are the wild ones,
+     and they carry their own scripts, which are the two hardest fights in the
+     game. `evWeight` is a multiplier on the species weight, so the fractions
+     below make them rare inside a tier that is already rare inside an event
+     that is rarer still. */
+
+  { id: 'celestial_leviathan', name: 'The Celestial Leviathan', rarity: 'void', value: 3400000, kg: [9000, 120000], m: [40, 180], diff: 0.99,
+    event: 'celestial', evWeight: 2.90, cutscene: 'celestialcatch',
     desc: 'The thing the rod was made to catch, still waiting where the rod was dropped. Four hundred years is not a long time to it.',
     locs: [], baits: [], time: [], weather: [],
-    art: { body: 'whale', fin: 'wing', eyes: 6, glow: 1, c1: '#f0d79c', c2: '#20180c', c3: '#fffbe8', ex: ['halo', 'rings', 'stars', 'wings', 'runes'] } },
+    art: { body: 'whale', fin: 'wing', eyes: 6, glow: 1, c1: '#f0d79c', c2: '#20180c', c3: '#fffbe8', ex: ['halo', 'rings', 'stars', 'wings', 'runes'] },
+    trial: {
+      phases: [
+        /* the quest version of this fight opens gently because it is the first
+           one anybody ever has. this one does not, because it is not */
+        { at: 0.00, name: 'The Sky Opens', start: 0.30,
+          barW: 0.145, barSpeed: 1.30, fishSpeed: 0.85, fishTurn: 0.45, dart: 0.55,
+          fill: 0.144, drain: 0.352 },
+        { at: 0.26, name: 'Four Hundred Years',
+          barW: 0.125, barSpeed: 1.45, fishSpeed: 0.98, fishTurn: 0.30, dart: 0.70,
+          fill: 0.138, drain: 0.392 },
+        /* it has met this rod before and it has not forgotten how it moves */
+        { at: 0.52, name: 'It Remembers The Rod',
+          barW: 0.105, barSpeed: 1.58, fishSpeed: 1.10, fishTurn: 0.22, dart: 0.80,
+          evade: 0.34, fill: 0.142, drain: 0.422 },
+        { at: 0.76, name: 'All Of It',
+          barW: 0.090, barSpeed: 1.68, fishSpeed: 1.22, fishTurn: 0.17, dart: 0.86,
+          evade: 0.52, fill: 0.174, drain: 0.452 },
+        /* the last eighth fills fastest, so the end is a sprint and not a wall */
+        { at: 0.92, name: 'The Last Length',
+          barW: 0.082, barSpeed: 1.74, fishSpeed: 1.30, fishTurn: 0.15, dart: 0.90,
+          evade: 0.58, fill: 0.214, drain: 0.466 }
+      ]
+    } },
+
+  { id: 'celestial_dragon', name: 'The Celestial Dragon', rarity: 'void', value: 8600000, kg: [26000, 310000], m: [90, 420], diff: 0.99,
+    event: 'celestial', evWeight: 3.70, cutscene: 'celestialcatch',
+    desc: 'The constellation is not a picture of it and never was. The constellation is where it usually sleeps, ' +
+          'and the stars are what it has settled on top of. It is longer than the lake, which is a problem the ' +
+          'lake has and not one it has, and it came down the line the entire way without once being hurried.',
+    locs: [], baits: [], time: [], weather: [],
+    art: { body: 'serpent', fin: 'wing', eyes: 4, glow: 1, c1: '#ffd98a', c2: '#231a0d', c3: '#fff6d8',
+           ex: ['halo', 'rings', 'stars', 'horns', 'spine'] },
+    trial: {
+      phases: [
+        /* the hardest fight in the game, and it is not close. five phases, no
+           rest between them, and the meter fills slower than it drains until
+           the very last stretch */
+        { at: 0.00, name: 'It Uncoils', start: 0.28,
+          barW: 0.138, barSpeed: 1.34, fishSpeed: 0.90, fishTurn: 0.42, dart: 0.58,
+          fill: 0.156, drain: 0.331 },
+        { at: 0.24, name: 'The Long Body',
+          barW: 0.118, barSpeed: 1.50, fishSpeed: 1.05, fishTurn: 0.28, dart: 0.74,
+          evade: 0.12, fill: 0.154, drain: 0.365 },
+        { at: 0.50, name: 'Coil',
+          barW: 0.098, barSpeed: 1.64, fishSpeed: 1.18, fishTurn: 0.20, dart: 0.84,
+          evade: 0.30, fill: 0.162, drain: 0.400 },
+        /* the phase everybody loses on: it stops running and starts reading */
+        { at: 0.74, name: 'It Looks At You',
+          barW: 0.084, barSpeed: 1.76, fishSpeed: 1.30, fishTurn: 0.15, dart: 0.90,
+          evade: 0.48, fill: 0.199, drain: 0.431 },
+        { at: 0.91, name: 'The Whole Length Of It',
+          barW: 0.076, barSpeed: 1.84, fishSpeed: 1.40, fishTurn: 0.13, dart: 0.94,
+          evade: 0.56, fill: 0.256, drain: 0.446 }
+      ]
+    } },
 
   /* --- and what lives above the clouds, once you can get up there --- */
 

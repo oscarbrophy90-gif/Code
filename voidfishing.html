@@ -3400,10 +3400,76 @@ input[type=range]::-moz-range-thumb {
     locs: [], baits: [], time: [], weather: [],
     art: { body: 'serpent', fin: 'wing', eyes: 4, glow: 1, c1: '#e3caa0', c2: '#241a10', c3: '#fff3cc', ex: ['halo', 'rings', 'runes', 'wings'] } },
 
-  { id: 'celestial_leviathan', name: 'The Celestial Leviathan', rarity: 'void', value: 3400000, kg: [9000, 120000], m: [40, 180], diff: 0.99, event: 'trial',
+  /* --- the two celestials ---------------------------------------------------
+     Neither of these is in any water unless a Celestial Convergence is
+     overhead, and the convergence does not exist until the Heavens Rod has
+     been won. The questline hands you one leviathan under controlled
+     conditions with a fight tuned to be winnable; these are the wild ones,
+     and they carry their own scripts, which are the two hardest fights in the
+     game. `evWeight` is a multiplier on the species weight, so the fractions
+     below make them rare inside a tier that is already rare inside an event
+     that is rarer still. */
+
+  { id: 'celestial_leviathan', name: 'The Celestial Leviathan', rarity: 'void', value: 3400000, kg: [9000, 120000], m: [40, 180], diff: 0.99,
+    event: 'celestial', evWeight: 2.90, cutscene: 'celestialcatch',
     desc: 'The thing the rod was made to catch, still waiting where the rod was dropped. Four hundred years is not a long time to it.',
     locs: [], baits: [], time: [], weather: [],
-    art: { body: 'whale', fin: 'wing', eyes: 6, glow: 1, c1: '#f0d79c', c2: '#20180c', c3: '#fffbe8', ex: ['halo', 'rings', 'stars', 'wings', 'runes'] } },
+    art: { body: 'whale', fin: 'wing', eyes: 6, glow: 1, c1: '#f0d79c', c2: '#20180c', c3: '#fffbe8', ex: ['halo', 'rings', 'stars', 'wings', 'runes'] },
+    trial: {
+      phases: [
+        /* the quest version of this fight opens gently because it is the first
+           one anybody ever has. this one does not, because it is not */
+        { at: 0.00, name: 'The Sky Opens', start: 0.30,
+          barW: 0.145, barSpeed: 1.30, fishSpeed: 0.85, fishTurn: 0.45, dart: 0.55,
+          fill: 0.144, drain: 0.352 },
+        { at: 0.26, name: 'Four Hundred Years',
+          barW: 0.125, barSpeed: 1.45, fishSpeed: 0.98, fishTurn: 0.30, dart: 0.70,
+          fill: 0.138, drain: 0.392 },
+        /* it has met this rod before and it has not forgotten how it moves */
+        { at: 0.52, name: 'It Remembers The Rod',
+          barW: 0.105, barSpeed: 1.58, fishSpeed: 1.10, fishTurn: 0.22, dart: 0.80,
+          evade: 0.34, fill: 0.142, drain: 0.422 },
+        { at: 0.76, name: 'All Of It',
+          barW: 0.090, barSpeed: 1.68, fishSpeed: 1.22, fishTurn: 0.17, dart: 0.86,
+          evade: 0.52, fill: 0.174, drain: 0.452 },
+        /* the last eighth fills fastest, so the end is a sprint and not a wall */
+        { at: 0.92, name: 'The Last Length',
+          barW: 0.082, barSpeed: 1.74, fishSpeed: 1.30, fishTurn: 0.15, dart: 0.90,
+          evade: 0.58, fill: 0.214, drain: 0.466 }
+      ]
+    } },
+
+  { id: 'celestial_dragon', name: 'The Celestial Dragon', rarity: 'void', value: 8600000, kg: [26000, 310000], m: [90, 420], diff: 0.99,
+    event: 'celestial', evWeight: 3.70, cutscene: 'celestialcatch',
+    desc: 'The constellation is not a picture of it and never was. The constellation is where it usually sleeps, ' +
+          'and the stars are what it has settled on top of. It is longer than the lake, which is a problem the ' +
+          'lake has and not one it has, and it came down the line the entire way without once being hurried.',
+    locs: [], baits: [], time: [], weather: [],
+    art: { body: 'serpent', fin: 'wing', eyes: 4, glow: 1, c1: '#ffd98a', c2: '#231a0d', c3: '#fff6d8',
+           ex: ['halo', 'rings', 'stars', 'horns', 'spine'] },
+    trial: {
+      phases: [
+        /* the hardest fight in the game, and it is not close. five phases, no
+           rest between them, and the meter fills slower than it drains until
+           the very last stretch */
+        { at: 0.00, name: 'It Uncoils', start: 0.28,
+          barW: 0.138, barSpeed: 1.34, fishSpeed: 0.90, fishTurn: 0.42, dart: 0.58,
+          fill: 0.156, drain: 0.331 },
+        { at: 0.24, name: 'The Long Body',
+          barW: 0.118, barSpeed: 1.50, fishSpeed: 1.05, fishTurn: 0.28, dart: 0.74,
+          evade: 0.12, fill: 0.154, drain: 0.365 },
+        { at: 0.50, name: 'Coil',
+          barW: 0.098, barSpeed: 1.64, fishSpeed: 1.18, fishTurn: 0.20, dart: 0.84,
+          evade: 0.30, fill: 0.162, drain: 0.400 },
+        /* the phase everybody loses on: it stops running and starts reading */
+        { at: 0.74, name: 'It Looks At You',
+          barW: 0.084, barSpeed: 1.76, fishSpeed: 1.30, fishTurn: 0.15, dart: 0.90,
+          evade: 0.48, fill: 0.199, drain: 0.431 },
+        { at: 0.91, name: 'The Whole Length Of It',
+          barW: 0.076, barSpeed: 1.84, fishSpeed: 1.40, fishTurn: 0.13, dart: 0.94,
+          evade: 0.56, fill: 0.256, drain: 0.446 }
+      ]
+    } },
 
   /* --- and what lives above the clouds, once you can get up there --- */
 
@@ -4586,9 +4652,15 @@ input[type=range]::-moz-range-thumb {
       desc: 'Visible only when it is under load. Otherwise you are holding a suggestion.',
       art: { c1: '#bfe8f5', c2: '#6f9db0', grip: '#3f5f6e', tip: '#ffffff', len: 1.28, curve: 0.05, glow: 0.78, style: 'glass' } },
 
-    /* Not for sale at any price. It arrives, once, at the end of a long thread. */
+    /* Not for sale at any price. It arrives, once, at the end of a long thread,
+       and it is the best rod in the game on every axis there is — better than
+       the deepest shop rod and better than anything the wanderer will ever
+       carry. It is also the only rod that fills the meter faster than the
+       baseline rather than trading width for it. Nothing is meant to outclass
+       it, because nothing else in the game costs a questline. */
     { id: 'heavens', name: 'Heavens Rod', cost: 0, level: 0, quest: 'heavens',
-      cast: 1.00, reel: 1.95, line: 7.20, rare: 4.10, luck: 1.45,
+      cast: 1.72, reel: 3.98, line: 17.60, rare: 11.20, luck: 4.25,
+      barSize: 2.10, barSpeed: 1.26, barFill: 1.08,
       desc: 'Made by somebody who could fish anywhere, and dropped from a height four hundred years ago. It is warm, and it has been waiting.',
       art: { c1: '#f2d78a', c2: '#8a6620', grip: '#5a4214', tip: '#fff6d0', len: 1.30, curve: 0.05, glow: 1.0, style: 'heavens' } },
 
@@ -5869,7 +5941,24 @@ input[type=range]::-moz-range-thumb {
       mods: { rare: 1.85, bite: 0.78, treasure: 1.4, secret: 1.3 },
       skyfall: 1,
       tint: '#ffd88a', minLoc: 3,
-      test: function () { return VF.quests && VF.quests.reached('heavens', 8); } }
+      test: function () { return VF.quests && VF.quests.reached('heavens', 8); } },
+
+    /* The rarest thing the sky does, and the only water the two celestials can
+       be found in. It does not exist until the rod has been won — the
+       questline hands you one leviathan under controlled conditions, and this
+       is where you go looking for the rest of them afterwards. Weight 9
+       against a pool of roughly 180 puts it at about one condition in twenty,
+       and a condition arrives every seven minutes or so in deep water, so
+       this is a couple of hours apart. It is meant to be a thing you stop
+       what you are doing for. */
+    { id: 'celestial', name: 'Celestial Convergence',
+      weight: function () { return VF.state.data.flags.heavensRod ? 9 : 0; },
+      dur: [200, 340],
+      blurb: 'every star that ever fell is overhead at once, and none of them are moving',
+      mods: { rare: 2.40, bite: 0.86, secret: 1.5 },
+      celestial: 1,
+      tint: '#ffe9b0', minLoc: 5,
+      test: function (d) { return !!d.flags.heavensRod; } }
   ];
 
   const BY_ID = VF.util.byId(LIST);
@@ -8172,6 +8261,20 @@ input[type=range]::-moz-range-thumb {
     };
   }
 
+  /* A scripted fight is a boss, and a boss does not get erased by shopping.
+     Ordinary fishing takes the rod's bar width at face value; in here it is
+     taken at face value up to the knee and at thirty per cent above it, so
+     the ladder stays strictly monotonic — a better rod is still a better rod,
+     right to the top — without the widest rods in the game turning the
+     hardest fights into a formality. The knee sits just above the Lunar Rod,
+     which is what the heaven's trial was tuned against, so that fight is
+     untouched by this. */
+  const TRIAL_KNEE = 1.35;
+
+  function trialBar(rodBar) {
+    return rodBar <= TRIAL_KNEE ? rodBar : TRIAL_KNEE + (rodBar - TRIAL_KNEE) * 0.55;
+  }
+
   /* One phase of a scripted fight. The phase writes the shape of it; the
      loadout still moves the numbers, on exactly the same terms as a normal
      fight, so a better rod is a better rod all the way to the top. */
@@ -8181,7 +8284,7 @@ input[type=range]::-moz-range-thumb {
     const barTop = Math.max(0.80, ph.fishSpeed * 1.55) * (ph.barSpeed || 1);
     return {
       diff: 1.15,
-      barW: U.clamp(ph.barW * L.rodBar * L.barSize, 0.050, 0.46),
+      barW: U.clamp(ph.barW * trialBar(L.rodBar) * L.barSize, 0.050, 0.46),
       barSpeed: Math.max(ph.fishSpeed * BAR_FLOOR, barTop * L.barMul),
       barTau: 0.170 / (1 + 0.60 * L.q),
       fishSpeed: ph.fishSpeed,
@@ -9680,6 +9783,10 @@ input[type=range]::-moz-range-thumb {
   /* Species tagged with an `event` only exist while that event is happening. */
   function eventActive(tag) {
     if (tag === 'skyfall') return !!(VF.conditions && VF.conditions.has('skyfall'));
+    /* The two celestials are in no water at all unless the convergence is
+       overhead. 'trial' stays false on purpose: that one is handed out by the
+       questline and is never in a pool. */
+    if (tag === 'celestial') return !!(VF.conditions && VF.conditions.has('celestial'));
     return false;
   }
 
@@ -9982,6 +10089,20 @@ input[type=range]::-moz-range-thumb {
       { dur: 2.1, dark: 0.44, shadow: 0.12, rise: 0.92, lit: 0.55, shake: 1,
         text: 'it does not thrash. it arrives.' },
       { dur: 2.0, dark: 0.24, shadow: 0, rise: 1, lit: 1, flash: 1, name: 1 }
+    ]
+  };
+
+  /* The two celestials get their own sequence rather than the void one. They
+     are the only fish in the game that arrive lit. */
+  SCENES.celestialcatch = {
+    audio: 'grand',
+    frame: { box: [0.70, 0.60], top: 0.90, bot: 0.86, surf: 0.62 },
+    beats: [
+      { dur: 1.6, dark: 0.50, shadow: 0.40, rise: 0, lit: 0.10,
+        text: 'the stars overhead go out one at a time, in a line, toward the water.' },
+      { dur: 2.2, dark: 0.34, shadow: 0.10, rise: 0.94, lit: 0.78, shake: 1,
+        text: 'it does not break the surface. the surface gets out of the way.' },
+      { dur: 2.1, dark: 0.16, shadow: 0, rise: 1, lit: 1, flash: 1, name: 1 }
     ]
   };
 
@@ -16803,6 +16924,69 @@ input[type=range]::-moz-range-thumb {
     ctx.restore();
   }
 
+  /* ---------------------------------------------- celestial convergence
+     The rarest condition in the game, and the only water the two celestials
+     are in. A slow wheel of stars sits directly overhead and does not move
+     the way the real sky does, and the whole horizon carries a warm line
+     under it. Cheap on purpose — it runs for five minutes at a time. */
+  const WHEEL = [];
+  for (let i = 0; i < 34; i++) {
+    WHEEL.push({ a: (i / 34) * TAU + (i % 5) * 0.11,
+                 r: 0.30 + ((i * 37) % 71) / 71 * 0.70,
+                 s: 0.7 + ((i * 53) % 43) / 43 * 1.9,
+                 p: ((i * 29) % 97) / 97 * TAU });
+  }
+
+  function drawCelestial(P) {
+    const k = VF.conditions ? VF.conditions.flag('celestial') : 0;
+    if (k <= 0.01) return;
+    const q = VF.state.data.settings.quality;
+    const n = q === 'low' ? 12 : q === 'medium' ? 22 : WHEEL.length;
+    const t = VF.state.rt.t;
+    const cx = W * 0.5, cy = L.horizonY * 0.46;
+    const span = Math.min(W * 0.46, L.horizonY * 0.92);
+
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+
+    // the warm line along the whole horizon
+    const hg = ctx.createLinearGradient(0, L.horizonY - span * 0.5, 0, L.horizonY);
+    hg.addColorStop(0, 'rgba(255,233,176,0)');
+    hg.addColorStop(1, 'rgba(255,226,158,' + (0.16 * k).toFixed(3) + ')');
+    ctx.fillStyle = hg;
+    ctx.fillRect(0, L.horizonY - span * 0.5, W, span * 0.5);
+
+    // the ring the whole thing sits on, so it reads as one turning object
+    // rather than a handful of stars that happen to be near each other
+    ctx.strokeStyle = 'rgba(255,226,158,' + (0.10 * k).toFixed(3) + ')';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, span, span * 0.42, 0, 0, TAU);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, span * 0.62, span * 0.26, 0, 0, TAU);
+    ctx.stroke();
+
+    // the wheel itself, turning about a degree every two seconds
+    const spin = t * 0.017;
+    for (let i = 0; i < n; i++) {
+      const s = WHEEL[i];
+      const a = s.a + spin;
+      const x = cx + Math.cos(a) * span * s.r;
+      const y = cy + Math.sin(a) * span * s.r * 0.42;
+      // each one breathes on its own clock so the ring never pulses as a unit
+      const b = (0.62 + 0.38 * Math.sin(t * 0.9 + s.p)) * k * 1.35;
+      const rad = s.s * 5.5;
+      const g = ctx.createRadialGradient(x, y, 0, x, y, rad);
+      g.addColorStop(0, 'rgba(255,251,232,' + (0.85 * b).toFixed(3) + ')');
+      g.addColorStop(0.35, 'rgba(255,228,160,' + (0.30 * b).toFixed(3) + ')');
+      g.addColorStop(1, 'rgba(255,208,120,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(x, y, rad, 0, TAU); ctx.fill();
+    }
+    ctx.restore();
+  }
+
   function spawnMeteor() {
     const K = VF.particles.KIND;
     const x = Math.random() * W * 1.2 - W * 0.1;
@@ -16842,6 +17026,7 @@ input[type=range]::-moz-range-thumb {
     mark('horizon', function () { drawHorizonFeature(P); });
     mark('land', function () { if (backdrop) ctx.drawImage(backdrop, 0, 0, W, H); });
     mark('aurora', function () { drawAurora(P); });
+    mark('celestial', function () { drawCelestial(P); });
     mark('lightning', function () { drawLightning(P); });
     mark('fog', function () { drawFog(P, q); });
     mark('water', function () { drawWater(P, q); });

@@ -73,6 +73,20 @@
     ]
   };
 
+  /* The two celestials get their own sequence rather than the void one. They
+     are the only fish in the game that arrive lit. */
+  SCENES.celestialcatch = {
+    audio: 'grand',
+    frame: { box: [0.70, 0.60], top: 0.90, bot: 0.86, surf: 0.62 },
+    beats: [
+      { dur: 1.6, dark: 0.50, shadow: 0.40, rise: 0, lit: 0.10,
+        text: 'the stars overhead go out one at a time, in a line, toward the water.' },
+      { dur: 2.2, dark: 0.34, shadow: 0.10, rise: 0.94, lit: 0.78, shake: 1,
+        text: 'it does not break the surface. the surface gets out of the way.' },
+      { dur: 2.1, dark: 0.16, shadow: 0, rise: 1, lit: 1, flash: 1, name: 1 }
+    ]
+  };
+
   SCENES.glitchcatch = {
     audio: 'glitch',
     frame: { box: [0.62, 0.54], top: 0.86, bot: 0.86, surf: 0.58 },

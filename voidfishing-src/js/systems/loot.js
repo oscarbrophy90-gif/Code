@@ -237,6 +237,20 @@
     };
   }
 
+  /* A scripted fight is a boss, and a boss does not get erased by shopping.
+     Ordinary fishing takes the rod's bar width at face value; in here it is
+     taken at face value up to the knee and at thirty per cent above it, so
+     the ladder stays strictly monotonic — a better rod is still a better rod,
+     right to the top — without the widest rods in the game turning the
+     hardest fights into a formality. The knee sits just above the Lunar Rod,
+     which is what the heaven's trial was tuned against, so that fight is
+     untouched by this. */
+  const TRIAL_KNEE = 1.35;
+
+  function trialBar(rodBar) {
+    return rodBar <= TRIAL_KNEE ? rodBar : TRIAL_KNEE + (rodBar - TRIAL_KNEE) * 0.55;
+  }
+
   /* One phase of a scripted fight. The phase writes the shape of it; the
      loadout still moves the numbers, on exactly the same terms as a normal
      fight, so a better rod is a better rod all the way to the top. */
@@ -246,7 +260,7 @@
     const barTop = Math.max(0.80, ph.fishSpeed * 1.55) * (ph.barSpeed || 1);
     return {
       diff: 1.15,
-      barW: U.clamp(ph.barW * L.rodBar * L.barSize, 0.050, 0.46),
+      barW: U.clamp(ph.barW * trialBar(L.rodBar) * L.barSize, 0.050, 0.46),
       barSpeed: Math.max(ph.fishSpeed * BAR_FLOOR, barTop * L.barMul),
       barTau: 0.170 / (1 + 0.60 * L.q),
       fishSpeed: ph.fishSpeed,

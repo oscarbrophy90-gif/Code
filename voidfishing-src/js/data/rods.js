@@ -55,9 +55,15 @@
       desc: 'Visible only when it is under load. Otherwise you are holding a suggestion.',
       art: { c1: '#bfe8f5', c2: '#6f9db0', grip: '#3f5f6e', tip: '#ffffff', len: 1.28, curve: 0.05, glow: 0.78, style: 'glass' } },
 
-    /* Not for sale at any price. It arrives, once, at the end of a long thread. */
+    /* Not for sale at any price. It arrives, once, at the end of a long thread,
+       and it is the best rod in the game on every axis there is — better than
+       the deepest shop rod and better than anything the wanderer will ever
+       carry. It is also the only rod that fills the meter faster than the
+       baseline rather than trading width for it. Nothing is meant to outclass
+       it, because nothing else in the game costs a questline. */
     { id: 'heavens', name: 'Heavens Rod', cost: 0, level: 0, quest: 'heavens',
-      cast: 1.00, reel: 1.95, line: 7.20, rare: 4.10, luck: 1.45,
+      cast: 1.72, reel: 3.98, line: 17.60, rare: 11.20, luck: 4.25,
+      barSize: 2.10, barSpeed: 1.26, barFill: 1.08,
       desc: 'Made by somebody who could fish anywhere, and dropped from a height four hundred years ago. It is warm, and it has been waiting.',
       art: { c1: '#f2d78a', c2: '#8a6620', grip: '#5a4214', tip: '#fff6d0', len: 1.30, curve: 0.05, glow: 1.0, style: 'heavens' } },
 

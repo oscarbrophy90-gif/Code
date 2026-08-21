@@ -459,6 +459,69 @@
     ctx.restore();
   }
 
+  /* ---------------------------------------------- celestial convergence
+     The rarest condition in the game, and the only water the two celestials
+     are in. A slow wheel of stars sits directly overhead and does not move
+     the way the real sky does, and the whole horizon carries a warm line
+     under it. Cheap on purpose — it runs for five minutes at a time. */
+  const WHEEL = [];
+  for (let i = 0; i < 34; i++) {
+    WHEEL.push({ a: (i / 34) * TAU + (i % 5) * 0.11,
+                 r: 0.30 + ((i * 37) % 71) / 71 * 0.70,
+                 s: 0.7 + ((i * 53) % 43) / 43 * 1.9,
+                 p: ((i * 29) % 97) / 97 * TAU });
+  }
+
+  function drawCelestial(P) {
+    const k = VF.conditions ? VF.conditions.flag('celestial') : 0;
+    if (k <= 0.01) return;
+    const q = VF.state.data.settings.quality;
+    const n = q === 'low' ? 12 : q === 'medium' ? 22 : WHEEL.length;
+    const t = VF.state.rt.t;
+    const cx = W * 0.5, cy = L.horizonY * 0.46;
+    const span = Math.min(W * 0.46, L.horizonY * 0.92);
+
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+
+    // the warm line along the whole horizon
+    const hg = ctx.createLinearGradient(0, L.horizonY - span * 0.5, 0, L.horizonY);
+    hg.addColorStop(0, 'rgba(255,233,176,0)');
+    hg.addColorStop(1, 'rgba(255,226,158,' + (0.16 * k).toFixed(3) + ')');
+    ctx.fillStyle = hg;
+    ctx.fillRect(0, L.horizonY - span * 0.5, W, span * 0.5);
+
+    // the ring the whole thing sits on, so it reads as one turning object
+    // rather than a handful of stars that happen to be near each other
+    ctx.strokeStyle = 'rgba(255,226,158,' + (0.10 * k).toFixed(3) + ')';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, span, span * 0.42, 0, 0, TAU);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, span * 0.62, span * 0.26, 0, 0, TAU);
+    ctx.stroke();
+
+    // the wheel itself, turning about a degree every two seconds
+    const spin = t * 0.017;
+    for (let i = 0; i < n; i++) {
+      const s = WHEEL[i];
+      const a = s.a + spin;
+      const x = cx + Math.cos(a) * span * s.r;
+      const y = cy + Math.sin(a) * span * s.r * 0.42;
+      // each one breathes on its own clock so the ring never pulses as a unit
+      const b = (0.62 + 0.38 * Math.sin(t * 0.9 + s.p)) * k * 1.35;
+      const rad = s.s * 5.5;
+      const g = ctx.createRadialGradient(x, y, 0, x, y, rad);
+      g.addColorStop(0, 'rgba(255,251,232,' + (0.85 * b).toFixed(3) + ')');
+      g.addColorStop(0.35, 'rgba(255,228,160,' + (0.30 * b).toFixed(3) + ')');
+      g.addColorStop(1, 'rgba(255,208,120,0)');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(x, y, rad, 0, TAU); ctx.fill();
+    }
+    ctx.restore();
+  }
+
   function spawnMeteor() {
     const K = VF.particles.KIND;
     const x = Math.random() * W * 1.2 - W * 0.1;
@@ -498,6 +561,7 @@
     mark('horizon', function () { drawHorizonFeature(P); });
     mark('land', function () { if (backdrop) ctx.drawImage(backdrop, 0, 0, W, H); });
     mark('aurora', function () { drawAurora(P); });
+    mark('celestial', function () { drawCelestial(P); });
     mark('lightning', function () { drawLightning(P); });
     mark('fog', function () { drawFog(P, q); });
     mark('water', function () { drawWater(P, q); });

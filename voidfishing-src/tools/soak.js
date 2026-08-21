@@ -88,6 +88,16 @@ const path = require('path');
       else if (secs > 45) out.slow.push('cycle ' + i + ': ' + secs + 's');
 
       if (VF.fishing.state() === 'landed') {
+        /* Anything from the void tier up plays a landing sequence before the
+           card, so the card is several seconds later than it used to be.
+           Skip through it rather than sit out five seconds on every one, and
+           do it here — a cutscene still running when the menu sweep starts
+           holds the card back and reads as ten broken panels. */
+        guard = 0;
+        while (VF.cutscene && VF.cutscene.active() && guard++ < 500) {
+          VF.cutscene.skip();
+          await sleep(16);
+        }
         // wait for the card, then take one of the three actions
         guard = 0;
         while (!VF.catchUI.isOpen() && guard++ < 120) await sleep(16);

@@ -63,7 +63,24 @@
       mods: { rare: 1.85, bite: 0.78, treasure: 1.4, secret: 1.3 },
       skyfall: 1,
       tint: '#ffd88a', minLoc: 3,
-      test: function () { return VF.quests && VF.quests.reached('heavens', 8); } }
+      test: function () { return VF.quests && VF.quests.reached('heavens', 8); } },
+
+    /* The rarest thing the sky does, and the only water the two celestials can
+       be found in. It does not exist until the rod has been won — the
+       questline hands you one leviathan under controlled conditions, and this
+       is where you go looking for the rest of them afterwards. Weight 9
+       against a pool of roughly 180 puts it at about one condition in twenty,
+       and a condition arrives every seven minutes or so in deep water, so
+       this is a couple of hours apart. It is meant to be a thing you stop
+       what you are doing for. */
+    { id: 'celestial', name: 'Celestial Convergence',
+      weight: function () { return VF.state.data.flags.heavensRod ? 9 : 0; },
+      dur: [200, 340],
+      blurb: 'every star that ever fell is overhead at once, and none of them are moving',
+      mods: { rare: 2.40, bite: 0.86, secret: 1.5 },
+      celestial: 1,
+      tint: '#ffe9b0', minLoc: 5,
+      test: function (d) { return !!d.flags.heavensRod; } }
   ];
 
   const BY_ID = VF.util.byId(LIST);

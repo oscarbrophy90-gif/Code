@@ -146,6 +146,10 @@
   /* Species tagged with an `event` only exist while that event is happening. */
   function eventActive(tag) {
     if (tag === 'skyfall') return !!(VF.conditions && VF.conditions.has('skyfall'));
+    /* The two celestials are in no water at all unless the convergence is
+       overhead. 'trial' stays false on purpose: that one is handed out by the
+       questline and is never in a pool. */
+    if (tag === 'celestial') return !!(VF.conditions && VF.conditions.has('celestial'));
     return false;
   }
 
