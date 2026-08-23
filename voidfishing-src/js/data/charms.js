@@ -173,7 +173,19 @@
     { id: 'coin', name: 'Tideworn Coin', kind: 'relic', rarity: 'rare', found: true,
       desc: 'Currency of somewhere that no longer takes payment.',
       note: 'everything sells for more',
-      stats: { value: 1.65, xp: 0.88 } }
+      stats: { value: 1.65, xp: 0.88 } },
+
+    /* The two at the end of the long threads. Neither is sold and neither is
+       in the water: they are what somebody hands you for finishing. */
+    { id: 'olderplate', name: 'The Older Plate', kind: 'relic', rarity: 'legendary', found: true,
+      desc: 'The names on it have not finished being on it.',
+      note: 'the old and the enormous come up, and they take their time about it',
+      stats: { size: 1.48, value: 1.35, xp: 1.28, trait: 1.25, bite: 0.78 } },
+
+    { id: 'nightglass', name: 'Night Glass', kind: 'relic', rarity: 'legendary', found: true,
+      desc: 'Held up to the dark it shows the dark, only nearer.',
+      note: 'finds what is hidden and what is strange, and never hurries',
+      stats: { secret: 2.0, rare: 1.42, trait: 1.35, encounter: 1.30, reel: 0.76 } }
   ];
 
   const BY_ID = VF.util.byId(LIST);

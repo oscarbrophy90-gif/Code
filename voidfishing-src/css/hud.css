@@ -55,6 +55,21 @@
 }
 .xp-text { font-family: var(--mono); font-size: 10px; color: var(--ink-3); letter-spacing: 0.04em; }
 
+/* A run of clean catches. It says what it pays, because a bare `×7` next to a
+   level reads as a multiplier on everything and used to multiply nothing. */
+.streak-tag {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.04em;
+  color: var(--good);
+  border: 1px solid rgba(95, 214, 153, 0.34);
+  border-radius: 999px; padding: 1px 7px;
+  white-space: nowrap;
+}
+.streak-tag.hot { color: var(--warn); border-color: rgba(255, 195, 106, 0.45); }
+
+/* Past the cap the bar counts fathoms instead of levels. */
+.xp-fill.deep { background: linear-gradient(90deg, #4a3a7a, #b48aff); }
+.lv.deep { color: #c9a8ff; }
+
 .hud-tr { display: flex; flex-direction: column; align-items: flex-end; gap: 9px; }
 
 .chips { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
@@ -375,6 +390,41 @@
 .quest-item.on .who { color: var(--ink); }
 .quest-item .want { color: var(--ink-3); }
 .quest-done-line { margin-top: 11px; font-size: 12px; color: var(--good); letter-spacing: 0.04em; }
+
+/* A thread that has not opened yet: dimmer, with the list of what it is
+   waiting for. Ready and unstarted is the loud one — that is somebody
+   standing there with something to say. */
+.quest-sep {
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.20em;
+  color: var(--ink-4); margin: 20px 0 10px; padding-bottom: 7px;
+  border-bottom: 1px solid var(--line);
+}
+.quest.locked { border-style: dashed; background: transparent; }
+.quest.locked .quest-name { color: var(--ink-3); }
+.quest.locked.ready {
+  border-style: solid; border-color: var(--accent-dim);
+  background: var(--fill);
+}
+.quest.locked.ready .quest-name { color: var(--ink); }
+.quest.locked.ready .quest-where { padding-left: 0; color: var(--accent); margin-top: 9px; }
+
+.quest-check { margin-top: 12px; display: grid; gap: 8px; }
+.quest-need {
+  display: flex; gap: 10px; align-items: baseline;
+  font-size: 12.5px; color: var(--ink-3);
+}
+.quest-need.done { color: var(--ink-2); }
+.quest-need > div { flex: 1 1 auto; }
+.quest-box {
+  width: 13px; height: 13px; flex: 0 0 13px;
+  border: 1px solid var(--line-2); border-radius: 3px;
+  font-size: 9px; line-height: 12px; text-align: center; color: var(--good);
+  align-self: center;
+}
+.quest-need.done .quest-box { border-color: rgba(95, 214, 153, 0.5); }
+.quest-need-note { font-size: 11px; color: var(--ink-4); margin-top: 2px; }
+.quest-need-at { font-family: var(--mono); font-size: 10.5px; color: var(--ink-4); }
+.quest-need.done .quest-need-at { color: var(--good); }
 
 /* ------------------------------------------------------------- prompts */
 

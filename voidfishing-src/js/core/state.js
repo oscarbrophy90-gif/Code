@@ -14,6 +14,10 @@
       money: 0,
       level: 1,
       xp: 0,
+      /* Past the level cap the xp does not stop arriving, so it goes here
+         instead of into a bar that cannot move. A fathom is a long way down. */
+      fathoms: 0,
+      fathomXp: 0,
       reputation: 0,          // earned by releasing fish
 
       /* --- equipment --- */
@@ -83,6 +87,7 @@
         playSeconds: 0,
         perfectReels: 0,
         linesSnapped: 0,
+        secondChances: 0,
         treasuresFound: 0,
         casesOpened: 0,
         secretsFound: 0,

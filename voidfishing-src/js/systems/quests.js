@@ -56,12 +56,58 @@
 
   /* ------------------------------------------------------------- driving */
 
+  /* What a thread is waiting for, as a list somebody can read. A quest states
+     its requirements once, here, and whether it opens is decided by the same
+     list the log draws — so what the player is told is what is actually being
+     tested, and it cannot drift into being a lie. */
+  function needs(def) {
+    if (!def.needs) return null;
+    let list = null;
+    try { list = def.needs(VF.state.data); } catch (e) { return null; }
+    if (!Array.isArray(list)) return null;
+    return list.map(function (n) {
+      return { label: n.label, note: n.note || null,
+               have: n.have | 0, need: n.need | 0,
+               done: (n.have | 0) >= (n.need | 0) };
+    });
+  }
+
+  function startable(def) {
+    const list = needs(def);
+    if (list) return list.every(function (n) { return n.done; });
+    let ok = false;
+    try { ok = def.start ? def.start(VF.state.data) : true; } catch (e) { ok = false; }
+    return ok;
+  }
+
+  /* Threads that exist and have not opened yet. A player who has met the
+     person carrying one can see it is there and what it is waiting for —
+     without that, a quest becomes available in silence and the only way to
+     find out is to talk to everybody again on the off chance. */
+  function locked() {
+    const out = [];
+    for (let i = 0; i < VF.questData.list.length; i++) {
+      const def = VF.questData.list[i];
+      if (started(def.id)) continue;
+      if (def.giver && !VF.npcs.met(def.giver)) continue;
+      const list = needs(def) || [];
+      const met = list.filter(function (n) { return n.done; }).length;
+      out.push({ def: def, needs: list, ready: startable(def),
+                 close: list.length ? met / list.length : 0 });
+    }
+    /* Nearest first. The one that is ready to be started is the one the player
+       can act on, and it was sitting at the bottom of the list underneath two
+       they cannot touch for another twenty levels. */
+    out.sort(function (a, b) {
+      return (b.ready ? 1 : 0) - (a.ready ? 1 : 0) || b.close - a.close;
+    });
+    return out;
+  }
+
   function offer(def) {
     const d = VF.state.data;
     if (d.quests[def.id] && d.quests[def.id].started) return false;
-    let ok = false;
-    try { ok = def.start ? def.start(d) : true; } catch (e) { ok = false; }
-    if (!ok) return false;
+    if (!startable(def)) return false;
     const q = rec(def.id);
     q.started = Date.now();
     q.step = 0;
@@ -195,10 +241,10 @@
       if (!ch || !ch.talk) continue;
       const npc = VF.npcs.get(ch.talk);
       if (!npc) continue;
-      const avail = VF.npcs.availableQuest(npc);
-      const cur = VF.npcs.peek(ch.talk).qstage | 0;
+      const avail = VF.npcs.availableQuest(npc, def.id);
+      const cur = VF.npcs.questConsumed(ch.talk, def.id);
       if (avail < 0 || cur <= avail) continue;
-      VF.npcs.rec(ch.talk).qstage = avail;
+      VF.npcs.setQuestConsumed(ch.talk, def.id, avail);
       VF.bus.emit('quest:repaired', { quest: def, npc: npc });
       VF.save.save();
     }
@@ -222,6 +268,7 @@
   VF.quests = {
     tick: tick, rec: rec, peek: peek, objective: objective, chapter: chapter,
     started: started, complete: complete, step: step, reached: reached, at: at,
+    needs: needs, startable: startable, locked: locked,
     fromNpc: fromNpc, onCatch: onCatch, advance: advance, evaluate: evaluate,
     reconcile: reconcile,
     eventActive: eventActive, armed: armed, anyArmed: anyArmed,
@@ -229,4 +276,8 @@
   };
 
   VF.bus.on('fishing:landed', onCatch);
+  /* An object arrives through its own event, so a chapter that wants one never
+     saw it. The engine watches both — a chapter that only wants fish checks
+     `c.kind` itself, which every one of them already does. */
+  VF.bus.on('fishing:treasure', onCatch);
 })(window.VF = window.VF || {});

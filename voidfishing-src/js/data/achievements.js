@@ -156,6 +156,23 @@
     { id: 'streak_25', name: 'Not One Lost', desc: 'Land 25 in a row without losing one.', reward: 30000,
       test: function (d) { return d.records.bestStreak >= 25; } },
 
+    /* --- the long threads, and what is past the end of the ladder --- */
+    { id: 'q_firstshore', name: 'Eight Of Them', desc: 'Finish Count Backwards.', reward: 400000,
+      test: function () { return VF.quests.complete('firstshore'); } },
+    { id: 'q_errand', name: 'Put Down, Not Lost', desc: "Finish What The Drifter Left.", reward: 400000,
+      test: function () { return VF.quests.complete('errand'); } },
+    { id: 'q_all', name: 'Every Thread', desc: 'Finish every long thread there is.',
+      hidden: true, reward: 5000000,
+      test: function () {
+        return VF.questData.list.every(function (q) { return VF.quests.complete(q.id); });
+      } },
+    { id: 'fathom_1', name: 'Past The Bottom', desc: 'Reach the first fathom.',
+      hidden: true, reward: 1000000,
+      test: function (d) { return (d.fathoms | 0) >= 1; } },
+    { id: 'fathom_12', name: 'Twelve Down', desc: 'Reach twelve fathoms.',
+      hidden: true, reward: 20000000,
+      test: function (d) { return (d.fathoms | 0) >= 12; } },
+
     /* --- cosmetics --- */
     { id: 'case_1', name: 'Purely Decorative', desc: 'Open your first case.', reward: 2000,
       test: function (d) { return d.stats.casesOpened >= 1; } },

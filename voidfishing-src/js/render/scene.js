@@ -174,7 +174,8 @@
     ctx = cv.getContext('2d', { alpha: false });
     buildGrain();
     resize();
-    VF.bus.on('location:changed', function () { backdropKey = ''; buildStars(); seedAmbient(); });
+    VF.bus.on('location:changed', function () { backdropKey = ''; buildStars(); seedAmbient(); departure = null; });
+    VF.bus.on('fishing:lost', function (e) { beginDeparture(e.catch); });
     VF.bus.on('settings:quality', function () { backdropKey = ''; buildStars(); VF.particles.clearAll(); seedAmbient(); });
   }
 
@@ -200,14 +201,26 @@
     L.figureH = Math.min(H * 0.30, W * 0.20);
     L.glowX = W * 0.70;
     L.glowY = L.horizonY - H * 0.145;
-    L.seatX = W * 0.20;
-    L.seatY = H * 0.90;
-    L.landPoint.x = W * 0.42;
-    L.landPoint.y = L.horizonY + L.waterH * 0.90;
+    L.seatX = W * U.lerp(0.20, 0.27, U.clamp(((loc.void || 0) - 0.5) / 0.5, 0, 1));
+    /* On a shore the ledge runs off the bottom of the frame and the seat can
+       sit low. Once it is a slab in nothing, the nothing under it is half the
+       picture, so the whole thing lifts to make room for it. */
+    const vd = U.clamp(loc.void || 0, 0, 1);
+    L.seatY = H * U.lerp(0.90, 0.72, U.clamp((vd - 0.5) / 0.5, 0, 1));
+    /* Where a fish is brought to hand. On a shore that is the water just in
+       front of you. On a slab in nothing it has to be clear of the slab: the
+       last seconds of every fight happen here, and so does everything a fish
+       does after it gets off, and none of it is worth watching from behind the
+       thing you are sitting on. */
+    const nearEdge = U.clamp((vd - 0.5) / 0.5, 0, 1);
+    L.landPoint.x = W * U.lerp(0.42, 0.55, nearEdge);
+    L.landPoint.y = L.horizonY + L.waterH * U.lerp(0.90, 0.72, nearEdge);
   }
 
   function seedAmbient() {
     VF.particles.clearKind(VF.particles.KIND.MOTE);
+    // nothing drifts in the last water, because there is nothing to drift in
+    if ((VF.locations.current().void || 0) > 0.9) return;
     const q = VF.state.data.settings.quality;
     const n = q === 'low' ? 14 : q === 'medium' ? 30 : 52;
     VF.particles.ambient(W, H, n, VF.palette.P.star);
@@ -223,6 +236,8 @@
     computeLayout();
     updateRod(dt);
     updateBobber(dt);
+    VF.rodArt.tick(dt);
+    if (departure) departure.t += dt;
     updateWeatherParticles(dt);
     VF.particles.update(dt, W, H, L.horizonY + L.waterH * 0.35);
   }
@@ -262,9 +277,18 @@
     rodState.bend = U.clamp(U.approach(rodState.bend, targetBend, 0.002, dt), 0, 0.78);
   }
 
+  /* A fishing rod is somewhere near twice the height of the person holding it.
+     `art.len` drifted upward as rods were added — the shelf started at 0.78 and
+     the newest ones are past 1.7, which came out over three times the angler —
+     so the spread is compressed here, against the wooden rod as the anchor,
+     rather than by rewriting sixty art blocks. Wood stays where it was; the top
+     of the list lands near 2.2x instead of 3.2x. */
+  const ROD_ANCHOR = 0.78, ROD_SPREAD = 0.435;
+
   function rodTipPoint() {
     const fh = L.figureH;
-    const len = fh * 1.85 * VF.rods.get(VF.state.data.rod).art.len;
+    const rl = VF.rods.get(VF.state.data.rod).art.len;
+    const len = fh * 1.85 * (ROD_ANCHOR + (rl - ROD_ANCHOR) * ROD_SPREAD);
     const a = rodState.angle + rodState.sway;
     const bend = rodState.bend;
     // quadratic curve: control point offset perpendicular to the rod line
@@ -285,20 +309,36 @@
     L.rodTip.x = tip.x; L.rodTip.y = tip.y;
 
     const b = L.bobber;
+    const vd = VF.palette.P.void || 0;
     const near = L.horizonY + L.waterH * 0.80;
     const far = L.horizonY + L.waterH * 0.09;
-    const distT = U.clamp(S.castDist / 1.5, 0, 1);
+    /* Distance is how far out across the water the throw reaches. Where there
+       is no water to reach across, the same power puts the hook straight down
+       instead, so the range collapses toward the near end. */
+    const distT = U.clamp(S.castDist / 1.5, 0, 1) * (1 - vd * 0.55);
     L.castTarget.x = W * castLateral;
     L.castTarget.y = U.lerp(near, far, distT);
 
-    if (S.state === 'idle' || S.state === 'landed') { b.visible = false; return; }
+    const out = S.state === 'casting' || S.state === 'waiting' ||
+                S.state === 'bite' || S.state === 'reeling';
+    if (out) rigOut = true;
+    else if (rigOut) beginRetract(b, tip);
+
+    if (!out) return updateRetract(dt, b, tip);
     b.visible = true;
 
     if (S.state === 'casting') {
       const k = U.easeOutCubic(S.flight);
       b.x = U.lerp(tip.x, L.castTarget.x, k);
-      const arc = Math.sin(S.flight * Math.PI) * L.waterH * 0.55;
-      b.y = U.lerp(tip.y, L.castTarget.y, k) - arc;
+      /* The throw lifts on its way out, but the rig is a weight on a line, not
+         a bird: it cannot climb over the horizon into the sky. The lift is
+         capped at the water's top edge, and where the straight path is already
+         higher than that — the first moments, leaving a raised tip — no lift
+         is added at all. */
+      const straight = U.lerp(tip.y, L.castTarget.y, k);
+      const arc = Math.sin(S.flight * Math.PI) * L.waterH * 0.42 * (0.35 + distT * 0.65);
+      const ceiling = Math.min(straight, L.horizonY + L.waterH * 0.05);
+      b.y = Math.max(ceiling, straight - arc);
       b.scale = U.lerp(1.0, scaleAt(L.castTarget.y), k);
     } else if (S.state === 'reeling' && S.fight) {
       const k = U.clamp(S.fight.distance, 0, 1);
@@ -316,19 +356,62 @@
     }
   }
 
+  /* Bringing the line in is a movement, not a disappearance. Whatever the rig
+     was doing, it travels back up the line to the rod tip and goes out there —
+     otherwise it blinks out wherever it happened to be sitting, which is what
+     it looked like every time a cast was cancelled or a fish came off. */
+  let rigOut = false;
+  const retract = { t: 0, dur: 0, x: 0, y: 0, scale: 1 };
+
+  function beginRetract(b, tip) {
+    rigOut = false;
+    retract.x = b.x;
+    retract.y = b.y + b.bob;
+    retract.scale = b.scale;
+    // a long cast takes longer to wind back than a short one
+    const d = Math.hypot(retract.x - tip.x, retract.y - tip.y);
+    retract.dur = U.clamp(0.16 + d / Math.max(1, W) * 0.55, 0.16, 0.52);
+    retract.t = retract.dur;
+  }
+
+  function updateRetract(dt, b, tip) {
+    if (retract.t <= 0) { b.visible = false; return; }
+    retract.t = Math.max(0, retract.t - dt);
+    const k = U.easeInCubic(1 - retract.t / retract.dur);   // slow off the water, quick at the hand
+    b.visible = true;
+    b.x = U.lerp(retract.x, tip.x, k);
+    b.y = U.lerp(retract.y, tip.y, k);
+    b.scale = U.lerp(retract.scale, 0.42, k);
+    b.bob = 0;
+  }
+
   function scaleAt(y) {
     const k = U.clamp((y - L.horizonY) / Math.max(1, L.waterH), 0, 1);
     return U.lerp(0.34, 1.0, Math.pow(k, 0.85));
   }
 
   function newCastLateral() {
-    castLateral = 0.54 + VF.rng.g() * 0.22;
+    /* Out across the water on the shore. In the last water there is nothing to
+       cast across, so the throw shortens and the line goes down instead — but
+       it goes down off the edge of the slab rather than through it, so however
+       short the throw is it never lands nearer than where the slab stops.
+       Read off the location and not off the palette: the palette catches up a
+       frame later, and the first cast after arriving used the old number. */
+    const vd = U.clamp(VF.locations.current().void || 0, 0, 1);
+    const near = U.clamp((vd - 0.5) / 0.5, 0, 1);
+    const raw = (0.54 + VF.rng.g() * 0.22) * (1 - vd * 0.30);
+    const edge = (L.seatX + (L.figureH || W * 0.2) * 1.16) / Math.max(1, W);
+    castLateral = Math.max(raw, U.lerp(0, edge, near));
   }
 
   /* ------------------------------------------------- weather particles */
 
   function updateWeatherParticles(dt) {
     const K = VF.particles.KIND;
+    /* Rain needs somewhere to land and fog needs air to sit in. Neither is
+       available at the bottom, and the weather still does everything it does
+       to the odds — it simply stops being visible as weather. */
+    if ((VF.locations.current().void || 0) > 0.9) return;
     const q = VF.state.data.settings.quality;
     const scale = q === 'low' ? 0.35 : q === 'medium' ? 0.65 : 1;
 
@@ -496,15 +579,23 @@
     mark('sky', function () { drawSky(P); });
     mark('stars', function () { drawStars(P, q); });
     mark('horizon', function () { drawHorizonFeature(P); });
-    mark('land', function () { if (backdrop) ctx.drawImage(backdrop, 0, 0, W, H); });
+    mark('land', function () {
+      if (!backdrop) return;
+      // the far shore is the first thing the void takes
+      const a = 1 - P.void;
+      if (a <= 0.01) return;
+      ctx.globalAlpha = a;
+      ctx.drawImage(backdrop, 0, 0, W, H);
+      ctx.globalAlpha = 1;
+    });
     mark('aurora', function () { drawAurora(P); });
     mark('lightning', function () { drawLightning(P); });
     mark('fog', function () { drawFog(P, q); });
     mark('water', function () { drawWater(P, q); });
-    mark('under', function () { drawUnderwater(P); });
+    mark('under', function () { if (P.void < 0.9) drawUnderwater(P); });
     mark('skyfall', function () { drawSkyfall(); });
-    mark('ripples', function () { VF.fx.drawRipples(ctx, 0.26); });
-    mark('line', function () { drawLineAndBobber(P); });
+    mark('ripples', function () { if (P.void < 0.9) VF.fx.drawRipples(ctx, 0.26); });
+    mark('line', function () { drawLineAndBobber(P); drawDeparture(P); });
     mark('particles', function () { VF.particles.draw(ctx); });
     mark('fore', function () { drawForeground(P); });
     mark('cutscene', function () { drawCutscene(); });
@@ -525,10 +616,11 @@
 
     // light gathering at the horizon — this is what makes distant land read
     const band = H * 0.26;
+    const far = 1 - P.void;                 // there is no distance in the void
     const hg = ctx.createLinearGradient(0, L.horizonY - band, 0, L.horizonY);
     hg.addColorStop(0, U.rgbToCss(P.glow, 0));
-    hg.addColorStop(0.62, U.rgbToCss(P.glow, 0.045 * P.bright + 0.020));
-    hg.addColorStop(1, U.rgbToCss(P.glow, 0.115 * P.bright + 0.045));
+    hg.addColorStop(0.62, U.rgbToCss(P.glow, (0.045 * P.bright + 0.020) * far));
+    hg.addColorStop(1, U.rgbToCss(P.glow, (0.115 * P.bright + 0.045) * far));
     ctx.fillStyle = hg;
     ctx.fillRect(0, L.horizonY - band, W, band);
   }
@@ -557,6 +649,18 @@
     ctx.globalAlpha = 1;
   }
 
+  /* Zero unless a surge is running somewhere the surge cannot otherwise be
+     seen. It rises and falls across about eight seconds of a twenty-second
+     cycle, so it reads as something looking up and then away rather than as a
+     light being switched on and left on. */
+  function surgeLook(P) {
+    const s = VF.weather.surge();
+    if (s <= 0.01 || (P.void || 0) < 0.9) return 0;
+    const c = (t * 0.05) % 1;
+    if (c > 0.40) return 0;
+    return Math.pow(Math.sin((c / 0.40) * Math.PI), 1.7) * 0.46 * s;
+  }
+
   /* The one big light source: moon, ring, arch, monolith, crystal, tear, eye. */
   function drawHorizonFeature(P) {
     const loc = VF.locations.current();
@@ -564,17 +668,30 @@
     const R = Math.min(W, H) * 0.046 * P.glowSize;
     const glow = U.rgbToCss(P.glow);
 
+    /* Whatever is out there does not survive the descent, and at the bottom it
+       does not survive at all. A dim shape is still a shape: against a ground
+       of rgb(9,5,18) even a quarter-strength one came out three times the
+       brightness of everything around it, with an edge you could trace. */
+    /* Except while a surge is running. Down there the weather has nothing left
+       to move — no rain to slant, no fog to thicken, not one particle — so it
+       expresses itself through the only thing still out there: the eye opens,
+       looks for a few seconds, and closes again. */
+    const feat = Math.max(U.clamp((0.92 - P.void) / 0.32, 0, 1), surgeLook(P));
+    if (feat <= 0.001) return;
+
+    ctx.save();
+    ctx.globalAlpha = feat;
+
     // ambient bloom around the feature
     drawBloom(P, gx, gy, R);
 
-    ctx.save();
     switch (loc.horizon) {
       case 'moon': {
         ctx.fillStyle = U.rgbToCss(U.shade(P.glow, 0.55));
-        ctx.globalAlpha = 1;
+        ctx.globalAlpha = (1) * feat;
         ctx.beginPath(); ctx.arc(gx, gy, R, 0, TAU); ctx.fill();
         // craters
-        ctx.globalAlpha = 0.12;
+        ctx.globalAlpha = (0.12) * feat;
         ctx.fillStyle = '#000';
         ctx.beginPath(); ctx.arc(gx - R * 0.28, gy - R * 0.18, R * 0.22, 0, TAU); ctx.fill();
         ctx.beginPath(); ctx.arc(gx + R * 0.30, gy + R * 0.22, R * 0.15, 0, TAU); ctx.fill();
@@ -582,31 +699,31 @@
         break;
       }
       case 'ring': {
-        ctx.strokeStyle = glow; ctx.globalAlpha = 0.55; ctx.lineWidth = R * 0.16;
+        ctx.strokeStyle = glow; ctx.globalAlpha = (0.55) * feat; ctx.lineWidth = R * 0.16;
         ctx.beginPath(); ctx.ellipse(gx, gy, R * 3.1, R * 0.85, -0.13, Math.PI * 0.06, Math.PI * 1.34); ctx.stroke();
-        ctx.globalAlpha = 0.28; ctx.lineWidth = R * 0.07;
+        ctx.globalAlpha = (0.28) * feat; ctx.lineWidth = R * 0.07;
         ctx.beginPath(); ctx.ellipse(gx, gy, R * 3.6, R * 1.0, -0.13, Math.PI * 1.5, Math.PI * 1.92); ctx.stroke();
-        ctx.globalAlpha = 0.85; ctx.fillStyle = glow;
+        ctx.globalAlpha = (0.85) * feat; ctx.fillStyle = glow;
         ctx.beginPath(); ctx.arc(gx, gy, R * 0.42, 0, TAU); ctx.fill();
         break;
       }
       case 'arch': {
-        ctx.strokeStyle = glow; ctx.globalAlpha = 0.42; ctx.lineWidth = R * 0.20;
+        ctx.strokeStyle = glow; ctx.globalAlpha = (0.42) * feat; ctx.lineWidth = R * 0.20;
         ctx.beginPath(); ctx.arc(gx, L.horizonY, R * 3.4, Math.PI, TAU); ctx.stroke();
-        ctx.globalAlpha = 0.20; ctx.lineWidth = R * 0.09;
+        ctx.globalAlpha = (0.20) * feat; ctx.lineWidth = R * 0.09;
         ctx.beginPath(); ctx.arc(gx, L.horizonY, R * 4.3, Math.PI * 1.1, Math.PI * 1.9); ctx.stroke();
         break;
       }
       case 'monolith': {
-        ctx.globalAlpha = 0.9; ctx.fillStyle = '#05070b';
+        ctx.globalAlpha = (0.9) * feat; ctx.fillStyle = '#05070b';
         const mw = R * 0.72, mh = R * 6.2;
         ctx.fillRect(gx - mw / 2, L.horizonY - mh, mw, mh);
-        ctx.globalAlpha = 0.55; ctx.fillStyle = glow;
+        ctx.globalAlpha = (0.55) * feat; ctx.fillStyle = glow;
         ctx.fillRect(gx - mw * 0.10, L.horizonY - mh * 0.86, mw * 0.20, mh * 0.66);
         break;
       }
       case 'crystal': {
-        ctx.globalAlpha = 0.70; ctx.fillStyle = glow;
+        ctx.globalAlpha = (0.70) * feat; ctx.fillStyle = glow;
         for (let i = 0; i < 5; i++) {
           const ox = gx + (i - 2) * R * 1.25;
           const hh = R * (2.0 + (i % 3) * 1.5);
@@ -617,35 +734,35 @@
           ctx.lineTo(ox - R * 0.26, L.horizonY + 2);
           ctx.lineTo(ox - R * 0.44, L.horizonY - hh * 0.38);
           ctx.closePath();
-          ctx.globalAlpha = 0.22 + (i % 3) * 0.16;
+          ctx.globalAlpha = (0.22 + (i % 3) * 0.16) * feat;
           ctx.fill();
         }
         break;
       }
       case 'tear': {
-        ctx.globalAlpha = 0.85; ctx.fillStyle = '#000';
+        ctx.globalAlpha = (0.85) * feat; ctx.fillStyle = '#000';
         ctx.beginPath();
         ctx.moveTo(gx, gy - R * 3.0);
         ctx.quadraticCurveTo(gx + R * 0.55, gy, gx, gy + R * 2.6);
         ctx.quadraticCurveTo(gx - R * 0.34, gy, gx, gy - R * 3.0);
         ctx.fill();
-        ctx.globalAlpha = 0.6; ctx.strokeStyle = glow; ctx.lineWidth = R * 0.06;
+        ctx.globalAlpha = (0.6) * feat; ctx.strokeStyle = glow; ctx.lineWidth = R * 0.06;
         ctx.stroke();
         break;
       }
       case 'eye': {
         const open = 0.34 + 0.14 * Math.sin(t * 0.19);
-        ctx.globalAlpha = 0.34; ctx.fillStyle = glow;
+        ctx.globalAlpha = (0.34) * feat; ctx.fillStyle = glow;
         ctx.beginPath(); ctx.ellipse(gx, gy, R * 4.2, R * 4.2 * open, 0, 0, TAU); ctx.fill();
-        ctx.globalAlpha = 0.95; ctx.fillStyle = '#000';
+        ctx.globalAlpha = (0.95) * feat; ctx.fillStyle = '#000';
         ctx.beginPath(); ctx.ellipse(gx, gy, R * 1.5, R * 1.5 * Math.min(1, open * 2.4), 0, 0, TAU); ctx.fill();
-        ctx.globalAlpha = 0.7; ctx.fillStyle = glow;
+        ctx.globalAlpha = (0.7) * feat; ctx.fillStyle = glow;
         ctx.beginPath(); ctx.arc(gx + R * 0.4, gy - R * 0.4, R * 0.22, 0, TAU); ctx.fill();
         break;
       }
     }
     ctx.restore();
-    ctx.globalAlpha = 1;
+    ctx.globalAlpha = (1) * feat;
   }
 
   /* The bloom around the horizon feature is a big translucent radial fill, so it
@@ -742,13 +859,15 @@
     g.addColorStop(0, U.rgbToCss(P.waterTop));
     g.addColorStop(0.50, U.rgbToCss(U.mixRgb(P.waterTop, P.waterBot, 0.68)));
     g.addColorStop(0.78, U.rgbToCss(P.waterBot));
-    g.addColorStop(1, U.rgbToCss(U.mixRgb(P.waterBot, [0, 0, 0], 0.45)));
+    g.addColorStop(1, U.rgbToCss(U.mixRgb(P.waterBot, [0, 0, 0], 0.45 * (1 - P.void))));
     ctx.fillStyle = g;
     ctx.fillRect(0, hy, W, wh + 2);
 
-    // horizon seam: brightest where the light source meets it, gone at the edges
+    // horizon seam: brightest where the light source meets it, gone at the
+    // edges — and gone everywhere once there is no far side for it to be the
+    // near edge of
     const seam = ctx.createLinearGradient(0, 0, W, 0);
-    const seamA = 0.55 * P.bright + 0.16;
+    const seamA = (0.55 * P.bright + 0.16) * (1 - P.void);
     seam.addColorStop(0, U.rgbToCss(P.glow, seamA * 0.18));
     seam.addColorStop(U.clamp(L.glowX / W, 0.05, 0.95), U.rgbToCss(P.glow, seamA));
     seam.addColorStop(1, U.rgbToCss(P.glow, seamA * 0.22));
@@ -756,10 +875,19 @@
     ctx.fillRect(0, hy - 1, W, 1.4);
     ctx.globalAlpha = 1;
 
-    if (q !== 'low') { drawBackdropReflection(P); drawReflection(P); }
-    drawMoonpath(P);
-    drawSwell(P, q);
-    drawWaveLines(P, q);
+    /* Everything that makes water read as water — a reflection, a path of
+       light across it, swell, the lines of the waves — is a property of a
+       surface, and the surface is what the void takes last. */
+    const surf = 1 - P.void;
+    if (surf > 0.02) {
+      ctx.save();
+      ctx.globalAlpha = surf;
+      if (q !== 'low') { drawBackdropReflection(P); drawReflection(P); }
+      drawMoonpath(P);
+      drawSwell(P, q);
+      drawWaveLines(P, q);
+      ctx.restore();
+    }
 
   }
 
@@ -1163,11 +1291,13 @@
     const by = b.y + b.bob;
     const r = 5.5 * b.scale;
 
-    // bobber shadow on the water
-    ctx.globalAlpha = 0.35;
-    ctx.fillStyle = '#000';
-    ctx.beginPath(); ctx.ellipse(b.x, by + r * 0.9, r * 1.5, r * 0.45, 0, 0, TAU); ctx.fill();
-    ctx.globalAlpha = 1;
+    // bobber shadow on the water — where there is water for it to be on
+    if (P.void < 0.9) {
+      ctx.globalAlpha = 0.35;
+      ctx.fillStyle = '#000';
+      ctx.beginPath(); ctx.ellipse(b.x, by + r * 0.9, r * 1.5, r * 0.45, 0, 0, TAU); ctx.fill();
+      ctx.globalAlpha = 1;
+    }
 
     const bc = VF.cosmetics.cfg('bobber');
     const cy2 = by - r * 0.3;
@@ -1219,6 +1349,99 @@
     }
     ctx.fillStyle = U.rgbToCss(P.glow, 0.7);
     ctx.fillRect(b.x - r * 0.18, by - r * 1.5, r * 0.36, r * 0.7);
+  }
+
+  /* What a fish does after it has got off. Up top it turns and goes: one hard
+     kick sideways, down and away under the surface, with a boil left behind on
+     the water. At the bottom there is no water to swim in and nothing to swim
+     away through, so it does the only other thing available and falls —
+     straight down, turning over, getting smaller until the dark has it. */
+  let departure = null;
+
+  function beginDeparture(c) {
+    if (!c) return;
+    const b = L.bobber;
+    const vd = VF.palette.P.void || 0;
+    const falls = vd > 0.9;
+    departure = {
+      c: c, t: 0, dur: falls ? 2.05 : 1.15, falls: falls,
+      x: b.x, y: b.y + b.bob, scale: b.scale,
+      /* Away from the ledge, whichever side of it the hook is on. A fish that
+         drops straight down from where the fight ended goes behind the thing
+         you are sitting on and is never seen again, which is not the same
+         picture as watching it go. */
+      dir: b.x >= L.seatX ? 1 : -1,
+      spin: (VF.rng.g() - 0.5) * 1.6,
+      rank: VF.rarities.rank(c.rarity)
+    };
+    if (!falls) {
+      VF.fx.ripple(b.x, b.y + b.bob, L.w * 0.055 * b.scale, 1.5);
+      VF.fx.ripple(b.x, b.y + b.bob, L.w * 0.028 * b.scale, 1.0);
+    }
+  }
+
+  function drawDeparture(P) {
+    const d = departure;
+    if (!d) return;
+    const k = U.clamp(d.t / d.dur, 0, 1);
+    if (k >= 1) { departure = null; return; }
+
+    const base = Math.min(W, H) * 0.055 * d.scale * 1.4 * (0.7 + d.rank * 0.09);
+    let x, y, rot, size, a;
+
+    let near;
+    if (d.falls) {
+      /* Falling, not sinking. It leaves the hook already moving and picks up
+         speed, and it keeps its colour on the way down instead of going
+         straight to a silhouette — against a ground with nothing in it, a dark
+         shape on dark is not a fish falling, it is nothing happening. */
+      const g = k * 0.30 + k * k * 0.70;
+      // out into the open as it goes, and turning over as it falls
+      x = d.x + d.dir * (base * (0.35 + k * 2.4) + Math.sin(k * 3.4) * base * 0.22);
+      y = d.y + g * (H - d.y + base * 3.0);
+      rot = d.spin * k * 2.4 + 0.5;
+      size = base * (1 - k * 0.66);
+      a = U.clamp((1 - k) * 1.35, 0, 1) * 0.95;
+      near = 0.85 * (1 - k);
+    } else {
+      /* Away and down, the tail doing the work: fast at first, then the water
+         between you and it does the rest. */
+      const e = U.easeOutCubic(k);
+      x = d.x + d.dir * e * W * 0.30;
+      y = d.y + e * L.waterH * 0.30;
+      rot = d.dir * 0.34 + Math.sin(d.t * 22) * 0.16 * (1 - k);
+      size = base * (1 - k * 0.55);
+      a = U.clamp((1 - k) * 1.5, 0, 1) * 0.9;
+      near = 0.55 * (1 - k);
+    }
+
+    ctx.save();
+    /* Falling into a place with no light in it, a dark fish on a dark ground is
+       nothing happening. It takes its own halo down with it — which is also the
+       only thing down there that ever lights anything. */
+    if (d.falls) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      const gr = ctx.createRadialGradient(x, y, 0, x, y, size * 2.1);
+      gr.addColorStop(0, U.rgbToCss(P.glow, 0.34 * a));
+      gr.addColorStop(0.45, U.rgbToCss(P.glow, 0.13 * a));
+      gr.addColorStop(1, U.rgbToCss(P.glow, 0));
+      ctx.fillStyle = gr;
+      ctx.fillRect(x - size * 2.1, y - size * 2.1, size * 4.2, size * 4.2);
+      ctx.restore();
+    }
+    ctx.globalAlpha = a;
+    ctx.translate(x, y);
+    ctx.rotate(rot);
+    if (d.dir < 0) ctx.scale(-1, 1);
+    if (d.c.kind === 'treasure') {
+      ctx.fillStyle = '#000';
+      ctx.beginPath(); ctx.ellipse(0, 0, size * 0.85, size * 0.62, 0, 0, TAU); ctx.fill();
+    } else if (d.c.fish && d.c.fish.id) {
+      VF.fishArt.drawSilhouette(ctx, d.c.fish, size, 0.95, near);
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
   }
 
   function drawHookedFish(f, b) {
@@ -1302,28 +1525,67 @@
     const rim = U.rgbToCss(P.glow, rimA);
     const dark = '#03050a';
 
-    /* --- the ledge the angler is sitting on --- */
+    /* --- what you are sitting on ---
+       On the shore this is a shore: it runs off the left of the frame and down
+       past the bottom of it, because there is more of it in both directions.
+       The further down the map you go the less of it there is, until the last
+       water, where it is a slab with nothing under it and nothing beside it —
+       which is the whole of what that place is. The top edge is sampled off
+       groundY rather than drawn as its own curve, so the ledge and the thing
+       standing on it can never disagree about where the ground is. */
     const lipY = seatY + fh * 0.16;
+    const slab = U.clamp((P.void - 0.5) / 0.5, 0, 1);
+    const xL = U.lerp(-12, seatX - fh * 0.72, slab);
+    const endX = seatX + fh * 0.98;
+    const keel = U.lerp(H + 12, lipY + fh * (0.48 + 0.34 * slab), slab);
+
+    const top = [];
+    const STEPS = 9;
+    for (let i = 0; i <= STEPS; i++) {
+      const x = U.lerp(xL, endX, i / STEPS);
+      top.push([x, groundY(x)]);
+    }
+
     ctx.beginPath();
-    ctx.moveTo(-12, H + 12);
-    ctx.lineTo(-12, lipY - fh * 0.10);
-    ctx.quadraticCurveTo(W * 0.07, lipY - fh * 0.16, seatX + fh * 0.10, lipY - fh * 0.03);
-    ctx.quadraticCurveTo(seatX + fh * 0.62, lipY + fh * 0.10, seatX + fh * 0.98, lipY + fh * 0.52);
-    ctx.lineTo(seatX + fh * 1.3, H + 12);
+    ctx.moveTo(top[0][0], top[0][1]);
+    for (let i = 1; i < top.length; i++) ctx.lineTo(top[i][0], top[i][1]);
+    // the near end, then the underside back to where it started
+    ctx.lineTo(U.lerp(seatX + fh * 1.3, endX + fh * 0.16, slab),
+               U.lerp(H + 12, keel - fh * 0.34, slab));
+    ctx.lineTo(U.lerp(seatX + fh * 1.3, endX - fh * 0.30, slab), keel);
+    ctx.lineTo(U.lerp(-12, xL + fh * 0.46, slab), U.lerp(H + 12, keel - fh * 0.22, slab));
+    ctx.lineTo(xL, U.lerp(H + 12, top[0][1] + fh * 0.30, slab));
     ctx.closePath();
     // a hair above pure black so the silhouette separates from the deep water
-    const lg = ctx.createLinearGradient(0, lipY - fh * 0.2, 0, H);
-    lg.addColorStop(0, '#080c13');
-    lg.addColorStop(1, '#010204');
+    const lg = ctx.createLinearGradient(0, lipY - fh * 0.2, 0, U.lerp(H, keel, slab));
+    lg.addColorStop(0, U.rgbToCss(U.mixRgb([8, 12, 19], [16, 12, 30], slab)));
+    lg.addColorStop(0.55, U.rgbToCss(U.mixRgb([4, 6, 12], [8, 5, 18], slab)));
+    lg.addColorStop(1, U.rgbToCss(U.mixRgb([1, 2, 4], [2, 1, 6], slab), U.lerp(1, 0.5, slab)));
     ctx.fillStyle = lg;
     ctx.fill();
+
+    /* Under a slab there is nothing to catch light off, so the underside gets
+       the faintest edge there is — enough that the thing you are sitting on
+       has a bottom, not enough to make it look like it is standing on
+       something. */
+    if (slab > 0.02) {
+      ctx.strokeStyle = U.rgbToCss(P.glow, (0.05 + P.bright * 0.05) * slab);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(top[top.length - 1][0], top[top.length - 1][1]);
+      ctx.lineTo(U.lerp(seatX + fh * 1.3, endX + fh * 0.16, slab),
+                 U.lerp(H + 12, keel - fh * 0.34, slab));
+      ctx.lineTo(U.lerp(seatX + fh * 1.3, endX - fh * 0.30, slab), keel);
+      ctx.lineTo(U.lerp(-12, xL + fh * 0.46, slab), U.lerp(H + 12, keel - fh * 0.22, slab));
+      ctx.lineTo(xL, U.lerp(H + 12, top[0][1] + fh * 0.30, slab));
+      ctx.stroke();
+    }
 
     ctx.strokeStyle = rim;
     ctx.lineWidth = 1.3;
     ctx.beginPath();
-    ctx.moveTo(-12, lipY - fh * 0.10);
-    ctx.quadraticCurveTo(W * 0.07, lipY - fh * 0.16, seatX + fh * 0.10, lipY - fh * 0.03);
-    ctx.quadraticCurveTo(seatX + fh * 0.62, lipY + fh * 0.10, seatX + fh * 0.98, lipY + fh * 0.52);
+    ctx.moveTo(top[0][0], top[0][1]);
+    for (let i = 1; i < top.length; i++) ctx.lineTo(top[i][0], top[i][1]);
     ctx.stroke();
 
     if (VF.visit && VF.visit.active()) { L.merchant = null; drawVisit(P, rim); return; }
@@ -1453,12 +1715,23 @@
     ctx.restore();
   }
 
+  /* The equipped rod with the player's finish on it. A finish repaints — it
+     does not replace what the rod is, so an apex rod keeps its own flourish
+     and simply wears the new colours: a Gilt dragon is a gold dragon, not a
+     gold rod with no dragon on it. Length and stats are never touched. */
+  function paintedRod() {
+    const rod = VF.rods.get(VF.state.data.rod);
+    const skin = VF.cosmetics.cfg('rodSkin');
+    if (!skin || !skin.c1) return rod;
+    const paint = Object.assign({}, skin);
+    if (rod.art.apex) delete paint.style;
+    return { art: Object.assign({}, rod.art, paint, { len: rod.art.len }) };
+  }
+
   /* The rod, left leaning against the ledge at the seat. */
   function drawRestingRod(P) {
     const fh = L.figureH;
-    let rod = VF.rods.get(VF.state.data.rod);
-    const skin = VF.cosmetics.cfg('rodSkin');
-    if (skin && skin.c1) rod = { art: Object.assign({}, rod.art, skin, { len: rod.art.len }) };
+    const rod = paintedRod();
     const len = fh * 1.30 * rod.art.len;
     const bx = L.seatX + fh * 0.46, by = L.seatY + fh * 0.22;
     const a = -1.06;
@@ -1472,12 +1745,7 @@
 
   /* Rod geometry lives here; the drawing is shared with the shop previews. */
   function drawRod(P) {
-    let rod = VF.rods.get(VF.state.data.rod);
-    const skin = VF.cosmetics.cfg('rodSkin');
-    if (skin && skin.c1) {
-      // a finish repaints the rod without touching its length or its stats
-      rod = { art: Object.assign({}, rod.art, skin, { len: rod.art.len }) };
-    }
+    const rod = paintedRod();
     const tip = rodTipPoint();
     const hand = L.rodHand;
     const a = tip.a;
@@ -1642,13 +1910,28 @@
   function syncVignette() {
     if (!pulseEl) pulseEl = document.getElementById('vigPulse');
     if (!pulseEl) return;
-    const v = Math.round(VF.fx.pulseAmt() * 100) / 100;
+    /* The other half of a surge with nothing to blow around: the frame itself.
+       The edges of the picture draw in and let go on a ten-second breath, under
+       everything else, so the place feels like it is doing something even when
+       nothing on screen has moved. */
+    let raw = VF.fx.pulseAmt();
+    const sg = VF.weather.surge();
+    if (sg > 0.01 && (VF.locations.current().void || 0) > 0.9) {
+      const br = 0.5 - 0.5 * Math.cos(t * 0.62);
+      raw = Math.max(raw, Math.pow(br, 1.8) * 0.30 * sg);
+    }
+    const v = Math.round(raw * 100) / 100;
     if (v !== lastPulse) { lastPulse = v; pulseEl.style.opacity = v; }
   }
 
   VF.scene = {
     init: init, resize: resize, update: update, draw: draw,
     L: L, addShadow: addShadow, newCastLateral: newCastLateral,
+    /* what a lost fish is doing right now, for the tools */
+    debugDeparture: function () {
+      return departure ? { t: departure.t, x: departure.x, y: departure.y,
+                           falls: departure.falls } : null;
+    },
     groundY: groundY, visitSpots: visitSpots,
     /* Is this canvas point on the wanderer? The input layer asks before it
        decides a press was the start of a cast. */
