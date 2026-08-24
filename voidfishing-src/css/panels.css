@@ -607,3 +607,84 @@ input[type=range]::-moz-range-thumb {
   .cut-bar { height: 8vh; }
   .cut-inner { bottom: 12vh; width: calc(100vw - 40px); }
 }
+
+
+/* Four games. A row is the same shape as a location row on the map, because
+   choosing which game to be in is the same kind of choice. */
+.saveslot-list { display: flex; flex-direction: column; gap: 8px; }
+.saveslot {
+  display: flex; align-items: center; gap: 12px;
+  padding: 11px 13px;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: rgba(255, 255, 255, 0.012);
+}
+.saveslot.here { border-color: var(--accent-dim); background: rgba(255, 255, 255, 0.028); }
+.saveslot.blank .saveslot-desc { color: var(--ink-4); font-style: italic; }
+.saveslot-mark { width: 3px; align-self: stretch; border-radius: 2px; flex: none; }
+.saveslot-main { flex: 1 1 auto; min-width: 0; text-align: left; }
+.saveslot-name {
+  font-family: var(--mono); font-size: 11px; letter-spacing: 0.10em;
+  color: var(--ink-2); display: flex; align-items: baseline; gap: 8px;
+}
+.saveslot-desc { font-size: 12px; color: var(--ink-3); margin-top: 4px; }
+.saveslot-sub { font-size: 11px; color: var(--ink-4); margin-top: 2px; }
+.saveslot-acts { display: flex; gap: 7px; flex: none; }
+
+@media (max-width: 560px) {
+  .saveslot { flex-wrap: wrap; }
+  .saveslot-acts { width: 100%; justify-content: flex-end; }
+}
+
+/* ------------------------------------------------- the index, by water */
+.water-grid {
+  display: grid; gap: 10px;
+  grid-template-columns: repeat(auto-fill, minmax(258px, 1fr));
+}
+.water {
+  border: 1px solid var(--line); border-radius: var(--r-lg);
+  background: rgba(255, 255, 255, 0.014);
+  padding: 13px 14px 12px;
+  display: flex; flex-direction: column; gap: 9px;
+}
+.water.here { border-color: var(--accent-dim); background: rgba(255, 255, 255, 0.03); }
+.water-head { display: flex; align-items: flex-start; gap: 10px; }
+.water-mark { width: 3px; align-self: stretch; border-radius: 2px; flex: none; }
+.water-head > div:nth-child(2) { flex: 1 1 auto; min-width: 0; }
+.water-name {
+  font-size: 13.5px; color: var(--ink);
+  display: flex; align-items: baseline; gap: 8px;
+}
+.water-tag { font-size: 11px; color: var(--ink-4); margin-top: 2px; }
+.water-of { font-family: var(--mono); font-size: 10.5px; color: var(--ink-3); flex: none; }
+
+.water-track { height: 4px; border-radius: 2px; background: rgba(255,255,255,0.07); overflow: hidden; }
+.water-fill { height: 100%; width: 0%; border-radius: 2px; transition: width 420ms var(--ease); }
+
+.water-tiers { display: flex; flex-wrap: wrap; gap: 9px; }
+.water-tier {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-family: var(--mono); font-size: 10px; color: var(--ink-3);
+}
+.water-dot { width: 5px; height: 5px; border-radius: 50%; display: inline-block; }
+
+.water-foot {
+  display: flex; flex-wrap: wrap; gap: 4px 12px;
+  font-size: 11px; color: var(--ink-4);
+}
+.water-sig { width: 100%; font-size: 11px; display: flex; gap: 8px; align-items: baseline; }
+.water-sig-k {
+  font-family: var(--mono); font-size: 9px; letter-spacing: 0.16em;
+  color: var(--ink-4); flex: none;
+}
+.water .btn { align-self: flex-start; margin-top: 2px; }
+
+.water-odd {
+  margin-top: 12px; padding: 12px 14px;
+  border: 1px dashed var(--line); border-radius: var(--r-lg);
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+}
+.water-odd-k {
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: 0.18em;
+  color: var(--ink-4);
+}
+.water-odd-v { font-size: 12px; color: var(--ink-3); flex: 1 1 200px; }

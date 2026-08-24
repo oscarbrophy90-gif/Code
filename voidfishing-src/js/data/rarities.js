@@ -16,8 +16,10 @@
     /* Thinned deliberately. At 0.075 the deepest water gave one up every
        seventeen casts, which is not what the tier is for — and every one of
        them now stops the frame to show you, so they have to be worth stopping
-       for. About one in forty-five at the bottom of the map. */
-    { id: 'void',      name: 'Void',      rank: 6, weight: 0.030, pow: 3.40, color: '#8a5cff', glow: '#c9a8ff', xp: 9200,  shake: 13,  stinger: 'void' },
+       for. About one in forty at the bottom of the map — re-thinned after the
+     top of the rod ladder moved, which had walked it back to one in
+     eighteen without anything being said about it. */
+    { id: 'void',      name: 'Void',      rank: 6, weight: 0.012, pow: 3.40, color: '#8a5cff', glow: '#c9a8ff', xp: 9200,  shake: 13,  stinger: 'void' },
     { id: 'glitch',    name: '!@#$%^&$#', rank: 7, weight: 0.012, pow: 2.80, color: '#ff2d55', glow: '#66ffe0', xp: 31000, shake: 18,  stinger: 'glitch' },
 
     /* One tier above the last one, and it is not listed anywhere until you have

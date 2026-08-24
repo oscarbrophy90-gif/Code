@@ -37,7 +37,7 @@
 
   { id: 'pale_perch', name: 'Pale Perch', rarity: 'common', value: 14, kg: [0.2, 2.0], m: [0.1, 0.38], diff: 0.10,
     desc: 'Colourless, patient, entirely uninterested in you.',
-    locs: ['shore', 'basin', 'flats'], baits: ['worm'], time: [], weather: [],
+    locs: ['shore', 'basin'], baits: ['worm'], time: [], weather: [],
     art: { body: 'round', fin: 'spiky', eyes: 1, glow: 0, c1: '#b3bcc4', c2: '#7d868f', c3: '#e8eef2', ex: [] } },
 
   { id: 'silt_carp', name: 'Silt Carp', rarity: 'common', value: 22, kg: [1.0, 8.5], m: [0.3, 0.85], diff: 0.20,
@@ -47,12 +47,12 @@
 
   { id: 'drift_minnow', name: 'Drift Minnow', rarity: 'common', value: 8, kg: [0.02, 0.3], m: [0.04, 0.12], diff: 0.05,
     desc: 'Barely a fish. Mostly a suggestion of one, moving quickly.',
-    locs: ['shore', 'basin', 'flats'], baits: ['worm', 'minnow'], time: [], weather: [],
+    locs: ['shore', 'basin'], baits: ['worm', 'minnow'], time: [], weather: [],
     art: { body: 'torpedo', fin: 'normal', eyes: 1, glow: 0.1, c1: '#9fd8e0', c2: '#6ba7b4', c3: '#e6fbff', ex: [] } },
 
   { id: 'stone_loach', name: 'Stone Loach', rarity: 'common', value: 19, kg: [0.1, 1.2], m: [0.1, 0.3], diff: 0.16,
     desc: 'Hides beneath rocks that fell from a shore that was never built.',
-    locs: ['shore', 'flats'], baits: ['worm', 'deep'], time: ['night'], weather: [],
+    locs: ['shore'], baits: ['worm', 'deep'], time: ['night'], weather: [],
     art: { body: 'eel', fin: 'none', eyes: 1, glow: 0, c1: '#6a6355', c2: '#413d34', c3: '#a49a84', ex: ['antenna'] } },
 
   { id: 'moth_fry', name: 'Mothfry', rarity: 'common', value: 26, kg: [0.05, 0.6], m: [0.06, 0.2], diff: 0.08,
@@ -67,7 +67,7 @@
 
   { id: 'ash_bream', name: 'Ash Bream', rarity: 'common', value: 21, kg: [0.4, 3.6], m: [0.15, 0.5], diff: 0.15,
     desc: 'Grey as cooled cinder. Tastes, reportedly, of nothing whatsoever.',
-    locs: ['shore', 'basin', 'trench'], baits: ['worm', 'ember'], time: [], weather: ['overcast', 'storm'],
+    locs: ['shore', 'basin'], baits: ['worm', 'ember'], time: [], weather: ['overcast', 'storm'],
     art: { body: 'round', fin: 'normal', eyes: 1, glow: 0, c1: '#767b82', c2: '#4a4e55', c3: '#b6bbc2', ex: [] } },
 
   { id: 'nettle_eel', name: 'Nettle Eel', rarity: 'common', value: 30, kg: [0.4, 5.0], m: [0.4, 1.4], diff: 0.24,
@@ -77,7 +77,7 @@
 
   { id: 'tin_sardine', name: 'Tin Sardine', rarity: 'common', value: 10, kg: [0.03, 0.4], m: [0.05, 0.16], diff: 0.05,
     desc: 'Arrives in shoals. Leaves in shoals. Individually, unremarkable.',
-    locs: ['shore', 'basin', 'flats', 'trench'], baits: ['minnow'], time: [], weather: [],
+    locs: ['shore', 'basin'], baits: ['minnow'], time: [], weather: [],
     art: { body: 'torpedo', fin: 'normal', eyes: 1, glow: 0.05, c1: '#aeb8bd', c2: '#79848a', c3: '#e4edf1', ex: [] } },
 
   /* ============================ UNCOMMON ============================ */
@@ -98,7 +98,7 @@
 
   { id: 'ribbonfish', name: 'Ribbonfish', rarity: 'uncommon', value: 145, kg: [1.0, 9.0], m: [1.0, 3.2], diff: 0.38,
     desc: 'Long as a thought you cannot finish. Moves like a banner in slow wind.',
-    locs: ['basin', 'trench'], baits: ['minnow', 'deep'], time: ['sunset'], weather: [],
+    locs: ['basin'], baits: ['minnow', 'deep'], time: ['sunset'], weather: [],
     art: { body: 'ribbon', fin: 'veil', eyes: 1, glow: 0.2, c1: '#dfd3e8', c2: '#9d8fb0', c3: '#ffffff', ex: [] } },
 
   { id: 'copper_ray', name: 'Copper Ray', rarity: 'uncommon', value: 175, kg: [4.0, 30.0], m: [0.6, 1.8], diff: 0.40,
@@ -108,12 +108,12 @@
 
   { id: 'fog_grouper', name: 'Fog Grouper', rarity: 'uncommon', value: 160, kg: [5.0, 44.0], m: [0.5, 1.4], diff: 0.44,
     desc: 'Only surfaces when visibility is poor. Assumed to prefer privacy.',
-    locs: ['basin', 'trench'], baits: ['deep', 'cluster'], time: [], weather: ['fog', 'overcast'],
+    locs: ['basin'], baits: ['deep', 'cluster'], time: [], weather: ['fog', 'overcast'],
     art: { body: 'blob', fin: 'normal', eyes: 1, glow: 0.05, c1: '#8f9aa2', c2: '#5a646c', c3: '#cfd8de', ex: [] } },
 
   { id: 'thorn_perch', name: 'Thorn Perch', rarity: 'uncommon', value: 88, kg: [0.6, 5.5], m: [0.2, 0.6], diff: 0.32,
     desc: 'Every fin is a warning. It has never had to use them twice.',
-    locs: ['shore', 'flats'], baits: ['cluster', 'worm'], time: [], weather: [],
+    locs: ['shore'], baits: ['cluster', 'worm'], time: [], weather: [],
     art: { body: 'round', fin: 'spiky', eyes: 1, glow: 0, c1: '#7a4f5e', c2: '#4a2c37', c3: '#d29aa8', ex: ['spine'] } },
 
   { id: 'moon_snail', name: 'Moonsnail', rarity: 'uncommon', value: 120, kg: [0.3, 4.0], m: [0.1, 0.4], diff: 0.18,
@@ -128,17 +128,17 @@
 
   { id: 'quartz_darter', name: 'Quartz Darter', rarity: 'uncommon', value: 190, kg: [0.4, 3.0], m: [0.15, 0.5], diff: 0.28,
     desc: 'Refracts the lure into six lures. Bites all of them, catches none.',
-    locs: ['flats', 'abyss'], baits: ['prism'], time: [], weather: ['clear', 'aurora'],
+    locs: ['flats'], baits: ['prism'], time: [], weather: ['clear', 'aurora'],
     art: { body: 'shard', fin: 'spiky', eyes: 2, glow: 0.35, c1: '#cfe3ff', c2: '#8fa9cc', c3: '#ffffff', ex: ['crystals'] } },
 
   { id: 'ember_roach', name: 'Ember Roach', rarity: 'uncommon', value: 135, kg: [0.3, 3.4], m: [0.15, 0.5], diff: 0.26,
     desc: 'Warm to the touch. Keeps a small coal somewhere behind its eyes.',
-    locs: ['trench', 'basin'], baits: ['ember'], time: ['sunset'], weather: ['meteor', 'storm'],
+    locs: ['trench'], baits: ['ember'], time: ['sunset'], weather: ['meteor', 'storm'],
     art: { body: 'torpedo', fin: 'spiky', eyes: 1, glow: 0.45, c1: '#a34a2c', c2: '#611f14', c3: '#ffb066', ex: [] } },
 
   { id: 'hollow_cod', name: 'Hollow Cod', rarity: 'uncommon', value: 105, kg: [2.0, 18.0], m: [0.4, 1.2], diff: 0.30,
     desc: 'Weighs less than it should. Something was removed from it, neatly.',
-    locs: ['trench', 'basin'], baits: ['deep', 'minnow'], time: [], weather: [],
+    locs: ['trench'], baits: ['deep', 'minnow'], time: [], weather: [],
     art: { body: 'torpedo', fin: 'normal', eyes: 0, glow: 0.05, c1: '#8b8e84', c2: '#565951', c3: '#c4c7bb', ex: ['fracture'] } },
 
   /* ============================ RARE ============================ */
@@ -154,17 +154,17 @@
 
   { id: 'mirror_tetra', name: 'Mirror Tetra', rarity: 'rare', value: 540, kg: [0.1, 1.4], m: [0.08, 0.3], diff: 0.34,
     desc: 'You see your own face on its flank. It is not doing what you are doing.',
-    locs: ['flats', 'abyss'], baits: ['prism', 'star'], time: [], weather: ['clear'],
+    locs: ['flats'], baits: ['prism', 'star'], time: [], weather: ['clear'],
     art: { body: 'shard', fin: 'veil', eyes: 2, glow: 0.4, c1: '#dfe9f2', c2: '#a3b4c6', c3: '#ffffff', ex: ['mask'] } },
 
   { id: 'tidewalker', name: 'Tidewalker Crab', rarity: 'rare', value: 690, kg: [1.0, 14.0], m: [0.2, 0.9], diff: 0.52,
     desc: 'Walks along the underside of the surface as though it were a floor.',
-    locs: ['shore', 'flats', 'trench'], baits: ['worm', 'cluster'], time: [], weather: ['rain', 'storm'],
+    locs: ['shore'], baits: ['worm', 'cluster'], time: [], weather: ['rain', 'storm'],
     art: { body: 'crustacean', fin: 'legs', eyes: 4, glow: 0.1, c1: '#8f5a6a', c2: '#4f2c38', c3: '#e0a2ae', ex: ['spine'] } },
 
   { id: 'starling_koi', name: 'Starling Koi', rarity: 'rare', value: 880, kg: [1.0, 12.0], m: [0.3, 0.9], diff: 0.44,
     desc: 'Its markings match a constellation nobody has bothered to name.',
-    locs: ['basin', 'flats', 'cradle'], baits: ['star', 'glowworm'], time: ['night'], weather: ['clear', 'meteor'],
+    locs: ['basin', 'flats'], baits: ['star', 'glowworm'], time: ['night'], weather: ['clear', 'meteor'],
     art: { body: 'round', fin: 'veil', eyes: 1, glow: 0.5, c1: '#f3f0ff', c2: '#8f86c2', c3: '#ffe9a0', ex: ['stars'] } },
 
   { id: 'brine_lantern', name: 'Brine Lanternfish', rarity: 'rare', value: 730, kg: [0.5, 6.0], m: [0.2, 0.7], diff: 0.42,
@@ -179,7 +179,7 @@
 
   { id: 'weeping_pike', name: 'Weeping Pike', rarity: 'rare', value: 820, kg: [3.0, 30.0], m: [0.6, 1.8], diff: 0.56,
     desc: 'Water runs from its eyes in a place with no gravity to pull it down.',
-    locs: ['basin', 'trench'], baits: ['minnow', 'deep'], time: ['sunset', 'night'], weather: ['rain'],
+    locs: ['basin'], baits: ['minnow', 'deep'], time: ['sunset', 'night'], weather: ['rain'],
     art: { body: 'torpedo', fin: 'spiky', eyes: 2, glow: 0.2, c1: '#5b6c93', c2: '#2e3853', c3: '#b9c9ef', ex: ['teeth', 'threads'] } },
 
   { id: 'hush_jelly', name: 'Hush Jelly', rarity: 'rare', value: 640, kg: [0.5, 9.0], m: [0.3, 1.6], diff: 0.30,
@@ -194,18 +194,18 @@
 
   { id: 'clockfish', name: 'Clockfish', rarity: 'rare', value: 1150, kg: [0.5, 5.0], m: [0.2, 0.6], diff: 0.48,
     desc: 'Ticks. Slows when you reel. Stops entirely the moment it leaves the water.',
-    locs: ['flats', 'cradle'], baits: ['prism', 'star'], time: [], weather: ['aurora', 'eclipse'],
+    locs: ['flats'], baits: ['prism', 'star'], time: [], weather: ['aurora', 'eclipse'],
     art: { body: 'orb', fin: 'normal', eyes: 3, glow: 0.45, c1: '#c9b478', c2: '#7d6a44', c3: '#ffe6a8', ex: ['rings', 'runes'] } },
 
   /* ============================ EPIC ============================ */
   { id: 'phantom_koi', name: 'Phantom Koi', rarity: 'epic', value: 3400, kg: [2.0, 24.0], m: [0.4, 1.2], diff: 0.60,
     desc: 'Passes through the net twice before deciding to be caught on the third.',
-    locs: ['basin', 'flats', 'abyss'], baits: ['star', 'prism'], time: ['night'], weather: ['fog', 'eclipse'],
+    locs: ['basin', 'flats'], baits: ['star', 'prism'], time: ['night'], weather: ['fog', 'eclipse'],
     art: { body: 'round', fin: 'veil', eyes: 2, glow: 0.6, c1: '#e6ecff', c2: '#7b86b8', c3: '#ffffff', ex: ['threads'] } },
 
   { id: 'moonfish', name: 'Moonfish', rarity: 'epic', value: 4200, kg: [6.0, 160.0], m: [0.8, 3.4], diff: 0.68,
     desc: 'Perfectly circular. Reflects light that has not arrived yet.',
-    locs: ['basin', 'abyss', 'cradle'], baits: ['glowworm', 'star'], time: ['night'], weather: ['clear', 'eclipse'],
+    locs: ['basin'], baits: ['glowworm', 'star'], time: ['night'], weather: ['clear', 'eclipse'],
     art: { body: 'orb', fin: 'long', eyes: 1, glow: 0.75, c1: '#f2f0e2', c2: '#a8a693', c3: '#ffffff', ex: ['halo'] } },
 
   { id: 'abyss_angler', name: 'Abyssal Angler', rarity: 'epic', value: 5100, kg: [10.0, 130.0], m: [0.6, 2.2], diff: 0.76,
@@ -215,7 +215,7 @@
 
   { id: 'stormcaller', name: 'Stormcaller Ray', rarity: 'epic', value: 4700, kg: [20.0, 240.0], m: [1.5, 4.2], diff: 0.74,
     desc: 'Weather follows it. Whether it causes the weather is an open question.',
-    locs: ['trench', 'cradle'], baits: ['ember', 'deep'], time: [], weather: ['storm', 'rain'],
+    locs: ['trench'], baits: ['ember', 'deep'], time: [], weather: ['storm', 'rain'],
     art: { body: 'ray', fin: 'wing', eyes: 2, glow: 0.5, c1: '#3d4a7a', c2: '#1a2140', c3: '#9fd8ff', ex: ['runes', 'spine'] } },
 
   { id: 'aurora_serpent', name: 'Aurora Serpent', rarity: 'epic', value: 6200, kg: [15.0, 190.0], m: [2.5, 7.0], diff: 0.72,
@@ -235,17 +235,17 @@
 
   { id: 'thousand_eye', name: 'Thousand-Eye Bream', rarity: 'epic', value: 4400, kg: [3.0, 42.0], m: [0.3, 1.0], diff: 0.66,
     desc: 'It has been watching this spot far longer than you have been sitting at it.',
-    locs: ['abyss', 'nowhere'], baits: ['star', 'void'], time: ['night'], weather: ['eclipse', 'fog'],
+    locs: ['abyss'], baits: ['star', 'void'], time: ['night'], weather: ['eclipse', 'fog'],
     art: { body: 'round', fin: 'frill', eyes: 6, glow: 0.4, c1: '#57406b', c2: '#2a1e36', c3: '#e0c8ff', ex: ['eyes_extra'] } },
 
   { id: 'cinder_marlin', name: 'Cinder Marlin', rarity: 'epic', value: 5900, kg: [50.0, 480.0], m: [2.0, 4.8], diff: 0.82,
     desc: 'Burns underwater. The line smokes. Reel carefully.',
-    locs: ['trench', 'cradle'], baits: ['ember'], time: ['sunset'], weather: ['meteor', 'storm'],
+    locs: ['trench'], baits: ['ember'], time: ['sunset'], weather: ['meteor', 'storm'],
     art: { body: 'torpedo', fin: 'long', eyes: 1, glow: 0.8, c1: '#7a2416', c2: '#3a0e08', c3: '#ffa040', ex: ['spine', 'teeth'] } },
 
   { id: 'null_jelly', name: 'Null Jelly', rarity: 'epic', value: 4800, kg: [1.0, 30.0], m: [0.5, 3.0], diff: 0.55,
     desc: 'Occupies space without appearing to be in it. Cold in a way that is not temperature.',
-    locs: ['nowhere', 'abyss'], baits: ['void', 'deep'], time: [], weather: ['voidsurge', 'fog'],
+    locs: ['nowhere'], baits: ['void', 'deep'], time: [], weather: ['voidsurge', 'fog'],
     art: { body: 'jelly', fin: 'none', eyes: 0, glow: 0.55, c1: '#2a2340', c2: '#100c1c', c3: '#a88fff', ex: ['tentacles', 'threads'] } }
 ,
 
@@ -257,32 +257,32 @@
 
   { id: 'ancient_marlin', name: 'Ancient Marlin', rarity: 'legendary', value: 19500, kg: [180, 2400], m: [3.5, 11], diff: 0.88,
     desc: 'Scarred by hooks in styles that have not been manufactured for four hundred years.',
-    locs: ['flats', 'trench', 'cradle'], baits: ['minnow', 'star', 'ember'], time: ['dawn', 'sunset'], weather: ['clear'],
+    locs: ['flats', 'trench'], baits: ['minnow', 'star', 'ember'], time: ['dawn', 'sunset'], weather: ['clear'],
     art: { body: 'torpedo', fin: 'long', eyes: 1, glow: 0.3, c1: '#2f5a78', c2: '#132c3e', c3: '#ffd68a', ex: ['spine', 'runes', 'fracture'] } },
 
   { id: 'tide_empress', name: 'Tide Empress', rarity: 'legendary', value: 31000, kg: [90, 1400], m: [2.5, 8.5], diff: 0.86,
     desc: 'The water arranges itself around her. It has been doing so for some time.',
-    locs: ['basin', 'cradle', 'abyss'], baits: ['prism', 'star'], time: ['night'], weather: ['aurora', 'clear'],
+    locs: ['basin'], baits: ['prism', 'star'], time: ['night'], weather: ['aurora', 'clear'],
     art: { body: 'serpent', fin: 'veil', eyes: 2, glow: 0.7, c1: '#5fc8d8', c2: '#276a86', c3: '#ffffff', ex: ['halo', 'threads', 'crystals'] } },
 
   { id: 'hollow_king', name: 'The Hollow King', rarity: 'legendary', value: 38000, kg: [60, 900], m: [2, 6.5], diff: 0.92,
     desc: 'A crown of bone above nothing at all. It bows when landed. Nobody enjoys this.',
-    locs: ['abyss', 'nowhere'], baits: ['void', 'deep'], time: ['night'], weather: ['eclipse', 'voidsurge'],
+    locs: ['abyss'], baits: ['void', 'deep'], time: ['night'], weather: ['eclipse', 'voidsurge'],
     art: { body: 'blob', fin: 'frill', eyes: 0, glow: 0.5, c1: '#3b3348', c2: '#171320', c3: '#e8d8a0', ex: ['horns', 'mask', 'runes'] } },
 
   { id: 'meteor_gar', name: 'Meteor Gar', rarity: 'legendary', value: 22000, kg: [120, 1600], m: [3, 9], diff: 0.84,
     desc: 'Enters the water from above at speed. Occasionally it does so directly onto your line.',
-    locs: ['cradle', 'trench', 'flats'], baits: ['ember', 'star'], time: [], weather: ['meteor', 'storm'],
+    locs: ['cradle'], baits: ['ember', 'star'], time: [], weather: ['meteor', 'storm'],
     art: { body: 'torpedo', fin: 'spiky', eyes: 1, glow: 0.85, c1: '#8a3a18', c2: '#3d1207', c3: '#ffd07a', ex: ['spine', 'stars', 'fracture'] } },
 
   { id: 'glass_leviathan', name: 'Glass Leviathan', rarity: 'legendary', value: 34000, kg: [300, 4000], m: [5, 16], diff: 0.89,
     desc: 'Entirely transparent. You watch the hook travel all the way through it and hold anyway.',
-    locs: ['flats', 'abyss'], baits: ['prism', 'star'], time: [], weather: ['clear', 'aurora'],
+    locs: ['flats'], baits: ['prism', 'star'], time: [], weather: ['clear', 'aurora'],
     art: { body: 'whale', fin: 'veil', eyes: 2, glow: 0.6, c1: '#cfe8f5', c2: '#7fa8bc', c3: '#ffffff', ex: ['crystals', 'bubbles'] } },
 
   { id: 'drowned_choir', name: 'The Drowned Choir', rarity: 'legendary', value: 29000, kg: [30, 500], m: [1.5, 5], diff: 0.87,
     desc: 'Nine fish that share one mouth. When landed, all nine stop singing at once.',
-    locs: ['nowhere', 'abyss'], baits: ['void', 'deep'], time: ['night'], weather: ['fog', 'voidsurge'],
+    locs: ['nowhere'], baits: ['void', 'deep'], time: ['night'], weather: ['fog', 'voidsurge'],
     art: { body: 'anomaly', fin: 'frill', eyes: 5, glow: 0.45, c1: '#43405e', c2: '#1a1828', c3: '#b8d8ff', ex: ['teeth', 'threads', 'eyes_extra'] } },
 
   { id: 'sunless_whale', name: 'Sunless Whale', rarity: 'legendary', value: 41000, kg: [900, 12000], m: [10, 34], diff: 0.93,
@@ -293,7 +293,7 @@
   /* ============================ MYTHIC ============================ */
   { id: 'star_serpent', name: 'Star Serpent', rarity: 'mythic', value: 165000, kg: [200, 3400], m: [8, 40], diff: 0.94,
     desc: 'Its body is the gap between five stars. Landing it briefly rearranges the sky.',
-    locs: ['cradle', 'nowhere', 'abyss'], baits: ['star', 'void'], time: ['night'], weather: ['meteor', 'clear', 'aurora'],
+    locs: ['cradle', 'nowhere'], baits: ['star', 'void'], time: ['night'], weather: ['meteor', 'clear', 'aurora'],
     art: { body: 'serpent', fin: 'veil', eyes: 2, glow: 0.9, c1: '#3a4a9a', c2: '#151a3c', c3: '#ffffff', ex: ['stars', 'halo', 'threads'] } },
 
   { id: 'astral_whale', name: 'Astral Whale', rarity: 'mythic', value: 240000, kg: [2000, 42000], m: [18, 70], diff: 0.96,
@@ -303,27 +303,27 @@
 
   { id: 'eclipse_ray', name: 'Eclipse Ray', rarity: 'mythic', value: 128000, kg: [300, 5200], m: [6, 24], diff: 0.93,
     desc: 'Passes overhead. For eleven seconds there is no light anywhere and you keep reeling anyway.',
-    locs: ['cradle', 'abyss', 'nowhere'], baits: ['void', 'prism'], time: [], weather: ['eclipse'],
+    locs: ['cradle', 'abyss'], baits: ['void', 'prism'], time: [], weather: ['eclipse'],
     art: { body: 'ray', fin: 'wing', eyes: 3, glow: 0.7, c1: '#1c1626', c2: '#08060c', c3: '#ffb84a', ex: ['halo', 'runes', 'eyes_extra'] } },
 
   { id: 'cathedral_jelly', name: 'Cathedral Jelly', rarity: 'mythic', value: 152000, kg: [60, 1100], m: [4, 18], diff: 0.88,
     desc: 'Interior architecture. Arches, a nave, and a light at the far end you should not walk toward.',
-    locs: ['abyss', 'nowhere'], baits: ['void', 'prism'], time: [], weather: ['fog', 'voidsurge'],
+    locs: ['abyss'], baits: ['void', 'prism'], time: [], weather: ['fog', 'voidsurge'],
     art: { body: 'jelly', fin: 'none', eyes: 0, glow: 0.85, c1: '#8f7fe0', c2: '#3a2f70', c3: '#ffeec8', ex: ['tentacles', 'runes', 'halo', 'crystals'] } },
 
   { id: 'lantern_god', name: 'The Lanternbearer', rarity: 'mythic', value: 198000, kg: [120, 2200], m: [3, 14], diff: 0.95,
     desc: 'Holds a light out over the water as though waiting for someone. It has been waiting.',
-    locs: ['nowhere', 'abyss'], baits: ['glowworm', 'void'], time: ['night'], weather: ['fog', 'eclipse'],
+    locs: ['nowhere'], baits: ['glowworm', 'void'], time: ['night'], weather: ['fog', 'eclipse'],
     art: { body: 'anomaly', fin: 'frill', eyes: 1, glow: 1, c1: '#2a2338', c2: '#0d0a14', c3: '#ffe08a', ex: ['lantern', 'halo', 'threads', 'mask'] } },
 
   { id: 'nine_tide', name: 'Nine-Tide Kraken', rarity: 'mythic', value: 176000, kg: [800, 16000], m: [10, 44], diff: 0.97,
     desc: 'Nine arms, nine tides, nine chances to lose the line. Most anglers manage about four.',
-    locs: ['trench', 'abyss', 'nowhere'], baits: ['deep', 'void'], time: ['night'], weather: ['storm', 'voidsurge'],
+    locs: ['trench', 'abyss'], baits: ['deep', 'void'], time: ['night'], weather: ['storm', 'voidsurge'],
     art: { body: 'anomaly', fin: 'none', eyes: 2, glow: 0.5, c1: '#4a2c52', c2: '#1a0f20', c3: '#ff8fc0', ex: ['tentacles', 'teeth', 'spine'] } },
 
-  { id: 'first_catch', name: 'The First Catch', rarity: 'mythic', value: 210000, kg: [1, 40], m: [0.3, 2], diff: 0.90,
+  { id: 'first_catch', name: "Firstcatch Marlin", rarity: 'mythic', value: 210000, kg: [1, 40], m: [0.3, 2], diff: 0.90,
     desc: 'A perfectly ordinary fish. It is simply the oldest one. Everything else came after.',
-    locs: ['shore', 'nowhere'], baits: ['worm'], time: ['dawn'], weather: ['clear'],
+    locs: ['shore'], baits: ['worm'], time: ['dawn'], weather: ['clear'],
     art: { body: 'torpedo', fin: 'normal', eyes: 1, glow: 0.6, c1: '#d8cba8', c2: '#8f8262', c3: '#fff6d8', ex: ['halo', 'runes'] } },
 
   /* ============================ VOID ============================ */
@@ -337,7 +337,7 @@
     locs: ['beneath', 'nowhere'], baits: ['void', 'null'], time: ['night'], weather: ['voidsurge', 'storm'],
     art: { body: 'whale', fin: 'wing', eyes: 3, glow: 0.75, c1: '#1a1030', c2: '#05030c', c3: '#b48aff', ex: ['teeth', 'spine', 'runes', 'eyes_extra', 'fracture'] } },
 
-  { id: 'the_quiet', name: 'The Quiet', rarity: 'void', value: 1750000, kg: [0.01, 0.4], m: [0.02, 0.15], diff: 0.94,
+  { id: 'the_quiet', name: "Hushmouth Puffer", rarity: 'void', value: 1750000, kg: [0.01, 0.4], m: [0.02, 0.15], diff: 0.94,
     desc: 'Weighs almost nothing. While it is on the line, no sound reaches you at all. Not one.',
     locs: ['beneath', 'nowhere'], baits: ['null', 'void'], time: [], weather: ['fog', 'voidsurge'],
     art: { body: 'orb', fin: 'none', eyes: 0, glow: 0.9, c1: '#efe8ff', c2: '#8f84b8', c3: '#ffffff', ex: ['halo', 'rings'] } },
@@ -366,17 +366,17 @@
   /* ---------- deep-water residents: the ordinary life of impossible places ---------- */
   { id: 'dust_minnow', name: 'Dust Minnow', rarity: 'common', value: 34, kg: [0.02, 0.5], m: [0.04, 0.15], diff: 0.08,
     desc: 'Feeds on whatever the crystals shed. There are millions of them and they are all identical.',
-    locs: ['abyss', 'cradle', 'nowhere', 'beneath'], baits: ['worm', 'minnow'], time: [], weather: [],
+    locs: ['abyss', 'cradle'], baits: ['worm', 'minnow'], time: [], weather: [],
     art: { body: 'torpedo', fin: 'normal', eyes: 1, glow: 0.25, c1: '#a89cc0', c2: '#6d6488', c3: '#e8e0ff', ex: [] } },
 
   { id: 'cinder_fry', name: 'Cinder Fry', rarity: 'common', value: 29, kg: [0.05, 0.9], m: [0.06, 0.22], diff: 0.10,
     desc: 'Hatched somewhere warm. Has been getting steadily colder ever since and does not mind.',
-    locs: ['trench', 'abyss', 'cradle'], baits: ['ember', 'worm'], time: [], weather: [],
+    locs: ['trench', 'abyss'], baits: ['ember', 'worm'], time: [], weather: [],
     art: { body: 'torpedo', fin: 'spiky', eyes: 1, glow: 0.3, c1: '#8f5030', c2: '#4a2414', c3: '#ffb878', ex: [] } },
 
   { id: 'pale_drifter', name: 'Pale Drifter', rarity: 'common', value: 41, kg: [0.1, 1.6], m: [0.08, 0.34], diff: 0.09,
     desc: 'Does not swim. Is simply carried, and has been for an extremely long time.',
-    locs: ['abyss', 'nowhere', 'beneath'], baits: ['worm', 'deep'], time: [], weather: [],
+    locs: ['abyss'], baits: ['worm', 'deep'], time: [], weather: [],
     art: { body: 'blob', fin: 'veil', eyes: 0, glow: 0.35, c1: '#d8d4e4', c2: '#8f8ba0', c3: '#ffffff', ex: ['threads'] } },
 
   { id: 'shardfish', name: 'Shardfish', rarity: 'uncommon', value: 210, kg: [0.3, 4.5], m: [0.12, 0.5], diff: 0.30,
@@ -386,12 +386,12 @@
 
   { id: 'orbit_smelt', name: 'Orbit Smelt', rarity: 'uncommon', value: 240, kg: [0.1, 1.8], m: [0.08, 0.3], diff: 0.24,
     desc: 'Circles the same point forever. Nothing is at that point. It circles anyway.',
-    locs: ['flats', 'cradle', 'nowhere'], baits: ['star', 'minnow'], time: [], weather: ['clear', 'meteor'],
+    locs: ['flats'], baits: ['star', 'minnow'], time: [], weather: ['clear', 'meteor'],
     art: { body: 'torpedo', fin: 'long', eyes: 1, glow: 0.45, c1: '#d8c8a0', c2: '#8f8060', c3: '#fff4c8', ex: ['rings'] } },
 
   { id: 'ossuary_minnow', name: 'Ossuary Minnow', rarity: 'uncommon', value: 275, kg: [0.05, 1.2], m: [0.06, 0.28], diff: 0.28,
     desc: 'Made almost entirely of small bones, none of which are its own.',
-    locs: ['trench', 'nowhere', 'beneath'], baits: ['deep', 'void'], time: ['night'], weather: [],
+    locs: ['trench'], baits: ['deep', 'void'], time: ['night'], weather: [],
     art: { body: 'eel', fin: 'none', eyes: 2, glow: 0.15, c1: '#ddd4c0', c2: '#94897a', c3: '#fff8e8', ex: ['spine'] } },
 
   { id: 'hushperch', name: 'Hushperch', rarity: 'uncommon', value: 330, kg: [0.4, 6.0], m: [0.15, 0.55], diff: 0.34,
@@ -406,7 +406,7 @@
 
   { id: 'veinlight_eel', name: 'Veinlight Eel', rarity: 'rare', value: 1250, kg: [1.0, 16.0], m: [0.7, 2.6], diff: 0.50,
     desc: 'Lit from the inside along every vessel. You can watch it think about the hook.',
-    locs: ['abyss', 'cradle', 'nowhere'], baits: ['glowworm', 'deep', 'prism'], time: [], weather: [],
+    locs: ['abyss', 'cradle'], baits: ['glowworm', 'deep', 'prism'], time: [], weather: [],
     art: { body: 'eel', fin: 'frill', eyes: 2, glow: 0.7, c1: '#3a2a58', c2: '#160f26', c3: '#8ffce0', ex: ['threads', 'lantern'] } },
 
   { id: 'ringtail_carp', name: 'Ringtail Carp', rarity: 'rare', value: 1400, kg: [2.0, 28.0], m: [0.4, 1.3], diff: 0.52,
@@ -421,17 +421,17 @@
 
   { id: 'ashfall_koi', name: 'Ashfall Koi', rarity: 'rare', value: 1150, kg: [1.5, 20.0], m: [0.35, 1.1], diff: 0.48,
     desc: 'Grey flakes come off it constantly and never reach the bottom.',
-    locs: ['abyss', 'cradle', 'beneath'], baits: ['ember', 'cluster'], time: [], weather: [],
+    locs: ['abyss', 'cradle'], baits: ['ember', 'cluster'], time: [], weather: [],
     art: { body: 'round', fin: 'veil', eyes: 1, glow: 0.3, c1: '#8f8880', c2: '#4a4540', c3: '#ffd0a8', ex: ['stars'] } },
 
   { id: 'gravity_bass', name: 'Gravity Bass', rarity: 'epic', value: 8200, kg: [12.0, 220.0], m: [0.6, 2.4], diff: 0.76,
     desc: 'Weighs whatever it has decided to weigh. It changes its mind during the fight.',
-    locs: ['cradle', 'nowhere', 'beneath'], baits: ['star', 'void'], time: [], weather: [],
+    locs: ['cradle', 'nowhere'], baits: ['star', 'void'], time: [], weather: [],
     art: { body: 'round', fin: 'normal', eyes: 1, glow: 0.5, c1: '#3a3a6a', c2: '#14142c', c3: '#c0c0ff', ex: ['rings', 'runes'] } },
 
   { id: 'echo_pike', name: 'Echo Pike', rarity: 'epic', value: 9600, kg: [8.0, 140.0], m: [0.8, 3.2], diff: 0.80,
     desc: 'Strikes once. You feel it four times, at decreasing volume.',
-    locs: ['abyss', 'nowhere', 'beneath'], baits: ['void', 'minnow'], time: ['night'], weather: [],
+    locs: ['abyss'], baits: ['void', 'minnow'], time: ['night'], weather: [],
     art: { body: 'torpedo', fin: 'spiky', eyes: 3, glow: 0.55, c1: '#403060', c2: '#1a1230', c3: '#a0e0ff', ex: ['threads', 'teeth'] } },
 
   { id: 'candlewhale', name: 'Candlewhale Calf', rarity: 'epic', value: 11500, kg: [60.0, 900.0], m: [2.5, 9.0], diff: 0.84,
@@ -439,19 +439,19 @@
     locs: ['nowhere', 'beneath'], baits: ['glowworm', 'void'], time: [], weather: [],
     art: { body: 'whale', fin: 'wing', eyes: 1, glow: 0.85, c1: '#2a2438', c2: '#0c0a14', c3: '#ffe0a0', ex: ['lantern', 'halo'] } },
 
-  { id: 'sunken_bell', name: 'The Sunken Bell', rarity: 'legendary', value: 46000, kg: [200, 3000], m: [2, 9], diff: 0.90,
+  { id: 'sunken_bell', name: "Bellmouth Puffer", rarity: 'legendary', value: 46000, kg: [200, 3000], m: [2, 9], diff: 0.90,
     desc: 'Rings once when it breaks the surface. Everything in the water stops to listen.',
     locs: ['nowhere', 'beneath'], baits: ['void', 'null'], time: [], weather: ['fog', 'voidsurge'],
     art: { body: 'orb', fin: 'none', eyes: 0, glow: 0.7, c1: '#8f7a48', c2: '#463a20', c3: '#ffe8a8', ex: ['rings', 'runes', 'chains'] } },
 
-  { id: 'long_dark', name: 'The Long Dark', rarity: 'legendary', value: 52000, kg: [150, 2600], m: [6, 30], diff: 0.93,
+  { id: 'long_dark', name: "Longdark Serpent", rarity: 'legendary', value: 52000, kg: [150, 2600], m: [6, 30], diff: 0.93,
     desc: 'You do not see it. You see the length of time during which you cannot see anything else.',
-    locs: ['abyss', 'nowhere', 'beneath'], baits: ['void', 'deep', 'null'], time: ['night'], weather: [],
+    locs: ['abyss'], baits: ['void', 'deep', 'null'], time: ['night'], weather: [],
     art: { body: 'serpent', fin: 'none', eyes: 2, glow: 0.2, c1: '#0e0a18', c2: '#000000', c3: '#5a4a8a', ex: ['spine', 'threads'] } },
 
   { id: 'something_patient', name: 'Something Patient', rarity: 'legendary', value: 58000, kg: [80, 1600], m: [2, 11], diff: 0.94,
     desc: 'It let you catch it. You will spend some time deciding how you feel about that.',
-    locs: ['cradle', 'beneath'], baits: ['null', 'void'], time: [], weather: ['eclipse', 'voidsurge'],
+    locs: ['cradle'], baits: ['null', 'void'], time: [], weather: ['eclipse', 'voidsurge'],
     art: { body: 'anomaly', fin: 'frill', eyes: 1, glow: 0.45, c1: '#2a2438', c2: '#0a0812', c3: '#e0c890', ex: ['mask', 'threads', 'runes'] } },
 
   { id: 'unlight', name: 'Unlight', rarity: 'mythic', value: 185000, kg: [40, 800], m: [1.5, 8], diff: 0.94,
@@ -466,7 +466,7 @@
 
   { id: 'anchor_saint', name: 'The Anchor Saint', rarity: 'mythic', value: 228000, kg: [500, 11000], m: [5, 26], diff: 0.96,
     desc: 'Wrapped in the chains of every vessel that ever gave up. It holds them gently.',
-    locs: ['cradle', 'beneath'], baits: ['null', 'void'], time: [], weather: ['fog', 'voidsurge', 'eclipse'],
+    locs: ['cradle'], baits: ['null', 'void'], time: [], weather: ['fog', 'voidsurge', 'eclipse'],
     art: { body: 'whale', fin: 'veil', eyes: 2, glow: 0.6, c1: '#3a4258', c2: '#141822', c3: '#ffe0b0', ex: ['chains', 'halo', 'runes'] } },
 
   /* ========================= !@#$%^&$# ========================= */
@@ -506,7 +506,7 @@
 
   { id: 'button_crab', name: 'Button Crab', rarity: 'common', value: 20, kg: [0.05, 0.6], m: [0.04, 0.16], diff: 0.14,
     desc: 'Small, round, and extremely certain that it is winning.',
-    locs: ['shore', 'flats'], baits: ['worm', 'cluster'], time: [], weather: [],
+    locs: ['shore'], baits: ['worm', 'cluster'], time: [], weather: [],
     art: { body: 'crustacean', fin: 'legs', eyes: 2, glow: 0, c1: '#a06a58', c2: '#5c382c', c3: '#e0b09c', ex: [] } },
 
   { id: 'chalk_sole', name: 'Chalk Sole', rarity: 'common', value: 26, kg: [0.3, 3.2], m: [0.15, 0.5], diff: 0.16,
@@ -516,7 +516,7 @@
 
   { id: 'kettle_perch', name: 'Kettle Perch', rarity: 'uncommon', value: 88, kg: [0.6, 5.4], m: [0.2, 0.62], diff: 0.26,
     desc: 'Warm to the touch, always, regardless of how cold the water is.',
-    locs: ['basin', 'trench'], baits: ['minnow', 'glowworm'], time: [], weather: ['rain', 'overcast'],
+    locs: ['basin'], baits: ['minnow', 'glowworm'], time: [], weather: ['rain', 'overcast'],
     art: { body: 'round', fin: 'normal', eyes: 1, glow: 0.08, c1: '#b06840', c2: '#6a3a20', c3: '#ffc890', ex: [] } },
 
   { id: 'sew_eel', name: 'Sewn Eel', rarity: 'uncommon', value: 132, kg: [0.8, 9], m: [0.5, 2.1], diff: 0.34,
@@ -526,7 +526,7 @@
 
   { id: 'tin_shoal', name: 'Tin Shoal', rarity: 'uncommon', value: 118, kg: [0.4, 4.2], m: [0.18, 0.55], diff: 0.30,
     desc: 'A single fish that arrives as a crowd and leaves as a crowd.',
-    locs: ['flats', 'basin', 'trench'], baits: ['minnow', 'cluster'], time: [], weather: [],
+    locs: ['flats', 'basin'], baits: ['minnow', 'cluster'], time: [], weather: [],
     art: { body: 'swarm', fin: 'normal', eyes: 3, glow: 0.10, c1: '#9aa8b4', c2: '#4e5a66', c3: '#dfe8f0', ex: [] } },
 
   { id: 'cold_marlin', name: 'Cold Marlin', rarity: 'rare', value: 620, kg: [8, 90], m: [1.2, 3.6], diff: 0.50,
@@ -561,7 +561,7 @@
 
   { id: 'root_pike', name: 'Rootbound Pike', rarity: 'epic', value: 4700, kg: [24, 400], m: [1.4, 5.4], diff: 0.70,
     desc: 'It has grown into something down there. Reeling it in brings some of that up too.',
-    locs: ['cradle', 'beneath'], baits: ['deep', 'void'], time: ['night'], weather: [],
+    locs: ['cradle'], baits: ['deep', 'void'], time: ['night'], weather: [],
     art: { body: 'torpedo', fin: 'spiky', eyes: 1, glow: 0.18, c1: '#4a5a3a', c2: '#1c2418', c3: '#c8e08a', ex: ['roots', 'teeth'] } },
 
   { id: 'coin_king', name: 'The Coin King', rarity: 'legendary', value: 74000, kg: [40, 900], m: [1.2, 5], diff: 0.90,
@@ -569,7 +569,7 @@
     locs: ['cradle', 'nowhere'], baits: ['prism', 'star', 'ember'], time: [], weather: ['aurora'],
     art: { body: 'round', fin: 'frill', eyes: 1, glow: 0.5, c1: '#d8a838', c2: '#5c4210', c3: '#fff0b0', ex: ['crown', 'stars'] } },
 
-  { id: 'tally_fish', name: 'The Tally', rarity: 'legendary', value: 68000, kg: [0.4, 12], m: [0.4, 2.2], diff: 0.88,
+  { id: 'tally_fish', name: "Tallyback Grouper", rarity: 'legendary', value: 68000, kg: [0.4, 12], m: [0.4, 2.2], diff: 0.88,
     desc: 'Four marks and a fifth struck across them. Every time you catch it, there is one more.',
     locs: ['nowhere', 'beneath'], baits: ['null', 'void'], time: [], weather: [],
     art: { body: 'tally', fin: 'none', eyes: 0, glow: 0.4, c1: '#d8d0c0', c2: '#3a352c', c3: '#ffffff', ex: ['runes'] } },
@@ -579,9 +579,9 @@
     locs: ['nowhere', 'beneath'], baits: ['void', 'deep', 'null'], time: ['night'], weather: ['fog', 'storm'],
     art: { body: 'jelly', fin: 'veil', eyes: 2, glow: 0.55, c1: '#4a5a6a', c2: '#161e28', c3: '#dfeaf4', ex: ['threads', 'chains', 'halo'] } },
 
-  { id: 'folded_letter', name: 'A Letter, Folded Twice', rarity: 'legendary', value: 63000, kg: [0.01, 0.2], m: [0.1, 0.4], diff: 0.72,
+  { id: 'folded_letter', name: "Letterfold Sole", rarity: 'legendary', value: 63000, kg: [0.01, 0.2], m: [0.1, 0.4], diff: 0.72,
     desc: 'Addressed to you. The ink has run, which is fortunate, because you were not going to like it.',
-    locs: ['cradle', 'nowhere', 'beneath'], baits: ['null'], time: [], weather: ['rain'],
+    locs: ['cradle', 'nowhere'], baits: ['null'], time: [], weather: ['rain'],
     art: { body: 'folded', fin: 'none', eyes: 0, glow: 0.35, c1: '#e4dcc8', c2: '#8a8270', c3: '#c8a058', ex: ['runes'] } },
 
   { id: 'mirror_twin', name: 'The Mirror Twin', rarity: 'mythic', value: 194000, kg: [60, 1300], m: [2, 12], diff: 0.95,
@@ -589,7 +589,7 @@
     locs: ['nowhere', 'beneath'], baits: ['void', 'null', 'prism'], time: [], weather: ['eclipse', 'voidsurge'],
     art: { body: 'mirror', fin: 'veil', eyes: 4, glow: 0.6, c1: '#9aa0c8', c2: '#2a2c44', c3: '#ffffff', ex: ['duplicate', 'halo'] } },
 
-  { id: 'sunken_column', name: 'The Standing Stone', rarity: 'mythic', value: 216000, kg: [3000, 62000], m: [12, 60], diff: 0.97,
+  { id: 'sunken_column', name: "Monolith Eel", rarity: 'mythic', value: 216000, kg: [3000, 62000], m: [12, 60], diff: 0.97,
     desc: 'Vertical. Motionless. It came up when you pulled, which is the part that is difficult to accept.',
     locs: ['beneath', 'nowhere'], baits: ['null', 'void', 'deep'], time: [], weather: ['voidsurge', 'eclipse'],
     art: { body: 'column', fin: 'none', eyes: 6, glow: 0.42, c1: '#5a5468', c2: '#181624', c3: '#c8b0ff', ex: ['runes', 'eyes_many', 'chains'] } },
@@ -600,22 +600,22 @@
     art: { body: 'spiral', fin: 'none', eyes: 1, glow: 0.85, c1: '#c8a8ff', c2: '#241848', c3: '#fff0ff', ex: ['halo', 'rings', 'stars'] } },
 
   /* ---- void ---- */
-  { id: 'the_absence', name: 'The Absence', rarity: 'void', value: 2450000, kg: [0, 0], m: [1, 9], diff: 0.98,
+  { id: 'the_absence', name: "Nullfish", rarity: 'void', value: 2450000, kg: [0, 0], m: [1, 9], diff: 0.98,
     desc: 'Exactly the shape of a fish, and weighing exactly nothing. The line still went tight.',
     locs: ['beneath', 'nowhere'], baits: ['null', 'void'], time: [], weather: ['voidsurge', 'eclipse'],
     art: { body: 'hole', fin: 'none', eyes: 0, glow: 0.9, c1: '#000000', c2: '#000000', c3: '#b48aff', ex: ['halo'] } },
 
-  { id: 'the_census', name: 'The Census', rarity: 'void', value: 1880000, kg: [40, 900], m: [2, 14], diff: 0.97,
+  { id: 'the_census', name: "Countless Shoal", rarity: 'void', value: 1880000, kg: [40, 900], m: [2, 14], diff: 0.97,
     desc: 'It has been counting. It is not counting fish. It knows how many of you there have been.',
     locs: ['beneath'], baits: ['null', 'void'], time: [], weather: ['voidsurge'],
     art: { body: 'swarm', fin: 'none', eyes: 8, glow: 0.5, c1: '#3a3448', c2: '#0c0a14', c3: '#ffe0a0', ex: ['eyes_many', 'barcode', 'runes'] } },
 
-  { id: 'the_understudy', name: 'The Understudy', rarity: 'void', value: 2150000, kg: [55, 96], m: [1.5, 2.0], diff: 0.98,
+  { id: 'the_understudy', name: "Halfmade Perch", rarity: 'void', value: 2150000, kg: [55, 96], m: [1.5, 2.0], diff: 0.98,
     desc: 'It has been practising being you. It has the rod right. It has the sitting right. Give it time.',
     locs: ['beneath', 'nowhere'], baits: ['void', 'null'], time: ['night'], weather: ['eclipse', 'voidsurge'],
     art: { body: 'unfinished', fin: 'none', eyes: 2, glow: 0.45, c1: '#4a4450', c2: '#101018', c3: '#ffd8b0', ex: ['mask', 'duplicate', 'threads'] } },
 
-  { id: 'the_long_now', name: 'The Long Now', rarity: 'void', value: 2600000, kg: [800, 24000], m: [20, 110], diff: 0.99,
+  { id: 'the_long_now', name: "Aeonic Serpent", rarity: 'void', value: 2600000, kg: [800, 24000], m: [20, 110], diff: 0.99,
     desc: 'Reeling it in takes as long as it takes. You will not be able to say afterwards how long that was.',
     locs: ['beneath'], baits: ['null'], time: [], weather: ['voidsurge', 'eclipse'],
     art: { body: 'serpent', fin: 'veil', eyes: 3, glow: 0.7, c1: '#1a1830', c2: '#000000', c3: '#8fd0ff', ex: ['rings', 'threads', 'countdown'] } },
@@ -649,19 +649,19 @@
     art: { body: 'object', object: 'counter', glitch: 1.3, glow: 1,
            c1: '#d8d4c8', c2: '#0a0a10', c3: '#ff2d55' } },
 
-  { id: 'g_gardener', name: 'THE ONE THAT PLANTED IT', rarity: 'glitch', value: 120000000, kg: [400, 88000], m: [8, 180], diff: 0.99,
+  { id: 'g_gardener', name: "THE SEEDBEARER", rarity: 'glitch', value: 120000000, kg: [400, 88000], m: [8, 180], diff: 0.99,
     desc: 'The water was put here. The fish were put here. You were put here. It has come to check on the arrangement.',
     locs: [], baits: ['null', 'void'], time: ['night'], weather: ['voidsurge', 'eclipse'],
     art: { body: 'column', fin: 'none', eyes: 12, glow: 1, c1: '#1a2418', c2: '#000000', c3: '#a8ff8a', ex: ['roots', 'eyes_many', 'crown', 'chains'] } },
 
-  { id: 'g_trench', name: 'THE TRENCH ITSELF', rarity: 'glitch', value: 168000000, kg: [900000, 40000000], m: [400, 9000], diff: 0.99,
+  { id: 'g_trench', name: "THE TRENCH WYRM", rarity: 'glitch', value: 168000000, kg: [900000, 40000000], m: [400, 9000], diff: 0.99,
     desc: 'You have not been fishing above it. The charts call it a trench because the word for a mouth ' +
           'that size would have to be invented, and nobody who could invent it came back up.',
     locs: [], baits: ['null', 'void'], time: [], weather: ['voidsurge', 'eclipse'],
     art: { body: 'column', fin: 'none', eyes: 8, glow: 0.9, c1: '#0e1a22', c2: '#000000', c3: '#5fe0ff',
            ex: ['teeth', 'eyes_many', 'roots', 'chains', 'fracture'] } },
 
-  { id: 'g_secondmoon', name: 'A SECOND MOON, LOWERING', rarity: 'glitch', value: 210000000, kg: [4000000, 90000000], m: [1200, 26000], diff: 0.99,
+  { id: 'g_secondmoon', name: "THE LOWERING MOONFISH", rarity: 'glitch', value: 210000000, kg: [4000000, 90000000], m: [1200, 26000], diff: 0.99,
     desc: 'It is not rising and it is not falling. It is being let down, slowly, on something, ' +
           'and the something has just gone tight in your hands.',
     locs: [], baits: ['null'], time: ['night'], weather: ['eclipse', 'clear'],
@@ -682,7 +682,7 @@
     art: { body: 'fractal', fin: 'none', eyes: 3, glow: 1, c1: '#100818', c2: '#000000', c3: '#c8a0ff',
            ex: ['static', 'duplicate', 'fracture', 'threads'] } },
 
-  { id: 'g_firstwater', name: 'THE FIRST WATER, AND WHAT WAS IN IT', rarity: 'glitch', value: 320000000, kg: [1000000, 60000000], m: [500, 14000], diff: 0.99,
+  { id: 'g_firstwater', name: "THE FIRSTWATER LEVIATHAN", rarity: 'glitch', value: 320000000, kg: [1000000, 60000000], m: [500, 14000], diff: 0.99,
     desc: 'Before there was a shore there was water, and it was not empty when it arrived. ' +
           'This is the passenger. It has been waiting for somebody to build a rod that could hold it.',
     locs: [], baits: ['null'], time: [], weather: ['voidsurge', 'eclipse'],
@@ -707,7 +707,7 @@
 
   { id: 'mud_gudgeon', name: 'Mud Gudgeon', rarity: 'common', value: 18, kg: [0.2, 2.2], m: [0.1, 0.34], diff: 0.13,
     desc: 'Comes up the colour of the bottom and stays that colour in the bucket.',
-    locs: ['shore', 'flats'], baits: ['worm', 'deep'], time: [], weather: ['rain'],
+    locs: ['shore'], baits: ['worm', 'deep'], time: [], weather: ['rain'],
     art: { body: 'round', fin: 'normal', eyes: 1, glow: 0, c1: '#6f6047', c2: '#413729', c3: '#b8a582', ex: ['antenna'] } },
 
   { id: 'paper_ray', name: 'Paper Ray', rarity: 'common', value: 28, kg: [0.1, 1.6], m: [0.14, 0.46], diff: 0.15,
@@ -722,7 +722,7 @@
 
   { id: 'coin_minnow', name: 'Coin Minnow', rarity: 'common', value: 32, kg: [0.02, 0.35], m: [0.04, 0.14], diff: 0.06,
     desc: 'Perfectly round and worth exactly nothing, which is a hard combination to forgive.',
-    locs: ['shore', 'basin', 'flats'], baits: ['minnow', 'prism'], time: [], weather: ['clear'],
+    locs: ['shore', 'basin'], baits: ['minnow', 'prism'], time: [], weather: ['clear'],
     art: { body: 'orb', fin: 'normal', eyes: 1, glow: 0.15, c1: '#d8c47c', c2: '#8a7638', c3: '#fff2c0', ex: [] } },
 
   { id: 'ribbon_smelt', name: 'Ribbon Smelt', rarity: 'common', value: 23, kg: [0.04, 0.7], m: [0.1, 0.4], diff: 0.10,
@@ -732,17 +732,17 @@
 
   { id: 'knot_loach', name: 'Knot Loach', rarity: 'common', value: 27, kg: [0.1, 1.5], m: [0.12, 0.42], diff: 0.19,
     desc: 'Ties itself up when frightened and takes an embarrassing amount of time to get free.',
-    locs: ['shore', 'flats'], baits: ['worm', 'deep'], time: ['night'], weather: [],
+    locs: ['shore'], baits: ['worm', 'deep'], time: ['night'], weather: [],
     art: { body: 'eel', fin: 'none', eyes: 1, glow: 0, c1: '#7a6a58', c2: '#453b30', c3: '#c0ab8e', ex: ['antenna'] } },
 
   { id: 'chip_crab', name: 'Chipped Crab', rarity: 'common', value: 25, kg: [0.08, 0.9], m: [0.06, 0.2], diff: 0.16,
     desc: 'Missing one claw and holding the remaining one out as though that settles it.',
-    locs: ['shore', 'flats'], baits: ['worm', 'cluster'], time: [], weather: [],
+    locs: ['shore'], baits: ['worm', 'cluster'], time: [], weather: [],
     art: { body: 'crustacean', fin: 'legs', eyes: 2, glow: 0, c1: '#8a7a6a', c2: '#4c4136', c3: '#d8c4ac', ex: ['fracture'] } },
 
   { id: 'lamp_fry', name: 'Lampfry', rarity: 'common', value: 30, kg: [0.02, 0.4], m: [0.04, 0.15], diff: 0.08,
     desc: 'A pinhead of light with a fish attached as an afterthought.',
-    locs: ['basin', 'trench'], baits: ['glowworm'], time: ['night'], weather: ['fog'],
+    locs: ['basin'], baits: ['glowworm'], time: ['night'], weather: ['fog'],
     art: { body: 'torpedo', fin: 'veil', eyes: 2, glow: 0.55, c1: '#4e6a76', c2: '#26383f', c3: '#ffe8a8', ex: ['lantern'] } },
 
   /* ---- uncommon ---- */
@@ -758,12 +758,12 @@
 
   { id: 'salt_jelly', name: 'Saltbell Jelly', rarity: 'uncommon', value: 122, kg: [0.4, 5.0], m: [0.2, 0.9], diff: 0.24,
     desc: 'Rings once when it comes out of the water and then does not do it again.',
-    locs: ['basin', 'flats', 'trench'], baits: ['prism', 'glowworm'], time: [], weather: ['fog', 'overcast'],
+    locs: ['basin', 'flats'], baits: ['prism', 'glowworm'], time: [], weather: ['fog', 'overcast'],
     art: { body: 'jelly', fin: 'veil', eyes: 0, glow: 0.45, c1: '#a8c0d8', c2: '#4f6178', c3: '#eaf6ff', ex: ['threads', 'bubbles'] } },
 
   { id: 'char_eel', name: 'Charred Eel', rarity: 'uncommon', value: 138, kg: [0.6, 7.2], m: [0.5, 1.9], diff: 0.36,
     desc: 'Black the whole way through. It has been burnt and it has not been near a fire.',
-    locs: ['trench', 'basin'], baits: ['ember', 'deep'], time: ['night'], weather: ['storm'],
+    locs: ['trench'], baits: ['ember', 'deep'], time: ['night'], weather: ['storm'],
     art: { body: 'eel', fin: 'frill', eyes: 1, glow: 0.22, c1: '#3a2f2a', c2: '#161210', c3: '#ff9a52', ex: ['spine'] } },
 
   { id: 'twinned_perch', name: 'Twinned Perch', rarity: 'uncommon', value: 160, kg: [0.5, 5.5], m: [0.2, 0.7], diff: 0.30,
@@ -773,7 +773,7 @@
 
   { id: 'thorn_bream', name: 'Thornback Bream', rarity: 'uncommon', value: 116, kg: [0.8, 8.4], m: [0.24, 0.8], diff: 0.38,
     desc: 'Handle it once and you will remember which way up it goes for the rest of your life.',
-    locs: ['basin', 'trench'], baits: ['worm', 'deep'], time: [], weather: [],
+    locs: ['basin'], baits: ['worm', 'deep'], time: [], weather: [],
     art: { body: 'round', fin: 'spiky', eyes: 1, glow: 0, c1: '#6a6a56', c2: '#383a2c', c3: '#c8c8a0', ex: ['spine', 'horns'] } },
 
   { id: 'ink_sole', name: 'Ink Sole', rarity: 'uncommon', value: 126, kg: [0.4, 4.8], m: [0.2, 0.7], diff: 0.26,
@@ -793,7 +793,7 @@
 
   { id: 'dust_carp', name: 'Dustfall Carp', rarity: 'uncommon', value: 134, kg: [1.5, 14], m: [0.4, 1.3], diff: 0.34,
     desc: 'Feeds on whatever comes down from above. There is nothing above.',
-    locs: ['basin', 'trench'], baits: ['worm', 'cluster', 'deep'], time: [], weather: ['meteor', 'overcast'],
+    locs: ['basin'], baits: ['worm', 'cluster', 'deep'], time: [], weather: ['meteor', 'overcast'],
     art: { body: 'round', fin: 'normal', eyes: 1, glow: 0.10, c1: '#8a8274', c2: '#463f36', c3: '#ded0b4', ex: ['stars'] } },
 
   /* ---- rare ---- */
@@ -819,7 +819,7 @@
 
   { id: 'hollow_carp', name: 'Hollow Carp', rarity: 'rare', value: 640, kg: [3, 40], m: [0.7, 2.4], diff: 0.50,
     desc: 'Weighs a third of what it should. Nobody has been willing to open one to find out why.',
-    locs: ['trench', 'abyss', 'cradle'], baits: ['worm', 'deep', 'null'], time: [], weather: [],
+    locs: ['trench', 'abyss'], baits: ['worm', 'deep', 'null'], time: [], weather: [],
     art: { body: 'round', fin: 'frill', eyes: 1, glow: 0.2, c1: '#8090a0', c2: '#3a4450', c3: '#d8e8f0', ex: ['bubbles'] } },
 
   { id: 'crown_jelly', name: 'Crowned Jelly', rarity: 'rare', value: 810, kg: [1.5, 22], m: [0.4, 1.6], diff: 0.44,
@@ -839,7 +839,7 @@
 
   { id: 'tide_crab', name: 'Tideturn Crab', rarity: 'rare', value: 620, kg: [1, 18], m: [0.3, 1.2], diff: 0.52,
     desc: 'Walks the way the water is about to go, which is how the old hands read the weather.',
-    locs: ['trench', 'flats', 'abyss'], baits: ['cluster', 'deep'], time: [], weather: ['storm', 'rain'],
+    locs: ['trench', 'flats'], baits: ['cluster', 'deep'], time: [], weather: ['storm', 'rain'],
     art: { body: 'crustacean', fin: 'legs', eyes: 4, glow: 0.18, c1: '#3f6a7a', c2: '#1a3038', c3: '#8fe0f0', ex: ['eyes_extra', 'crystals'] } },
 
   { id: 'still_marlin', name: 'The Still Marlin', rarity: 'rare', value: 880, kg: [12, 130], m: [1.6, 4.4], diff: 0.60,
@@ -863,7 +863,7 @@
     locs: ['nowhere', 'cradle'], baits: ['null', 'deep'], time: ['night'], weather: ['fog'],
     art: { body: 'ray', fin: 'wing', eyes: 0, glow: 0.4, c1: '#5a6070', c2: '#20242e', c3: '#c0c8e0', ex: ['halo', 'threads'] } },
 
-  { id: 'thousand_smelt', name: 'The Thousand', rarity: 'epic', value: 4900, kg: [8, 140], m: [1, 5], diff: 0.68,
+  { id: 'thousand_smelt', name: "Thousand Smelt", rarity: 'epic', value: 4900, kg: [8, 140], m: [1, 5], diff: 0.68,
     desc: 'One catch. One entry in the record. Count them and the number is different each time.',
     locs: ['cradle', 'nowhere'], baits: ['minnow', 'cluster', 'void'], time: [], weather: [],
     art: { body: 'swarm', fin: 'spiky', eyes: 6, glow: 0.5, c1: '#8ab0c8', c2: '#2c3c4c', c3: '#e8f8ff', ex: ['eyes_many', 'duplicate'] } },
@@ -873,7 +873,7 @@
     locs: ['cradle', 'nowhere'], baits: ['prism', 'star', 'cluster'], time: [], weather: ['aurora'],
     art: { body: 'crustacean', fin: 'legs', eyes: 4, glow: 0.55, c1: '#d8ac48', c2: '#5c4414', c3: '#fff0b8', ex: ['crown', 'crystals', 'eyes_extra'] } },
 
-  { id: 'kept_promise', name: 'A Kept Promise', rarity: 'epic', value: 4400, kg: [0.2, 6], m: [0.3, 2.4], diff: 0.62,
+  { id: 'kept_promise', name: "Foldwing Skate", rarity: 'epic', value: 4400, kg: [0.2, 6], m: [0.3, 2.4], diff: 0.62,
     desc: 'Small, warm, and entirely intact. It is the only one anybody has landed.',
     locs: ['cradle', 'nowhere'], baits: ['null', 'prism'], time: ['dawn'], weather: ['clear', 'aurora'],
     art: { body: 'folded', fin: 'none', eyes: 0, glow: 0.7, c1: '#f0e4c8', c2: '#8a7a58', c3: '#ffd8a0', ex: ['halo', 'runes'] } },
@@ -889,13 +889,13 @@
     art: { body: 'round', fin: 'frill', eyes: 2, glow: 0.36, c1: '#9a8ab0', c2: '#3c3250', c3: '#f0e0ff', ex: ['duplicate', 'wrongscale'] } },
 
   /* ---- legendary ---- */
-  { id: 'deep_hold', name: 'The Deep Hold', rarity: 'legendary', value: 92000, kg: [400, 8600], m: [5, 26], diff: 0.94,
+  { id: 'deep_hold', name: "Deephold Grouper", rarity: 'legendary', value: 92000, kg: [400, 8600], m: [5, 26], diff: 0.94,
     desc: 'Nine arms and no body worth speaking of. It took hold of the rod before it took hold of the bait, ' +
           'and it let go of the rod last.',
-    locs: ['abyss', 'cradle', 'nowhere'], baits: ['deep', 'void', 'cluster'], time: ['night'], weather: ['storm', 'fog'],
+    locs: ['abyss', 'cradle'], baits: ['deep', 'void', 'cluster'], time: ['night'], weather: ['storm', 'fog'],
     art: { body: 'blob', fin: 'none', eyes: 2, glow: 0.45, c1: '#8e2f34', c2: '#3c1216', c3: '#ff8a7a', ex: ['tentacles', 'eyes_extra', 'teeth'] } },
 
-  { id: 'longest_night', name: 'The Longest Night', rarity: 'legendary', value: 78000, kg: [30, 720], m: [2.4, 12], diff: 0.92,
+  { id: 'longest_night', name: "Midnight Serpent", rarity: 'legendary', value: 78000, kg: [30, 720], m: [2.4, 12], diff: 0.92,
     desc: 'It is dark around it in a way that is not shadow — the light arrives and then declines to continue.',
     locs: ['nowhere', 'beneath'], baits: ['void', 'null'], time: ['night'], weather: ['eclipse'],
     art: { body: 'serpent', fin: 'veil', eyes: 3, glow: 0.5, c1: '#1e1a30', c2: '#050410', c3: '#8a7ad8', ex: ['stars', 'threads', 'halo'] } },
@@ -905,89 +905,89 @@
     locs: ['nowhere', 'cradle'], baits: ['glowworm', 'star', 'prism'], time: ['night'], weather: ['fog', 'clear'],
     art: { body: 'whale', fin: 'long', eyes: 1, glow: 0.95, c1: '#4a5a68', c2: '#1a242c', c3: '#ffd88a', ex: ['lantern', 'stars', 'halo'] } },
 
-  { id: 'bell_of_hours', name: 'The Bell Of Hours', rarity: 'legendary', value: 96000, kg: [600, 14000], m: [4, 20], diff: 0.95,
+  { id: 'bell_of_hours', name: "Hourbell Jelly", rarity: 'legendary', value: 96000, kg: [600, 14000], m: [4, 20], diff: 0.95,
     desc: 'It rings on the hour. There are no hours down here, and it rings anyway, and it is never wrong.',
     locs: ['beneath', 'nowhere'], baits: ['null', 'void', 'star'], time: [], weather: ['eclipse', 'voidsurge'],
     art: { body: 'jelly', fin: 'none', eyes: 0, glow: 0.85, c1: '#c8b878', c2: '#4a4022', c3: '#fff4c0', ex: ['rings', 'halo', 'countdown'] } },
 
-  { id: 'long_hand', name: 'The Long Hand', rarity: 'legendary', value: 72000, kg: [8, 220], m: [2, 11], diff: 0.90,
+  { id: 'long_hand', name: "Longhand Lurker", rarity: 'legendary', value: 72000, kg: [8, 220], m: [2, 11], diff: 0.90,
     desc: 'Reaching. It has been reaching for the entire time you have been fishing, and it is closer now.',
     locs: ['beneath', 'nowhere'], baits: ['void', 'null', 'deep'], time: ['night'], weather: ['voidsurge', 'fog'],
     art: { body: 'anomaly', fin: 'none', eyes: 0, glow: 0.4, c1: '#4a4048', c2: '#141018', c3: '#e0c8b0', ex: ['tentacles', 'threads', 'chains'] } },
 
-  { id: 'unlit_lantern', name: 'The Unlit Lantern', rarity: 'legendary', value: 69000, kg: [1, 26], m: [0.3, 1.4], diff: 0.84,
+  { id: 'unlit_lantern', name: "Unlit Anglerfish", rarity: 'legendary', value: 69000, kg: [1, 26], m: [0.3, 1.4], diff: 0.84,
     desc: 'It is the only dark thing in the trench, and everything else down there is arranged around it.',
-    locs: ['abyss', 'cradle', 'beneath'], baits: ['null', 'deep'], time: [], weather: ['eclipse', 'fog'],
+    locs: ['abyss', 'cradle'], baits: ['null', 'deep'], time: [], weather: ['eclipse', 'fog'],
     art: { body: 'orb', fin: 'none', eyes: 0, glow: 0.3, c1: '#22242c', c2: '#08090c', c3: '#6a7a96', ex: ['chains', 'rings'] } },
 
-  { id: 'weight_of_it', name: 'The Weight Of It', rarity: 'legendary', value: 102000, kg: [4000, 96000], m: [1, 3], diff: 0.97,
+  { id: 'weight_of_it', name: "Deadweight Toadfish", rarity: 'legendary', value: 102000, kg: [4000, 96000], m: [1, 3], diff: 0.97,
     desc: 'Two metres of fish and the scale gives a number with five figures in it. Both readings have been checked.',
     locs: ['beneath'], baits: ['deep', 'void', 'null'], time: [], weather: ['voidsurge'],
     art: { body: 'blob', fin: 'none', eyes: 4, glow: 0.5, c1: '#3a3a48', c2: '#0e0e16', c3: '#b0a8d8', ex: ['wrongscale', 'eyes_extra', 'chains'] } },
 
   /* ---- mythic ---- */
-  { id: 'the_argument', name: 'The Argument', rarity: 'mythic', value: 205000, kg: [40, 900], m: [2, 11], diff: 0.95,
+  { id: 'the_argument', name: "Split Mirrorfish", rarity: 'mythic', value: 205000, kg: [40, 900], m: [2, 11], diff: 0.95,
     desc: 'Two of it, joined at the tail, going opposite ways with total conviction. Neither has won.',
     locs: ['nowhere', 'beneath'], baits: ['void', 'null', 'prism'], time: [], weather: ['voidsurge', 'eclipse'],
     art: { body: 'mirror', fin: 'spiky', eyes: 4, glow: 0.62, c1: '#b06bff', c2: '#2a1848', c3: '#ffe0ff', ex: ['duplicate', 'teeth', 'fracture'] } },
 
-  { id: 'the_inheritance', name: 'The Inheritance', rarity: 'mythic', value: 228000, kg: [200, 4200], m: [3, 18], diff: 0.96,
+  { id: 'the_inheritance', name: "Heirloom Koi", rarity: 'mythic', value: 228000, kg: [200, 4200], m: [3, 18], diff: 0.96,
     desc: 'Every scale has a name on it and the last one has yours. There is room after it.',
     locs: ['beneath'], baits: ['null', 'void'], time: [], weather: ['voidsurge', 'eclipse'],
     art: { body: 'round', fin: 'frill', eyes: 1, glow: 0.7, c1: '#d0b878', c2: '#4a3c1c', c3: '#fff4c8', ex: ['runes', 'barcode', 'crown'] } },
 
-  { id: 'the_low_note', name: 'The Low Note', rarity: 'mythic', value: 212000, kg: [900, 26000], m: [8, 44], diff: 0.97,
+  { id: 'the_low_note', name: "Lownote Whalefish", rarity: 'mythic', value: 212000, kg: [900, 26000], m: [8, 44], diff: 0.97,
     desc: 'You feel it in the rod before you hear it, and you hear it for some time after you have let go.',
     locs: ['beneath', 'nowhere'], baits: ['deep', 'void', 'null'], time: ['night'], weather: ['voidsurge', 'storm'],
     art: { body: 'whale', fin: 'long', eyes: 2, glow: 0.55, c1: '#2c3a56', c2: '#0a0e1c', c3: '#8fd8ff', ex: ['rings', 'halo', 'threads'] } },
 
-  { id: 'the_shed_skin', name: 'The Shed Skin', rarity: 'mythic', value: 186000, kg: [2, 60], m: [4, 30], diff: 0.94,
+  { id: 'the_shed_skin', name: "Moulted Serpent", rarity: 'mythic', value: 186000, kg: [2, 60], m: [4, 30], diff: 0.94,
     desc: 'The whole shape of it, hollow, and perfect, and recently vacated. Whatever left is still down there and is now larger.',
     locs: ['beneath', 'nowhere'], baits: ['void', 'null', 'deep'], time: [], weather: ['fog', 'voidsurge'],
     art: { body: 'unfinished', fin: 'veil', eyes: 0, glow: 0.6, c1: '#c8c0b0', c2: '#4a4438', c3: '#ffffff', ex: ['fracture', 'threads'] } },
 
-  { id: 'the_open_hand', name: 'The Open Hand', rarity: 'mythic', value: 244000, kg: [140, 3200], m: [3, 16], diff: 0.96,
+  { id: 'the_open_hand', name: "Great Handfish", rarity: 'mythic', value: 244000, kg: [140, 3200], m: [3, 16], diff: 0.96,
     desc: 'Offering. It has been offering for as long as there has been water, and nobody has ever taken it.',
     locs: ['beneath'], baits: ['null', 'void'], time: [], weather: ['eclipse', 'aurora'],
     art: { body: 'anomaly', fin: 'none', eyes: 0, glow: 0.9, c1: '#e8d0b8', c2: '#4a3a2c', c3: '#fff0d8', ex: ['halo', 'tentacles', 'rings'] } },
 
-  { id: 'the_first_dark', name: 'The First Dark', rarity: 'mythic', value: 262000, kg: [1200, 38000], m: [10, 60], diff: 0.98,
+  { id: 'the_first_dark', name: "Firstdark Serpent", rarity: 'mythic', value: 262000, kg: [1200, 38000], m: [10, 60], diff: 0.98,
     desc: 'Older than the water and considerably older than the light. It came up because it wanted to see the rod.',
     locs: ['beneath'], baits: ['void', 'null'], time: ['night'], weather: ['eclipse', 'voidsurge'],
     art: { body: 'serpent', fin: 'veil', eyes: 6, glow: 0.75, c1: '#160f26', c2: '#000000', c3: '#a88aff', ex: ['eyes_many', 'stars', 'rings'] } },
 
-  { id: 'the_kindness', name: 'The Kindness', rarity: 'mythic', value: 198000, kg: [0.5, 18], m: [0.4, 3], diff: 0.93,
+  { id: 'the_kindness', name: "Mercy Jelly", rarity: 'mythic', value: 198000, kg: [0.5, 18], m: [0.4, 3], diff: 0.93,
     desc: 'It let you catch it. You will spend a while working out how you know that, and you will be right.',
     locs: ['nowhere', 'beneath'], baits: ['null', 'prism', 'star'], time: ['dawn'], weather: ['aurora', 'clear'],
     art: { body: 'jelly', fin: 'veil', eyes: 1, glow: 0.95, c1: '#ffd8e8', c2: '#8a5a78', c3: '#ffffff', ex: ['halo', 'threads', 'stars'] } },
 
   /* ---- void ---- */
-  { id: 'the_remainder', name: 'The Remainder', rarity: 'void', value: 2280000, kg: [0.001, 0.4], m: [0.02, 1], diff: 0.97,
+  { id: 'the_remainder', name: "Remnant Perch", rarity: 'void', value: 2280000, kg: [0.001, 0.4], m: [0.02, 1], diff: 0.97,
     desc: 'Whatever was left over when everything else was made. It has been in the water since, quietly, not being anything.',
     locs: ['beneath', 'nowhere'], baits: ['null', 'void'], time: [], weather: ['voidsurge'],
     art: { body: 'unfinished', fin: 'none', eyes: 0, glow: 0.8, c1: '#7a7488', c2: '#1c1a26', c3: '#dcd0ff', ex: ['fracture', 'static'] } },
 
-  { id: 'the_witness', name: 'The Witness', rarity: 'void', value: 2720000, kg: [60, 1400], m: [2, 15], diff: 0.98,
+  { id: 'the_witness', name: "Sentinel Eel", rarity: 'void', value: 2720000, kg: [60, 1400], m: [2, 15], diff: 0.98,
     desc: 'It was there for all of it. Every cast, every one you lost, the one you did not report. It has no opinion.',
     locs: ['beneath'], baits: ['void', 'null'], time: [], weather: ['eclipse', 'voidsurge'],
     art: { body: 'column', fin: 'none', eyes: 9, glow: 0.62, c1: '#3c3850', c2: '#0a0912', c3: '#ffe8b0', ex: ['eyes_many', 'runes', 'halo'] } },
 
-  { id: 'the_second_water', name: 'The Second Water', rarity: 'void', value: 2960000, kg: [0, 0.0001], m: [3, 40], diff: 0.99,
+  { id: 'the_second_water', name: "Twinstream Oarfish", rarity: 'void', value: 2960000, kg: [0, 0.0001], m: [3, 40], diff: 0.99,
     desc: 'A length of water, on the line, wet, and not connected to the water it came out of.',
     locs: ['beneath'], baits: ['null'], time: [], weather: ['voidsurge', 'eclipse'],
     art: { body: 'ribbon', fin: 'veil', eyes: 0, glow: 0.9, c1: '#5a8ab0', c2: '#12283c', c3: '#d8f4ff', ex: ['bubbles', 'threads', 'halo'] } },
 
-  { id: 'the_returned', name: 'The Returned', rarity: 'void', value: 2540000, kg: [0.2, 90], m: [0.1, 6], diff: 0.98,
+  { id: 'the_returned', name: "Revenant Shoal", rarity: 'void', value: 2540000, kg: [0.2, 90], m: [0.1, 6], diff: 0.98,
     desc: 'Every fish you have ever released, in one shape, and it has come back to see how you are getting on.',
     locs: ['beneath', 'nowhere'], baits: ['void', 'null'], time: [], weather: ['voidsurge'],
     art: { body: 'swarm', fin: 'frill', eyes: 7, glow: 0.7, c1: '#6a8a9a', c2: '#1c2c34', c3: '#c8f0ff', ex: ['eyes_many', 'duplicate', 'halo'] } },
 
-  { id: 'the_quiet_part', name: 'The Quiet Part', rarity: 'void', value: 2410000, kg: [4, 260], m: [1, 9], diff: 0.98,
+  { id: 'the_quiet_part', name: "Mutefish", rarity: 'void', value: 2410000, kg: [4, 260], m: [1, 9], diff: 0.98,
     desc: 'The thing everybody has known about the water and nobody has said. It has weight and it has a mouth.',
     locs: ['beneath'], baits: ['null', 'void'], time: ['night'], weather: ['eclipse', 'voidsurge'],
     art: { body: 'hole', fin: 'none', eyes: 1, glow: 0.85, c1: '#000000', c2: '#000000', c3: '#ff9ad8', ex: ['teeth', 'halo'] } },
 
-  { id: 'the_hour_after', name: 'The Hour After', rarity: 'void', value: 2830000, kg: [50, 2200], m: [3, 26], diff: 0.99,
+  { id: 'the_hour_after', name: "Whirlpool Nautilus", rarity: 'void', value: 2830000, kg: [50, 2200], m: [3, 26], diff: 0.99,
     desc: 'Not the last hour. The one that comes after the last one. Reeling it in uses the hour up.',
     locs: ['beneath'], baits: ['null', 'void'], time: [], weather: ['voidsurge', 'eclipse'],
     art: { body: 'spiral', fin: 'none', eyes: 2, glow: 0.95, c1: '#a88aff', c2: '#180e34', c3: '#fff0ff', ex: ['countdown', 'rings', 'stars'] } },
@@ -1104,7 +1104,7 @@
 
   { id: 'moonlit', name: 'Moonlit Fish', rarity: 'rare', value: 2600, kg: [0.8, 14.0], m: [0.3, 1.1], diff: 0.44,
     desc: 'Rises only on nights when the moon has nothing in front of it. Some of them carry a scale that is not theirs.',
-    locs: ['basin', 'flats', 'cradle'], baits: ['prism', 'star', 'minnow'], time: ['night'], weather: ['clear'],
+    locs: ['basin', 'flats'], baits: ['prism', 'star', 'minnow'], time: ['night'], weather: ['clear'],
     art: { body: 'round', fin: 'veil', eyes: 2, glow: 0.72, c1: '#9fb4d8', c2: '#1b2440', c3: '#f2f7ff', ex: ['halo', 'stars'] } },
 
   { id: 'sky_ember', name: 'Sky Ember', rarity: 'uncommon', value: 900, kg: [0.1, 2.2], m: [0.1, 0.4], diff: 0.30, event: 'skyfall', evWeight: 34,
@@ -1138,7 +1138,7 @@
      that is rarer still. */
 
   { id: 'celestial_leviathan', name: 'The Celestial Leviathan', rarity: 'void', value: 3400000, kg: [9000, 120000], m: [40, 180], diff: 0.99,
-    event: 'celestial', evWeight: 2.90, cutscene: 'celestialcatch',
+    event: 'celestial', evWeight: 3.80, cutscene: 'celestialcatch',
     desc: 'The thing the rod was made to catch, still waiting where the rod was dropped. Four hundred years is not a long time to it.',
     locs: [], baits: [], time: [], weather: [],
     art: { body: 'whale', fin: 'wing', eyes: 6, glow: 1, c1: '#f0d79c', c2: '#20180c', c3: '#fffbe8', ex: ['halo', 'rings', 'stars', 'wings', 'runes'] },
@@ -1148,26 +1148,26 @@
            one anybody ever has. this one does not, because it is not */
         { at: 0.00, name: 'The Sky Opens', start: 0.30,
           barW: 0.145, barSpeed: 1.30, fishSpeed: 0.85, fishTurn: 0.45, dart: 0.55,
-          fill: 0.144, drain: 0.352 },
+          fill: 0.148, drain: 0.348 },
         { at: 0.26, name: 'Four Hundred Years',
           barW: 0.125, barSpeed: 1.45, fishSpeed: 0.98, fishTurn: 0.30, dart: 0.70,
-          fill: 0.138, drain: 0.392 },
+          fill: 0.143, drain: 0.388 },
         /* it has met this rod before and it has not forgotten how it moves */
         { at: 0.52, name: 'It Remembers The Rod',
           barW: 0.105, barSpeed: 1.58, fishSpeed: 1.10, fishTurn: 0.22, dart: 0.80,
-          evade: 0.34, fill: 0.142, drain: 0.422 },
+          evade: 0.34, fill: 0.147, drain: 0.418 },
         { at: 0.76, name: 'All Of It',
           barW: 0.090, barSpeed: 1.68, fishSpeed: 1.22, fishTurn: 0.17, dart: 0.86,
-          evade: 0.52, fill: 0.174, drain: 0.452 },
+          evade: 0.52, fill: 0.180, drain: 0.448 },
         /* the last eighth fills fastest, so the end is a sprint and not a wall */
         { at: 0.92, name: 'The Last Length',
           barW: 0.082, barSpeed: 1.74, fishSpeed: 1.30, fishTurn: 0.15, dart: 0.90,
-          evade: 0.58, fill: 0.214, drain: 0.466 }
+          evade: 0.58, fill: 0.221, drain: 0.462 }
       ]
     } },
 
   { id: 'celestial_dragon', name: 'The Celestial Dragon', rarity: 'void', value: 8600000, kg: [26000, 310000], m: [90, 420], diff: 0.99,
-    event: 'celestial', evWeight: 3.70, cutscene: 'celestialcatch',
+    event: 'celestial', evWeight: 4.85, cutscene: 'celestialcatch',
     desc: 'The constellation is not a picture of it and never was. The constellation is where it usually sleeps, ' +
           'and the stars are what it has settled on top of. It is longer than the lake, which is a problem the ' +
           'lake has and not one it has, and it came down the line the entire way without once being hurried.',
@@ -1181,20 +1181,20 @@
            the very last stretch */
         { at: 0.00, name: 'It Uncoils', start: 0.28,
           barW: 0.138, barSpeed: 1.34, fishSpeed: 0.90, fishTurn: 0.42, dart: 0.58,
-          fill: 0.156, drain: 0.331 },
+          fill: 0.152, drain: 0.334 },
         { at: 0.24, name: 'The Long Body',
           barW: 0.118, barSpeed: 1.50, fishSpeed: 1.05, fishTurn: 0.28, dart: 0.74,
-          evade: 0.12, fill: 0.154, drain: 0.365 },
+          evade: 0.12, fill: 0.150, drain: 0.368 },
         { at: 0.50, name: 'Coil',
           barW: 0.098, barSpeed: 1.64, fishSpeed: 1.18, fishTurn: 0.20, dart: 0.84,
-          evade: 0.30, fill: 0.162, drain: 0.400 },
+          evade: 0.30, fill: 0.157, drain: 0.404 },
         /* the phase everybody loses on: it stops running and starts reading */
         { at: 0.74, name: 'It Looks At You',
           barW: 0.084, barSpeed: 1.76, fishSpeed: 1.30, fishTurn: 0.15, dart: 0.90,
-          evade: 0.48, fill: 0.199, drain: 0.431 },
+          evade: 0.48, fill: 0.193, drain: 0.435 },
         { at: 0.91, name: 'The Whole Length Of It',
           barW: 0.076, barSpeed: 1.84, fishSpeed: 1.40, fishTurn: 0.13, dart: 0.94,
-          evade: 0.56, fill: 0.256, drain: 0.446 }
+          evade: 0.56, fill: 0.249, drain: 0.450 }
       ]
     } },
 
@@ -2317,6 +2317,26 @@
     knownCount: function () { return knownList().length; },
     byId: function (id) { return BY_ID[id] || null; },
     byRarity: function (r) { return BY_RARITY[r] || []; },
+    /* The species that belong to a water — its home ones first, then the
+       neighbours that also range into it. What is not here does not live
+       here, whatever may occasionally stray through. */
+    nativeTo: function (locId) {
+      const out = [];
+      for (let i = 0; i < F.length; i++) {
+        const f = F[i];
+        if (f.locs.length && f.locs.indexOf(locId) >= 0) out.push(f);
+      }
+      out.sort(function (a, b) {
+        return (a.locs[0] === locId ? 0 : 1) - (b.locs[0] === locId ? 0 : 1) ||
+               VF.rarities.rank(a.rarity) - VF.rarities.rank(b.rarity);
+      });
+      return out;
+    },
+    /* Species with no water at all: the wrong ones, and the ones an event
+       brings. They are nobody's and they are listed on their own. */
+    unplaced: function () {
+      return F.filter(function (f) { return !f.locs.length; });
+    },
     count: F.length
   };
 })(window.VF = window.VF || {});

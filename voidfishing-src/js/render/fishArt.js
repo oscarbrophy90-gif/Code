@@ -38,11 +38,356 @@
     return BODY_H[kind] === undefined ? 0.30 : BODY_H[kind];
   }
 
+
+  /* ==================== low-poly bodies ====================
+     A fish is a generalised cylinder: a spine, and a cross-section at every
+     point along it. Sampling that as quads and shading each one flat against a
+     light is what makes a model read as a model. One smooth gradient inside a
+     bezier outline — which is what this was — reads as a sticker of a fish.
+
+     `r` is the vertical half-height along the body, sampled evenly from tail
+     tip to snout and read between samples as a straight line. That is the
+     point rather than a shortcut: a lathe built on straight runs has a faceted
+     outline, and the outline is most of what tells you a thing is low-poly.
+     `d` is how deep the fish is against how tall — near 1 for something that
+     is basically a ball, near a third for something you could post. */
+
+  const PROFILE = {
+    torpedo:    { x: [-0.44, 0.52], d: 0.46, nu: 9, r: [0.07, 0.29, 0.57, 0.81, 0.96, 1.00, 0.94, 0.73, 0.26] },
+    round:      { x: [-0.44, 0.52], d: 0.38, r: [0.11, 0.42, 0.75, 0.93, 1.00, 0.98, 0.88, 0.64, 0.22] },
+    orb:        { x: [-0.50, 0.50], d: 0.94, r: [0.04, 0.46, 0.74, 0.91, 1.00, 0.98, 0.87, 0.62, 0.16] },
+    whale:      { x: [-0.48, 0.52], d: 0.66, r: [0.09, 0.33, 0.63, 0.85, 0.96, 1.00, 0.98, 0.88, 0.48] },
+    blob:       { x: [-0.42, 0.46], d: 0.82, r: [0.26, 0.58, 0.83, 0.96, 1.00, 0.96, 0.85, 0.66, 0.30] },
+    shard:      { x: [-0.46, 0.52], d: 0.30, r: [0.05, 0.44, 0.80, 1.00, 0.90, 0.76, 0.58, 0.38, 0.10], nu: 9 },
+    crustacean: { x: [-0.44, 0.48], d: 0.74, r: [0.18, 0.54, 0.83, 0.98, 1.00, 0.92, 0.79, 0.60, 0.24] },
+    anomaly:    { x: [-0.46, 0.50], d: 0.62, r: [0.14, 0.52, 0.72, 0.96, 0.84, 1.00, 0.78, 0.58, 0.20], nu: 11 },
+
+    /* The long ones carry their wave on the spine rather than in the outline,
+       so the cross-section stays round all the way down and the facets go
+       round the body instead of sliding along it. */
+    eel: { x: [-0.50, 0.52], d: 0.86, nu: 20,
+           rf: function (u) { return 0.28 + 0.72 * Math.pow(u, 0.75) - 0.26 * Math.pow(u, 9); },
+           wave: function (u, s) { return Math.sin((1 - u) * Math.PI * 2.1 + s) * 2.6 * (1 - u); } },
+    serpent: { x: [-0.52, 0.52], d: 0.82, nu: 22,
+           rf: function (u) { return 0.26 + 0.74 * Math.pow(u, 0.7) - 0.24 * Math.pow(u, 9); },
+           wave: function (u, s) { return Math.sin((1 - u) * Math.PI * 2.1 + s) * 4.2 * (1 - u); } },
+    ribbon: { x: [-0.50, 0.50], d: 0.24, nu: 18,
+           rf: function (u) { return 0.60 + 0.40 * Math.pow(u, 0.6) - 0.30 * Math.pow(u, 8); },
+           wave: function (u, s) { return Math.sin((1 - u) * 4.2 + s) * 1.9 * (1 - u); } }
+  };
+
+  /* Upper left and a little in front — the same key the scene puts on the
+     angler, so a fish held up on the catch card belongs to the same picture. */
+  const LIGHT = (function () {
+    const x = -0.52, y = -0.34, z = 0.78;
+    const m = Math.hypot(x, y, z);
+    return [x / m, y / m, z / m];
+  })();
+
+  function sampleR(P, u) {
+    if (P.rf) return P.rf(u);
+    const a = P.r, n = a.length - 1;
+    const f = U.clamp(u, 0, 1) * n;
+    const i = Math.min(n - 1, f | 0);
+    return U.lerp(a[i], a[i + 1], f - i);
+  }
+
+  /* One mesh is wanted twice in a row — once for the outline, once for the
+     shading — so the last one is kept rather than built again. */
+  let meshCache = null, meshKey = '';
+
+  function meshFor(kind, L, H, sway, q) {
+    const P = PROFILE[kind];
+    if (!P) return null;
+    const key = kind + '|' + L.toFixed(2) + '|' + H.toFixed(2) + '|' + sway.toFixed(3) + '|' + q;
+    if (meshKey === key) return meshCache;
+
+    const NU = Math.max(4, Math.round((P.nu || 9) * q));
+    const NV = Math.max(3, Math.round(5 * q));     // steps across the front half
+    const stride = NV + 1;
+    const v = new Float64Array((NU + 1) * stride * 3);
+    for (let iu = 0; iu <= NU; iu++) {
+      const u = iu / NU;
+      const x = U.lerp(P.x[0], P.x[1], u) * L;
+      const rr = sampleR(P, u) * H;
+      const dd = rr * P.d;
+      const sy = P.wave ? P.wave(u, sway) * H : 0;
+      for (let iv = 0; iv <= NV; iv++) {
+        // v runs 0 (belly edge) to PI (back edge); the half nearer the viewer
+        const a = (iv / NV) * Math.PI;
+        const o = (iu * stride + iv) * 3;
+        v[o] = x;
+        v[o + 1] = sy + Math.cos(a) * rr;
+        v[o + 2] = Math.sin(a) * dd;
+      }
+    }
+    meshKey = key;
+    meshCache = { v: v, NU: NU, NV: NV, stride: stride, H: H };
+    return meshCache;
+  }
+
+  /* ---------------------------------------------------------- bent lathes
+     The same idea as above, run along a curve instead of along a straight
+     line. `spine` is a list of { x, y, r } — where the axis is at that point
+     and how thick the body is there — and the cross-section is swept around
+     the spine's own normal, so the facets go round a bent body the way they go
+     round a straight one.
+
+     This is what a neck needs. The alternative, and what was here, is an
+     ellipse for the neck and another for the body and a seam everywhere they
+     meet: at any alpha below 1 every overlap shows, and the animal reads as a
+     pile of ovals rather than as one thing. A tube along a curve has no seams
+     because there is only ever one surface. */
+  function splineAt(pts, u, k) {
+    const n = pts.length - 1;
+    const f = U.clamp(u, 0, 1) * n;
+    const i = Math.min(n - 1, f | 0);
+    const t = f - i;
+    const p0 = pts[Math.max(0, i - 1)], p1 = pts[i];
+    const p2 = pts[i + 1], p3 = pts[Math.min(n, i + 2)];
+    const t2 = t * t, t3 = t2 * t;
+    // Catmull-Rom, so a spine can be placed by hand as a handful of joints
+    return 0.5 * (2 * p1[k] +
+                  (-p0[k] + p2[k]) * t +
+                  (2 * p0[k] - 5 * p1[k] + 4 * p2[k] - p3[k]) * t2 +
+                  (-p0[k] + 3 * p1[k] - 3 * p2[k] + p3[k]) * t3);
+  }
+
+  /* Control points are written in body units; sx and sy scale them into pixels
+     and r is scaled by sy so a body does not change thickness when the box
+     does. */
+  function spineFrom(pts, steps, sx, sy) {
+    /* Sampled by how much the body is doing rather than by u. Spread evenly, a
+       long smooth neck eats most of the facets and the head — which is where
+       all the shape is — gets two, so it comes out as a stub. Cost counts
+       distance travelled and thickness changed, so the facets land where the
+       animal changes and the straight runs get one long plane each, which is
+       what a low-poly body is supposed to look like anyway. */
+    const N = 160;
+    const px = new Float64Array(N + 1), py = new Float64Array(N + 1);
+    const pr = new Float64Array(N + 1), cost = new Float64Array(N + 1);
+    let rMax = 0;
+    for (let i = 0; i <= N; i++) {
+      const u = i / N;
+      px[i] = splineAt(pts, u, 0) * sx;
+      py[i] = splineAt(pts, u, 1) * sy;
+      pr[i] = Math.max(0.0008, splineAt(pts, u, 2)) * sy;
+      if (i) {
+        let turn = 0;
+        if (i > 1) {
+          const ax = px[i - 1] - px[i - 2], ay = py[i - 1] - py[i - 2];
+          const bx = px[i] - px[i - 1], by = py[i] - py[i - 1];
+          const al = Math.hypot(ax, ay), bl = Math.hypot(bx, by);
+          if (al > 1e-9 && bl > 1e-9) {
+            turn = Math.acos(U.clamp((ax * bx + ay * by) / (al * bl), -1, 1));
+          }
+        }
+        rMax = Math.max(rMax, pr[i]);
+        /* Distance covered, thickness changed, and corner turned. Without the
+           last one a bend gets one facet and a curved neck comes out as a
+           zigzag; with it the curve gets the planes it needs and the straight
+           runs still get one each. */
+        cost[i] = cost[i - 1] + Math.hypot(px[i] - px[i - 1], py[i] - py[i - 1]) +
+                  Math.abs(pr[i] - pr[i - 1]) * 3 + turn * rMax * 7;
+      }
+    }
+    const total = cost[N] || 1;
+    const out = new Array(steps + 1);
+    let j = 0;
+    for (let i = 0; i <= steps; i++) {
+      const want = (i / steps) * total;
+      while (j < N && cost[j + 1] < want) j++;
+      const span = cost[j + 1] - cost[j];
+      const t = span > 1e-9 ? (want - cost[j]) / span : 0;
+      const k = Math.min(N, j + 1);
+      out[i] = { x: U.lerp(px[j], px[k], t),
+                 y: U.lerp(py[j], py[k], t),
+                 r: U.lerp(pr[j], pr[k], t) };
+    }
+    return out;
+  }
+
+  /* The radius of the circle the spine is turning on here, near enough. Two
+     segments and the angle between them give it: a straight run has no bend
+     and no limit, a hairpin has almost none. */
+  function bendLimit(spine, i) {
+    const a = spine[Math.max(0, i - 1)], b = spine[i], c = spine[Math.min(spine.length - 1, i + 1)];
+    const ux = b.x - a.x, uy = b.y - a.y, vx = c.x - b.x, vy = c.y - b.y;
+    const ul = Math.hypot(ux, uy), vl = Math.hypot(vx, vy);
+    if (ul < 1e-6 || vl < 1e-6) return Infinity;
+    const cosA = U.clamp((ux * vx + uy * vy) / (ul * vl), -1, 1);
+    const turn = Math.acos(cosA);
+    if (turn < 1e-4) return Infinity;
+    return ((ul + vl) / 2 / turn) * 0.92;
+  }
+
+  function tubeMesh(spine, d, NV, H) {
+    const NU = spine.length - 1;
+    NV = Math.max(3, NV || 5);
+    const stride = NV + 1;
+    const v = new Float64Array((NU + 1) * stride * 3);
+    const cs = new Float64Array((NU + 1) * stride);
+    for (let iu = 0; iu <= NU; iu++) {
+      const p = spine[iu];
+      const a0 = spine[Math.max(0, iu - 1)], a1 = spine[Math.min(NU, iu + 1)];
+      let tx = a1.x - a0.x, ty = a1.y - a0.y;
+      const tl = Math.hypot(tx, ty) || 1;
+      tx /= tl; ty /= tl;
+      const nx = ty, ny = -tx;                 // points to the body's back
+      /* A tube cannot be thicker than the bend it is going round. Past that
+         the inside of the curve folds through itself and the surface comes out
+         as a row of shards — which is exactly what a body drawn round a tight
+         coil did. Cap the radius at the local turn instead, so a hard bend
+         narrows rather than inverting. */
+      const r = Math.min(p.r, bendLimit(spine, iu));
+      for (let iv = 0; iv <= NV; iv++) {
+        const a = (iv / NV) * Math.PI;
+        const ca = Math.cos(a), sa = Math.sin(a);
+        const o = (iu * stride + iv) * 3;
+        v[o] = p.x - nx * ca * r;
+        v[o + 1] = p.y - ny * ca * r;
+        v[o + 2] = sa * r * d;
+        // 0 at the belly edge, 1 at the back, following the body round the bend
+        cs[iu * stride + iv] = (1 - ca) / 2;
+      }
+    }
+    return { v: v, NU: NU, NV: NV, stride: stride, H: H, cs: cs };
+  }
+
+  /* The boundary of the front half is the belly run out and the back run home,
+     which is exactly the silhouette — and it is made of straight pieces. */
+  function meshOutline(ctx, m) {
+    const v = m.v, s = m.stride, NV = m.NV;
+    ctx.beginPath();
+    for (let iu = 0; iu <= m.NU; iu++) {
+      const o = (iu * s) * 3;
+      if (iu === 0) ctx.moveTo(v[o], v[o + 1]); else ctx.lineTo(v[o], v[o + 1]);
+    }
+    for (let iu = m.NU; iu >= 0; iu--) {
+      const o = (iu * s + NV) * 3;
+      ctx.lineTo(v[o], v[o + 1]);
+    }
+    ctx.closePath();
+  }
+
+  /* Flat shading. Every quad takes one colour off its own normal, and is then
+     stroked in that colour as well — abutting fills antialias against each
+     other and leave a hairline of background between them otherwise. */
+  function shadeMesh(ctx, m, back, mid, belly, spec, seed) {
+    const v = m.v, s = m.stride, NU = m.NU, NV = m.NV;
+    const rnd = VF.rng.make(seed);
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = Math.max(0.5, m.H * 0.025);
+    for (let iu = 0; iu < NU; iu++) {
+      for (let iv = 0; iv < NV; iv++) {
+        const o0 = (iu * s + iv) * 3, o1 = ((iu + 1) * s + iv) * 3;
+        const o2 = ((iu + 1) * s + iv + 1) * 3, o3 = (iu * s + iv + 1) * 3;
+        // the diagonal alternates, so the facets do not all lean the same way
+        const flip = (iu + iv) & 1;
+        const tris = flip ? [[o0, o1, o2], [o0, o2, o3]]
+                          : [[o0, o1, o3], [o1, o2, o3]];
+        for (let k = 0; k < 2; k++) {
+          const a = tris[k][0], b = tris[k][1], c = tris[k][2];
+          const ax = v[b] - v[a], ay = v[b + 1] - v[a + 1], az = v[b + 2] - v[a + 2];
+          const bx = v[c] - v[a], by = v[c + 1] - v[a + 1], bz = v[c + 2] - v[a + 2];
+          let nx = ay * bz - az * by, ny = az * bx - ax * bz, nz = ax * by - ay * bx;
+          const nm = Math.hypot(nx, ny, nz) || 1;
+          nx /= nm; ny /= nm; nz /= nm;
+          if (nz < 0) { nx = -nx; ny = -ny; nz = -nz; }
+
+          const lam = Math.max(0, nx * LIGHT[0] + ny * LIGHT[1] + nz * LIGHT[2]);
+          /* Counter-shading from the pigment: dark along the back, pale along
+             the belly. Read off the triangle's own height rather than its row,
+             so the two halves of a quad differ here as well. */
+          const my = (v[a + 1] + v[b + 1] + v[c + 1]) / 3;
+          /* A bent body carries its own: on a neck standing straight up the
+             back is the left edge, not the top, and reading it off the screen
+             would put the dark on the head and the pale at the shoulder. */
+          const t = m.cs
+            ? (m.cs[a / 3] + m.cs[b / 3] + m.cs[c / 3]) / 3
+            : U.clamp(0.5 - my / (m.H * 2.0), 0, 1);         // 0 belly .. 1 back
+          let col = t < 0.5 ? U.mixRgb(belly, mid, t * 2) : U.mixRgb(mid, back, (t - 0.5) * 2);
+          // then the light, with enough range in it to see a plane turn
+          col = U.shade(col, (-0.90 + 1.15 * lam) * (0.90 + rnd() * 0.20));
+          if (spec > 0) {
+            const sp = Math.pow(lam, 11) * spec;
+            if (sp > 0.01) col = U.mixRgb(col, [255, 255, 255], Math.min(0.55, sp));
+          }
+          // and the grazing edge takes the deep tone, the way a real one does
+          col = U.mixRgb(col, back, Math.pow(1 - nz, 4) * 0.5);
+
+          const css = U.rgbToCss(col);
+          ctx.fillStyle = css;
+          ctx.strokeStyle = css;
+          ctx.beginPath();
+          ctx.moveTo(v[a], v[a + 1]);
+          ctx.lineTo(v[b], v[b + 1]);
+          ctx.lineTo(v[c], v[c + 1]);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+        }
+      }
+    }
+  }
+
+  /* The shapes that are not a lathe — a ray is a wing, a jelly is a bell — keep
+     the outline they were drawn with and take the facets as a clipped grid
+     instead, with the normal guessed from how far up the shape a facet sits.
+     Not a model, but it breaks the flat gradient the same way. */
+  function facetFill(ctx, L, H, back, mid, belly, spec, seed) {
+    const rnd = VF.rng.make(seed);
+    const cell = Math.max(5, H * 0.38);
+    const x0 = -L * 0.62, x1 = L * 0.62, y0 = -H * 1.30, y1 = H * 1.30;
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = 1;
+    for (let y = y0; y < y1; y += cell) {
+      for (let x = x0; x < x1; x += cell) {
+        // each cell is split into two triangles so the grid does not read as
+        // a grid; the diagonal alternates
+        for (let tri = 0; tri < 2; tri++) {
+          const flip = ((x / cell + y / cell) | 0) % 2;
+          const pts = (tri ^ flip)
+            ? [[x, y], [x + cell, y], [x + cell, y + cell]]
+            : [[x, y], [x + cell, y + cell], [x, y + cell]];
+          const cy = (pts[0][1] + pts[1][1] + pts[2][1]) / 3;
+          const cx = (pts[0][0] + pts[1][0] + pts[2][0]) / 3;
+          const ny = U.clamp(cy / (H * 1.05), -1, 1);
+          const nxr = U.clamp(cx / (L * 0.62), -1, 1) * 0.45;
+          const nz = Math.sqrt(Math.max(0.02, 1 - ny * ny - nxr * nxr));
+          const lam = Math.max(0, nxr * LIGHT[0] + ny * LIGHT[1] + nz * LIGHT[2]);
+          const t = U.clamp(0.5 - ny * 0.5, 0, 1);
+          let col = t < 0.5 ? U.mixRgb(belly, mid, t * 2) : U.mixRgb(mid, back, (t - 0.5) * 2);
+          col = U.shade(col, (-0.86 + 1.10 * lam) * (0.90 + rnd() * 0.20));
+          if (spec > 0) {
+            const sp = Math.pow(lam, 9) * spec;
+            if (sp > 0.01) col = U.mixRgb(col, [255, 255, 255], Math.min(0.45, sp));
+          }
+          const css = U.rgbToCss(col);
+          ctx.fillStyle = css; ctx.strokeStyle = css;
+          ctx.beginPath();
+          ctx.moveTo(pts[0][0], pts[0][1]);
+          ctx.lineTo(pts[1][0], pts[1][1]);
+          ctx.lineTo(pts[2][0], pts[2][1]);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+        }
+      }
+    }
+  }
+
   /* ------------------------------------------------------------- bodies
      Each returns the path on ctx and reports its bounding half-height. */
 
   function bodyPath(ctx, kind, L, sway, rnd) {
     const H = L * bodyRatio(kind);
+
+    /* If the kind is one of the lathed ones its outline is the boundary of the
+       mesh, so the silhouette, the clip and the drawn body are all the same
+       object rather than three that have to be kept agreeing. */
+    const m = meshFor(kind, L, H, sway, 1);
+    if (m) { meshOutline(ctx, m); return H; }
 
     ctx.beginPath();
     switch (kind) {
@@ -329,16 +674,59 @@
 
   function paintFin(ctx, path, col, alpha, rays) {
     ctx.globalAlpha = alpha;
-    if (FIN && rays && rays.len > 0) {
+    const fan = FIN && rays && rays.len > 0 && rays.a1 !== rays.a0;
+
+    /* A fin is a membrane stretched on spines, and it folds between them. One
+       smooth radial wash across the whole thing gives a flat triangle sitting
+       next to a modelled body; panels between the spines, each catching the
+       light at its own angle, give a fin. */
+    if (fan) {
+      ctx.fillStyle = U.rgbToCss(U.shade(FIN.base, -0.20));
+      ctx.fill(path);
+      ctx.save();
+      ctx.clip(path);
+      /* The sweep goes all the way round the root rather than following the
+         ray angles, because those point along the spines and a tail's spines
+         point away from the tail. Clipped to the fin, the panels that land on
+         it are the ones that show. */
+      const N = 18, reach = rays.len * 2.2;
+      for (let i = 0; i < N; i++) {
+        const b0 = (i / N) * TAU, b1 = ((i + 1) / N) * TAU;
+        const bm = (b0 + b1) / 2;
+        // alternate panels lean toward the viewer and away from them
+        const lean = (i & 1) ? 0.46 : -0.46;
+        const nx = Math.cos(bm + Math.PI / 2) * lean;
+        const ny = Math.sin(bm + Math.PI / 2) * lean;
+        const nz = Math.sqrt(Math.max(0.05, 1 - nx * nx - ny * ny));
+        const lam = Math.max(0, nx * LIGHT[0] + ny * LIGHT[1] + nz * LIGHT[2]);
+        ctx.fillStyle = U.rgbToCss(U.shade(FIN.base, -0.66 + 1.05 * lam));
+        ctx.beginPath();
+        ctx.moveTo(rays.x, rays.y);
+        ctx.lineTo(rays.x + Math.cos(b0) * reach, rays.y + Math.sin(b0) * reach);
+        ctx.lineTo(rays.x + Math.cos(b1) * reach, rays.y + Math.sin(b1) * reach);
+        ctx.closePath();
+        ctx.fill();
+      }
+      /* One wash over the top of the panels puts the membrane back: thick and
+         opaque where it leaves the body, thinning at the trailing edge. */
+      const wash = ctx.createRadialGradient(rays.x, rays.y, 0, rays.x, rays.y, rays.len * 1.35);
+      wash.addColorStop(0, U.rgbToCss(U.shade(FIN.base, -0.28), 0.55));
+      wash.addColorStop(0.5, U.rgbToCss(FIN.base, 0.12));
+      wash.addColorStop(1, U.rgbToCss(U.mixRgb(FIN.base, FIN.tip, 0.5), 0.42));
+      ctx.fillStyle = wash;
+      ctx.fill(path);
+      ctx.restore();
+    } else if (FIN && rays && rays.len > 0) {
       const g = ctx.createRadialGradient(rays.x, rays.y, 0, rays.x, rays.y, rays.len * 1.02);
       g.addColorStop(0, U.rgbToCss(U.shade(FIN.base, -0.30)));
       g.addColorStop(0.45, U.rgbToCss(FIN.base));
       g.addColorStop(1, U.rgbToCss(U.mixRgb(FIN.base, FIN.tip, 0.42), 0.62));
       ctx.fillStyle = g;
+      ctx.fill(path);
     } else {
       ctx.fillStyle = col;
+      ctx.fill(path);
     }
-    ctx.fill(path);
     if (rays && rays.n > 1) {
       ctx.save();
       ctx.clip(path);
@@ -366,6 +754,17 @@
     ctx.globalAlpha = alpha;
   }
 
+  /* A limb, as a solid rather than as a line with a cap on the end. Points are
+     already in pixels: [x, y, radius]. Used wherever something has an arm, a
+     leg or a claw, so those come out modelled like the body they hang off
+     instead of as strokes with an ellipse stuck on the end. */
+  function limbTube(ctx, pts, d, H, base, tip, spec, seed) {
+    const spine = spineFrom(pts, Math.max(3, pts.length - 1), 1, 1);
+    const m = tubeMesh(spine, d, 3, H);
+    shadeMesh(ctx, m, U.shade(base, -0.34), base,
+              U.mixRgb(tip || base, [255, 255, 255], 0.14), spec, seed);
+  }
+
   function drawFins(ctx, style, L, H, sway, col, alpha, accent, baseRgb, tipRgb) {
     if (style === 'none') return;
     FIN = baseRgb ? { base: baseRgb, tip: tipRgb || baseRgb,
@@ -376,48 +775,63 @@
 
     switch (style) {
       case 'legs': {
-        ctx.strokeStyle = col;
-        ctx.fillStyle = col;
+        /* Eight walking legs and two claws, every one a tapered solid. What
+           was here was a round-capped stroke per leg and a plain ellipse for
+           each claw — which is the whole complaint: a crab drawn as sticks
+           with an oval on the end of each arm. A claw is two tapered fingers
+           meeting at a hinge, and it only looks like a claw if it is built
+           that way. */
+        const legBase = baseRgb || U.hexToRgb('#888888');
+        const legTip = tipRgb || legBase;
         ctx.globalAlpha = alpha;
-        ctx.lineCap = 'round';
-        ctx.lineWidth = Math.max(1, L * 0.020);
         for (let side = -1; side <= 1; side += 2) {
           for (let j = 0; j < 4; j++) {
             const x = L * (0.14 - j * 0.15);
             const reach = H * (0.95 + j * 0.12);
-            ctx.beginPath();
-            ctx.moveTo(x, side * H * 0.62);
-            ctx.quadraticCurveTo(x - L * 0.10, side * reach * 0.9,
-                                 x - L * 0.22, side * reach + sway * 2);
-            ctx.stroke();
+            const th = Math.max(0.9, L * 0.016) * (1 - j * 0.10);
+            limbTube(ctx, [
+              [x, side * H * 0.52, th * 1.25],
+              [x - L * 0.06, side * reach * 0.60, th],
+              [x - L * 0.14, side * reach * 0.92, th * 0.72],
+              [x - L * 0.22, side * reach + sway * 2, th * 0.20]
+            ], 0.40, H, legBase, legTip, 0.26, 0x3a1 + j * 7 + (side + 1) * 31);
           }
         }
-        // claws: an upper arm, a forearm, then a two-part pincer
         for (let side = -1; side <= 1; side += 2) {
           const ex = L * 0.30, ey = side * H * 1.05;      // elbow
-          const cx = L * 0.56, cy = side * H * 0.86;      // claw base
-          ctx.lineWidth = Math.max(1.4, L * 0.030);
-          ctx.beginPath();
-          ctx.moveTo(L * 0.20, side * H * 0.55);
-          ctx.lineTo(ex, ey);
-          ctx.lineTo(cx, cy);
-          ctx.stroke();
-          ctx.save();
-          ctx.translate(cx, cy);
-          ctx.rotate(side * -0.5);
-          ctx.beginPath();
-          ctx.ellipse(0, 0, L * 0.085, H * 0.38, 0, 0, TAU);
-          ctx.fill();
-          ctx.lineWidth = Math.max(1.1, L * 0.020);
-          ctx.beginPath();
-          ctx.moveTo(L * 0.05, -H * 0.14);
-          ctx.lineTo(L * 0.17, -H * 0.30);
-          ctx.stroke();
-          ctx.beginPath();
-          ctx.moveTo(L * 0.05, H * 0.10);
-          ctx.lineTo(L * 0.17, H * 0.02);
-          ctx.stroke();
-          ctx.restore();
+          const cx = L * 0.49, cy = side * H * 0.88;      // the hinge
+          const aw = Math.max(1.2, L * 0.026);
+          // shoulder to elbow to hinge, one piece
+          limbTube(ctx, [
+            [L * 0.18, side * H * 0.48, aw * 1.15],
+            [ex, ey, aw],
+            [(ex + cx) / 2, (ey + cy) / 2, aw * 0.92],
+            [cx, cy, aw * 0.80]
+          ], 0.40, H, legBase, legTip, 0.26, 0x9c4 + (side + 1) * 17);
+
+          /* A palm with two fingers off it. The heavy one is fixed and the
+             light one closes onto it, and the wedge of nothing between them is
+             the entire reason the shape reads as a claw. */
+          const rot = -side * 0.42;
+          const ux = Math.cos(rot), uy = Math.sin(rot);
+          const px = -uy, py = ux;
+          const at = function (a, b2, r) {
+            return [cx + ux * a + px * b2 * side, cy + uy * a + py * b2 * side, r];
+          };
+          limbTube(ctx, [
+            at(-L * 0.03, 0, aw * 1.5), at(L * 0.03, H * 0.02, aw * 2.2),
+            at(L * 0.09, H * 0.02, aw * 1.9), at(L * 0.13, H * 0.01, aw * 1.2)
+          ], 0.38, H, legBase, legTip, 0.26, 0x2f7 + (side + 1) * 5);
+          // the fixed finger, along the underside
+          limbTube(ctx, [
+            at(L * 0.08, H * 0.055, aw * 1.35), at(L * 0.15, H * 0.075, aw * 1.05),
+            at(L * 0.22, H * 0.070, aw * 0.62), at(L * 0.28, H * 0.045, aw * 0.16)
+          ], 0.34, H, legBase, legTip, 0.26, 0x71e + (side + 1) * 5);
+          // and the one that moves, held a little open
+          limbTube(ctx, [
+            at(L * 0.08, -H * 0.050, aw * 1.15), at(L * 0.15, -H * 0.085, aw * 0.88),
+            at(L * 0.21, -H * 0.070, aw * 0.52), at(L * 0.26, -H * 0.020, aw * 0.14)
+          ], 0.34, H, U.shade(legBase, -0.12), legTip, 0.26, 0x4b2 + (side + 1) * 5);
         }
         break;
       }
@@ -628,15 +1042,32 @@
           break;
         }
         case 'spine': {
-          ctx.strokeStyle = acc; ctx.globalAlpha = 0.75;
-          ctx.lineWidth = Math.max(1, L * 0.011);
+          /* Plates standing off the back, each one a solid taking the light
+             off its own lean. Eight identical strokes read as a comb glued on;
+             a row of triangles with two tones reads as part of the animal. */
+          ctx.globalAlpha = 0.92;
           for (let j = 0; j < 8; j++) {
-            const k = j / 8;
+            const k = j / 8, k2 = (j + 1) / 8;
             const x = U.lerp(L * 0.30, -L * 0.30, k);
+            const x2 = U.lerp(L * 0.30, -L * 0.30, k2);
+            const h2 = H * (0.34 + Math.sin(k * 4) * 0.22);
+            const lean = j & 1 ? 0.16 : -0.10;
+            // the lit face
+            ctx.fillStyle = U.rgbToCss(U.mixRgb(accRgb, [255, 255, 255], 0.30 - lean));
             ctx.beginPath();
-            ctx.moveTo(x, -H * 0.68);
-            ctx.lineTo(x - L * 0.02, -H * (1.05 + Math.sin(k * 4) * 0.25));
-            ctx.stroke();
+            ctx.moveTo(x, -H * 0.70);
+            ctx.lineTo(x - L * 0.018 + h2 * lean, -H * 0.70 - h2);
+            ctx.lineTo((x + x2) / 2, -H * 0.70);
+            ctx.closePath();
+            ctx.fill();
+            // and the one turned away from it
+            ctx.fillStyle = U.rgbToCss(U.shade(accRgb, -0.42));
+            ctx.beginPath();
+            ctx.moveTo((x + x2) / 2, -H * 0.70);
+            ctx.lineTo(x - L * 0.018 + h2 * lean, -H * 0.70 - h2);
+            ctx.lineTo(x2, -H * 0.70);
+            ctx.closePath();
+            ctx.fill();
           }
           break;
         }
@@ -1187,16 +1618,43 @@
     ctx.save();
     ctx.clip();
 
-    // scale texture — skipped at small sizes where it would only be noise
-    if (detail && SCALED[art.body]) scaleTexture(ctx, L, H, U.rgbToCss(U.shade(c2, -0.5)), rnd, art.body === 'round');
+    /* The modelling. A lathed body is shaded facet by facet off its own
+       normals; the shapes that are not a lathe take a clipped facet grid
+       instead. Either way the smooth gradient underneath is only there to
+       stop a seam showing, and what you actually see is planes. */
+    const spec = 0.30 + 0.55 * (pal.fx.metal ? 1 : 0) + glow * 0.10;
+    /* Only the absence stays flat — it is not a surface, it is the lack of
+       one. Everything else is a body and gets facets, including the two that
+       were sitting here as a single smooth gradient inside an outline. */
+    const faceted = art.body !== 'hole';
+    if (faceted && detail) {
+      const mesh = meshFor(art.body, L, H, sway, size >= 90 ? 1 : 0.62);
+      if (mesh) shadeMesh(ctx, mesh, back, c1, belly, spec, hash(fish.id) ^ 0x2f1a);
+      else facetFill(ctx, L, H, back, c1, belly, spec, hash(fish.id) ^ 0x2f1a);
+    }
 
-    // specular band along the upper flank
-    const sp = ctx.createLinearGradient(0, -H * 0.95, 0, H * 0.10);
-    sp.addColorStop(0, U.rgbToCss(c3, 0));
-    sp.addColorStop(0.42, U.rgbToCss(U.mixRgb(c3, [255, 255, 255], 0.35), 0.18));
-    sp.addColorStop(1, U.rgbToCss(c3, 0));
-    ctx.fillStyle = sp;
-    ctx.fillRect(-L, -H * 1.2, L * 2, H * 1.4);
+    /* Scales over facets is two surface treatments arguing with each other,
+       and the planes are the ones doing the modelling. Where the body is
+       faceted the scales come back only as a whisper of tooth. */
+    if (detail && SCALED[art.body]) {
+      const scaleAlpha = faceted ? 0.30 : 1;
+      ctx.save();
+      ctx.globalAlpha = scaleAlpha;
+      scaleTexture(ctx, L, H, U.rgbToCss(U.shade(c2, -0.5)), rnd, art.body === 'round');
+      ctx.restore();
+    }
+
+    /* A specular band across the whole flank would flatten the facets back
+       out, so a faceted body takes its highlight per plane and only the
+       un-faceted ones get the band. */
+    if (!faceted || !detail) {
+      const sp = ctx.createLinearGradient(0, -H * 0.95, 0, H * 0.10);
+      sp.addColorStop(0, U.rgbToCss(c3, 0));
+      sp.addColorStop(0.42, U.rgbToCss(U.mixRgb(c3, [255, 255, 255], 0.35), 0.18));
+      sp.addColorStop(1, U.rgbToCss(c3, 0));
+      ctx.fillStyle = sp;
+      ctx.fillRect(-L, -H * 1.2, L * 2, H * 1.4);
+    }
 
     // and a soft glow from the belly for anything luminous
     if (glow > 0.15) {
@@ -1319,202 +1777,355 @@
   }
 
   /* ------------------------------------------------------------- beings
-     Filled from three colours so the same code draws the lit version and the
-     shape coming up out of the dark. `P` is { a: body, b: shadow, c: accent }. */
+     Two things in the water that are not fish, and the only two that have a
+     skeleton worth building. Both are made the same way: a set of tubes run
+     along hand-placed spines, meeting at shared joints, shaded flat off the
+     same key light as everything else.
 
-  function beingShape(ctx, kind, L, H, P, tm) {
-    if (kind === 'human') { humanShape(ctx, L, H, P, tm); return; }
-    nessieShape(ctx, L, H, P, tm);
-  }
+     What this replaced was a pile of ellipses — three humps over a body under
+     a neck beside a flipper — each one its own fill. At full opacity the
+     overlaps merely looked wrong; at the alpha the surfacing silhouette uses,
+     every overlap showed as a lighter patch and the animal came apart into the
+     ovals it was made of. A tube has no seams because there is only one
+     surface, and the parts that do meet meet inside each other. */
 
-  /* A long neck out of the water, a body under it, and the rest of her behind
-     that as humps. Drawn facing right; the waterline is at y = H * 0.34, which
-     is why everything below it is only ever hinted at. */
-  function nessieShape(ctx, L, H, P, tm) {
-    const sway = Math.sin(tm * 0.7) * 0.035;
-    const waterY = H * 0.36;
+  /* Control points are [x, y, r]: x and y in body units off the centre, r the
+     radius there. The whole animal is one run from the tip of the tail to the
+     end of the snout, so the coils, the back, the shoulder, the neck and the
+     head are the same piece of her. */
+  const NESSIE_SPINE = [
+    [-0.58,  0.52, 0.012],   // the tail, well under and going away
+    [-0.45,  0.41, 0.050],
+    [-0.31,  0.33, 0.092],   // a low coil breaking the surface
+    [-0.16,  0.40, 0.142],   // and down again
+    [ 0.02,  0.26, 0.198],   // her back, the largest thing showing
+    [ 0.18,  0.32, 0.148],   // sloping away to the shoulder
+    [ 0.28,  0.04, 0.090],   // where the neck leaves the water
+    [ 0.24, -0.26, 0.072],   // and bows back on itself
+    [ 0.25, -0.52, 0.061],
+    [ 0.31, -0.70, 0.063],   // the base of the skull
+    [ 0.39, -0.77, 0.082],   // the skull
+    [ 0.48, -0.79, 0.052],   // the snout
+    [ 0.55, -0.76, 0.013]    // and the end of her
+  ];
 
-    // the humps, furthest first so they sit behind
-    ctx.fillStyle = P.b;
-    for (let i = 0; i < 3; i++) {
-      const hx = -L * (0.30 + i * 0.20);
-      const hr = L * (0.125 - i * 0.026);
-      ctx.beginPath();
-      ctx.ellipse(hx, waterY - hr * 0.30 + Math.sin(tm * 0.9 + i) * H * 0.012,
-                  hr, hr * 0.58, 0, Math.PI, 0);
-      ctx.fill();
+  /* A pair of paddles rather than a pair of ovals: each one is its own short
+     tube, rooted inside the body so the join is buried. */
+  const NESSIE_FINS = [
+    { root: [ 0.12, 0.33], pts: [[0, 0, 0.052], [0.07, 0.08, 0.078], [0.14, 0.15, 0.062], [0.19, 0.20, 0.020]], d: 0.34, sw: 0.07 },
+    { root: [-0.10, 0.38], pts: [[0, 0, 0.044], [-0.06, 0.07, 0.066], [-0.12, 0.13, 0.050], [-0.16, 0.17, 0.016]], d: 0.34, sw: 0.04 }
+  ];
+
+  /* Every limb is a tube and every joint is shared, so an elbow is one surface
+     bending rather than two slabs crossing. x and y are both in half-height
+     units — a person's proportions belong to the person, not to the box. */
+  const HUMAN_PARTS = [
+    { id: 'legL', d: 'limb', pts: [[-0.082, 0.08, 0.086], [-0.096, 0.42, 0.060], [-0.100, 0.72, 0.045], [-0.086, 0.93, 0.038]] },
+    { id: 'legR', d: 'limb', pts: [[ 0.082, 0.08, 0.086], [ 0.098, 0.42, 0.060], [ 0.102, 0.72, 0.045], [ 0.088, 0.93, 0.038]] },
+    { id: 'armL', d: 'limb', pts: [[-0.196, -0.38, 0.054], [-0.232, -0.13, 0.041], [-0.234, 0.13, 0.032], [-0.224, 0.25, 0.024]] },
+    { id: 'armR', d: 'limb', pts: [[ 0.196, -0.38, 0.054], [ 0.232, -0.13, 0.041], [ 0.234, 0.13, 0.032], [ 0.224, 0.25, 0.024]] },
+    { id: 'torso', d: 'torso', pts: [[0, 0.18, 0.146], [0, 0.02, 0.142], [0, -0.16, 0.182], [0, -0.34, 0.222], [0, -0.46, 0.146], [0, -0.55, 0.060]] },
+    { id: 'head', d: 'head', pts: [[0, -0.52, 0.050], [0, -0.62, 0.098], [0, -0.73, 0.120], [0, -0.84, 0.100], [0, -0.91, 0.032]] }
+  ];
+
+  /* How many facets long. A stout fish is nine and the serpent — the longest
+     body in the game — is twenty-two, and that coarseness is as much of the
+     look as the flatness is: finely tessellated is smooth, and smooth is the
+     one thing this game is not. These sit in the same range, measured against
+     how long the animal is rather than how many joints it has. */
+  const BEING_STEPS = { nessie: 20, human: 6 };
+
+  /* How deep a body is against how tall. The fish sit between 0.22 and 0.46 —
+     they are plates with folds in them, seen side on, and that flatness is the
+     whole look. A tube at 0.9 is a cylinder: the shading wraps all the way
+     round it, there is a specular band down the middle, and it reads as a 3D
+     render dropped into a flat picture. Everything here stays in the fishes'
+     range so a neck is a folded ribbon like everything else. */
+  const BEING_D = { body: 0.38, fin: 0.26, limb: 0.36, torso: 0.32, head: 0.44 };
+
+  /* The waterline. Above it she is lit; below it the same facets are shaded
+     down and cooled, which is what makes the coils read as being under
+     something rather than as a paler shape laid over the top. */
+  const NESSIE_WATER = 0.36;
+  const DEEP_WATER = [10, 22, 30];
+
+  /* Every tube the creature is made of, in pixels, back to front. */
+  function beingTubes(kind, L, H, tm) {
+    const out = [];
+    if (kind === 'human') {
+      const lean = Math.sin(tm * 0.9) * 0.006;
+      for (let i = 0; i < HUMAN_PARTS.length; i++) {
+        const part = HUMAN_PARTS[i];
+        const pts = part.pts.map(function (p, k) {
+          // the breath is in the spine, so the whole figure moves as one
+          return [p[0], p[1] + (p[1] < 0 ? lean * (k + 1) : 0), p[2]];
+        });
+        out.push({ id: part.id, d: BEING_D[part.d],
+                   trunk: part.id === 'torso' || part.id === 'head',
+                   spine: spineFrom(pts, BEING_STEPS.human, H, H) });
+      }
+      return out;
     }
 
-    // the body, mostly under
-    ctx.fillStyle = P.a;
-    ctx.beginPath();
-    ctx.ellipse(-L * 0.04, waterY - H * 0.03, L * 0.24, H * 0.22, -0.05, 0, TAU);
-    ctx.fill();
-
-    /* The neck. It is the whole silhouette, so it is slim and it is long — at
-       any thickness above about a sixth of the height it stops reading as a
-       neck and starts reading as a fin. Two bezier edges with their control
-       points staggered give it the shallow S every photograph claims. */
-    const sx = L * 0.00, sy = waterY - H * 0.14;        // shoulder
-    const hx2 = L * 0.20 + Math.sin(tm * 0.6) * L * 0.010;
-    const hy2 = -H * 0.80 + sway * H;                    // base of the head
-    const wS = H * 0.100, wH = H * 0.044;
-    ctx.beginPath();
-    ctx.moveTo(sx - wS, sy);
-    // back of the neck, bowing left then carrying right into the skull
-    ctx.bezierCurveTo(sx - wS * 2.6, sy - H * 0.60,
-                      hx2 - H * 0.24, hy2 - H * 0.05, hx2 - wH, hy2 - wH * 0.3);
-    ctx.lineTo(hx2 + wH * 0.8, hy2 + wH * 1.1);
-    // front of the neck, bowing the other way
-    ctx.bezierCurveTo(hx2 - H * 0.05, hy2 + H * 0.34,
-                      sx + wS * 4.2, sy - H * 0.46, sx + wS, sy);
-    ctx.closePath();
-    ctx.fill();
-
-    // the head: a blunt wedge with a jaw, tipped forward off the neck
-    ctx.save();
-    ctx.translate(hx2, hy2);
-    ctx.rotate(-0.22 + sway);
-    const hh = H * 0.098;                                // head half-height
-    ctx.beginPath();
-    ctx.moveTo(-hh * 0.9, hh * 0.55);
-    ctx.quadraticCurveTo(-hh * 1.15, -hh * 0.95, hh * 0.35, -hh * 1.05);
-    ctx.quadraticCurveTo(hh * 2.05, -hh * 0.90, hh * 2.30, -hh * 0.10);
-    ctx.quadraticCurveTo(hh * 2.20, hh * 0.55, hh * 1.30, hh * 0.62);
-    ctx.quadraticCurveTo(hh * 0.30, hh * 0.72, -hh * 0.9, hh * 0.55);
-    ctx.closePath();
-    ctx.fill();
-    // the jawline, so the head has a mouth rather than a profile
-    ctx.save();
-    ctx.globalAlpha *= 0.35;
-    ctx.fillStyle = P.b;
-    ctx.beginPath();
-    ctx.moveTo(hh * 0.25, hh * 0.16);
-    ctx.quadraticCurveTo(hh * 1.40, hh * 0.34, hh * 2.24, hh * 0.02);
-    ctx.quadraticCurveTo(hh * 1.40, hh * 0.74, hh * 0.25, hh * 0.16);
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
-    // the eye, small and set well forward
-    ctx.fillStyle = P.c;
-    ctx.beginPath();
-    ctx.ellipse(hh * 1.10, -hh * 0.40, hh * 0.24, hh * 0.20, 0, 0, TAU);
-    ctx.fill();
-    ctx.restore();
-
-    // a flipper breaking the surface in front of the body
-    ctx.fillStyle = P.b;
-    ctx.save();
-    ctx.translate(L * 0.09, waterY + H * 0.09);
-    ctx.rotate(0.40 + Math.sin(tm * 1.1) * 0.10);
-    ctx.beginPath();
-    ctx.ellipse(0, 0, L * 0.12, H * 0.070, 0, 0, TAU);
-    ctx.fill();
-    ctx.restore();
-
-    // the waterline: everything below it is displaced rather than seen
-    ctx.fillStyle = P.c;
-    ctx.globalAlpha *= 0.28;
-    ctx.beginPath();
-    ctx.ellipse(-L * 0.05, waterY + H * 0.05, L * 0.40, H * 0.052, 0, 0, TAU);
-    ctx.fill();
-    ctx.globalAlpha /= 0.28;
+    const sway = Math.sin(tm * 0.7) * 0.030;
+    const body = NESSIE_SPINE.map(function (p, i) {
+      const u = i / (NESSIE_SPINE.length - 1);
+      /* The coils breathe and the neck sways, and both are the same motion
+         travelling along her: the further from the water the more of it. */
+      const swell = Math.sin(tm * 0.9 + u * 5.2) * 0.014 * (1 - u * 0.4);
+      return [p[0] + sway * Math.max(0, u - 0.5) * 1.4, p[1] + swell, p[2]];
+    });
+    /* The paddles go down first, so where they meet her the body covers the
+       join — the same order a fish's fins are drawn in, and the reason a fin
+       can have its own edge without drawing a line through the body. */
+    for (let i = 0; i < NESSIE_FINS.length; i++) {
+      const f = NESSIE_FINS[i];
+      const beat = Math.sin(tm * 1.1 + i * 2.0) * f.sw;
+      const pts = f.pts.map(function (p, k) {
+        return [f.root[0] + p[0], f.root[1] + p[1] + beat * k * 0.5, p[2]];
+      });
+      out.push({ id: 'fin' + i, d: BEING_D.fin, spine: spineFrom(pts, 4, L, H) });
+    }
+    out.push({ id: 'body', d: BEING_D.body, trunk: true,
+              spine: spineFrom(body, BEING_STEPS.nessie, L, H) });
+    return out;
   }
 
-  /* A person, standing. The accent colour is his hair, which is the one
-     detail anybody actually reports afterwards. */
-  function humanShape(ctx, L, H, P, tm) {
-    const breathe = Math.sin(tm * 0.9) * H * 0.006;
-    const headR = H * 0.125;
-    const headY = -H * 0.75 + breathe;
-    const shoulderY = headY + headR * 1.75;
+  /* One path holding every part. A flat fill of this is the silhouette, and
+     because it is a single fill the overlaps cannot show through each other at
+     any alpha — which is the bug that made her look assembled. */
+  function beingSilhouette(ctx, kind, L, H, tm, only) {
+    const tubes = beingTubes(kind, L, H, tm);
+    ctx.beginPath();
+    for (let i = 0; i < tubes.length; i++) {
+      // `only` takes the trunk on its own, for the edge that runs along a back
+      if (only && !tubes[i].trunk) continue;
+      const m = tubeMesh(tubes[i].spine, tubes[i].d, 3, H);
+      const v = m.v, st = m.stride;
+      for (let iu = 0; iu <= m.NU; iu++) {
+        const o = (iu * st) * 3;
+        if (iu === 0) ctx.moveTo(v[o], v[o + 1]); else ctx.lineTo(v[o], v[o + 1]);
+      }
+      for (let iu = m.NU; iu >= 0; iu--) {
+        const o = (iu * st + m.NV) * 3;
+        ctx.lineTo(v[o], v[o + 1]);
+      }
+      ctx.closePath();
+    }
+  }
 
-    // legs
-    ctx.fillStyle = P.b;
-    for (let i = -1; i <= 1; i += 2) {
+  /* The edge every fish gets: lit along the back, shadow through the middle, a
+     little bounce off the belly. Measured across the part's own height — taken
+     across the whole animal instead, an arm hanging at chest height sits in the
+     lit end of the ramp for its whole length and comes out with a bright line
+     down each side. Drawn in part order, so a piece laid down later covers the
+     edge of the piece it sits on, which is how a flipper can have its own
+     outline without drawing a line across the body. */
+  function edgeStroke(ctx, pal, m, L) {
+    const v = m.v;
+    let y0 = Infinity, y1 = -Infinity;
+    for (let i = 1; i < v.length; i += 3) { if (v[i] < y0) y0 = v[i]; if (v[i] > y1) y1 = v[i]; }
+    if (!(y1 > y0)) { y0 = -1; y1 = 1; }
+    const eg = ctx.createLinearGradient(0, y0, 0, y1);
+    eg.addColorStop(0.00, U.rgbToCss(U.mixRgb(pal.r3, [255, 255, 255], 0.45), 0.42));
+    eg.addColorStop(0.34, U.rgbToCss(U.shade(pal.r2, -0.45), 0.36));
+    eg.addColorStop(0.74, U.rgbToCss(U.shade(pal.r2, -0.45), 0.24));
+    eg.addColorStop(1.00, U.rgbToCss(U.mixRgb(pal.r1, [255, 255, 255], 0.30), 0.30));
+    ctx.strokeStyle = eg;
+    ctx.lineWidth = Math.max(0.7, L * 0.0055);
+    ctx.lineJoin = 'round';
+    const st = m.stride;
+    ctx.beginPath();
+    for (let iu = 0; iu <= m.NU; iu++) {
+      const o = (iu * st) * 3;
+      if (iu === 0) ctx.moveTo(v[o], v[o + 1]); else ctx.lineTo(v[o], v[o + 1]);
+    }
+    for (let iu = m.NU; iu >= 0; iu--) {
+      const o = (iu * st + m.NV) * 3;
+      ctx.lineTo(v[o], v[o + 1]);
+    }
+    ctx.closePath();
+    ctx.stroke();
+  }
+
+  /* The lit model. */
+  function beingModel(ctx, kind, L, H, art, pal, tm, q) {
+    const tubes = beingTubes(kind, L, H, tm);
+    const back = U.shade(pal.r1, -0.42);
+    const mid = pal.r1;
+    const belly = U.mixRgb(pal.r2, [255, 255, 255], 0.10);
+    // the same key the fish take, so nothing here is shinier than the rest
+    const spec = 0.30 + (art.glow || 0) * 0.10;
+    const NV = 3;                      // three panels across, like a fish's
+
+    if (kind === 'nessie') {
+      const waterY = H * NESSIE_WATER;
+      /* Twice through the same mesh, split at the surface. Same facets, same
+         normals — only the palette changes at the line, so there is no seam to
+         see and the parts under the water are genuinely under it. */
+      const passes = [
+        { y0: -H * 4, y1: waterY, back: back, mid: mid, belly: belly, spec: spec },
+        /* Under the surface. Darker and colder, and pulled toward the deep
+           rather than toward her own accent — mixing toward the accent is how
+           the submerged half ended up brighter than the half in the air, which
+           is the wrong way round in every body of water there is. */
+        { y0: waterY, y1: H * 4,
+          back: U.mixRgb(U.shade(back, -0.52), DEEP_WATER, 0.42),
+          mid: U.mixRgb(U.shade(mid, -0.56), DEEP_WATER, 0.46),
+          belly: U.mixRgb(U.shade(belly, -0.58), DEEP_WATER, 0.44), spec: spec * 0.12 }
+      ];
+      for (let i = 0; i < tubes.length; i++) {
+        const m = tubeMesh(tubes[i].spine, tubes[i].d, NV, H);
+        for (let pi = 0; pi < passes.length; pi++) {
+          const pass = passes[pi];
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(-L * 1.2, pass.y0, L * 2.4, pass.y1 - pass.y0);
+          ctx.clip();
+          shadeMesh(ctx, m, pass.back, pass.mid, pass.belly, pass.spec, 0x4e55 + i);
+          ctx.restore();
+        }
+        // only the trunk: the ramp runs back-to-belly, and on a limb standing
+        // upright that puts the lit end at both ends and outlines the whole
+        // thing, which is a wireframe rather than a body
+        if (tubes[i].trunk) edgeStroke(ctx, pal, m, L);
+      }
+      nessieHead(ctx, tubes[tubes.length - 1].spine, L, H, pal, tm);
+      waterCut(ctx, kind, L, H, waterY, pal, tm);
+      return;
+    }
+
+    for (let i = 0; i < tubes.length; i++) {
+      const t = tubes[i];
+      const m = tubeMesh(t.spine, t.d, NV, H);
+      // the limbs sit behind the trunk, so they take a little less light
+      const k = (t.id === 'torso' || t.id === 'head') ? 1 : 0.86;
+      shadeMesh(ctx, m, U.shade(back, (k - 1) * 0.9), U.shade(mid, (k - 1) * 0.9),
+                U.shade(belly, (k - 1) * 0.9), spec * k, 0x51aa + i);
+      if (t.trunk) edgeStroke(ctx, pal, m, L);
+    }
+    humanFace(ctx, L, H, pal, tm);
+  }
+
+  /* The one part of her that is not a lathe: a jaw, and an eye. Both are hung
+     off the far end of the same spine, so they travel with the head instead of
+     being placed at a remembered coordinate. */
+  function nessieHead(ctx, spine, L, H, pal, tm) {
+    const n = spine.length - 1;
+    const a = spine[n - 3], b = spine[n];
+    let tx = b.x - a.x, ty = b.y - a.y;
+    const tl = Math.hypot(tx, ty) || 1;
+    tx /= tl; ty /= tl;
+    const nx = ty, ny = -tx;
+    const jaw = spine[n - 2];
+    const hh = H * 0.075;
+
+    // the mouth line, cut into the underside of the snout
+    ctx.save();
+    ctx.globalAlpha *= 0.55;
+    ctx.strokeStyle = U.rgbToCss(U.shade(pal.r1, -0.62));
+    ctx.lineWidth = Math.max(0.7, H * 0.011);
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(jaw.x - nx * jaw.r * 0.35, jaw.y - ny * jaw.r * 0.35);
+    ctx.lineTo(b.x - nx * hh * 0.12, b.y - ny * hh * 0.12);
+    ctx.stroke();
+    ctx.restore();
+
+    // the eye, set back and high on the skull
+    const e = spine[n - 3];
+    const ex = e.x + nx * e.r * 0.20 + tx * hh * 0.30;
+    const ey = e.y + ny * e.r * 0.20 + ty * hh * 0.30;
+    ctx.fillStyle = U.rgbToCss(U.shade(pal.r3, -0.55));
+    ctx.beginPath();
+    ctx.ellipse(ex, ey, hh * 0.30, hh * 0.24, Math.atan2(ty, tx), 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = U.rgbToCss(U.mixRgb(pal.r3, [255, 255, 255], 0.55));
+    ctx.beginPath();
+    ctx.arc(ex - hh * 0.05, ey - hh * 0.05, hh * 0.11, 0, TAU);
+    ctx.fill();
+
+    /* A crest of low plates down the back of the neck, which is most of what
+       separates a neck from a hose. Each one is a flat triangle taking the
+       light off its own lean. */
+    const crestFrom = Math.round(spine.length * 0.56);
+    for (let i = crestFrom; i < spine.length - 4; i += 2) {
+      const p = spine[i], q = spine[i + 1];
+      let dx = q.x - p.x, dy = q.y - p.y;
+      const dl = Math.hypot(dx, dy) || 1;
+      dx /= dl; dy /= dl;
+      const px = dy, py = -dx;
+      const h2 = p.r * (0.55 + 0.30 * Math.sin(i * 1.7 + tm * 0.6));
+      ctx.fillStyle = U.rgbToCss(U.shade(pal.r2, -0.18 + (i % 4 === 0 ? 0.10 : 0)));
       ctx.beginPath();
-      ctx.moveTo(i * H * 0.045 - H * 0.050, H * 0.04);
-      ctx.lineTo(i * H * 0.045 + H * 0.050, H * 0.04);
-      ctx.lineTo(i * H * 0.075 + H * 0.046, H * 0.94);
-      ctx.lineTo(i * H * 0.075 - H * 0.050, H * 0.94);
+      ctx.moveTo(p.x + px * p.r * 0.92, p.y + py * p.r * 0.92);
+      ctx.lineTo(p.x + px * (p.r + h2) - dx * h2 * 0.5,
+                 p.y + py * (p.r + h2) - dy * h2 * 0.5);
+      ctx.lineTo(q.x + px * q.r * 0.92, q.y + py * q.r * 0.92);
       ctx.closePath();
       ctx.fill();
     }
+  }
 
-    /* Arms first and behind, so the torso closes over the shoulder and he
-       stops reading as a set of slabs stood next to each other. */
+  /* Where she goes into the water: a bright line on the surface and a short
+     disturbance either side of it. Not an ellipse laid over her — the parts
+     below are already shaded as submerged, so this only has to be the line. */
+  function waterCut(ctx, kind, L, H, waterY, pal, tm) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    /* The bright part is only where she actually crosses it, so it is clipped
+       to her — a band drawn straight across the frame is a stripe over the
+       picture, which is what it looked like. */
+    ctx.save();
+    beingSilhouette(ctx, kind, L, H, tm);
+    ctx.clip();
+    const g = ctx.createLinearGradient(0, waterY - H * 0.038, 0, waterY + H * 0.038);
+    g.addColorStop(0, U.rgbToCss(pal.r3, 0));
+    g.addColorStop(0.5, U.rgbToCss(U.mixRgb(pal.r3, [255, 255, 255], 0.45), 0.20));
+    g.addColorStop(1, U.rgbToCss(pal.r3, 0));
+    ctx.fillStyle = g;
+    ctx.fillRect(-L, waterY - H * 0.038, L * 2, H * 0.076);
+    ctx.restore();
+
+    // and the water she is displacing, only as far out as she reaches
+    const g2 = ctx.createRadialGradient(0, waterY, 0, 0, waterY, L * 0.52);
+    g2.addColorStop(0, U.rgbToCss(pal.r3, 0.10));
+    g2.addColorStop(1, U.rgbToCss(pal.r3, 0));
+    ctx.fillStyle = g2;
+    ctx.beginPath();
+    ctx.ellipse(0, waterY, L * 0.52, H * 0.055 * (1 + Math.sin(tm * 0.8) * 0.12), 0, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  /* A face, at the scale a face is actually seen at from a boat: two dark
+     sockets, a mouth, and the hair that is the one detail anybody reports. */
+  function humanFace(ctx, L, H, pal, tm) {
+    const cy = -H * 0.74;
+    const r = H * 0.115;
+    ctx.save();
+    // hair, over the crown and down the back of the skull
+    ctx.fillStyle = U.rgbToCss(U.shade(pal.r3, -0.20));
+    ctx.beginPath();
+    ctx.moveTo(-r * 1.02, cy + r * 0.30);
+    ctx.quadraticCurveTo(-r * 1.20, cy - r * 1.30, 0, cy - r * 1.22);
+    ctx.quadraticCurveTo(r * 1.20, cy - r * 1.30, r * 1.02, cy + r * 0.30);
+    ctx.quadraticCurveTo(r * 0.86, cy - r * 0.28, 0, cy - r * 0.42);
+    ctx.quadraticCurveTo(-r * 0.86, cy - r * 0.28, -r * 1.02, cy + r * 0.30);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = U.rgbToCss(U.shade(pal.r1, -0.70));
     for (let i = -1; i <= 1; i += 2) {
-      ctx.save();
-      ctx.translate(i * H * 0.155, shoulderY + H * 0.02);
-      ctx.rotate(i * (0.055 + Math.sin(tm * 0.8) * 0.015));
       ctx.beginPath();
-      ctx.moveTo(-H * 0.046, -H * 0.03);
-      ctx.lineTo(H * 0.046, -H * 0.03);
-      ctx.lineTo(H * 0.036, H * 0.60);
-      ctx.lineTo(-H * 0.042, H * 0.60);
-      ctx.closePath();
+      ctx.ellipse(i * r * 0.38, cy + r * 0.02, r * 0.17, r * 0.22, 0, 0, TAU);
       ctx.fill();
-      // the hand, so the arm ends in something
-      ctx.beginPath();
-      ctx.ellipse(-H * 0.003, H * 0.635, H * 0.040, H * 0.048, 0, 0, TAU);
-      ctx.fill();
-      ctx.restore();
     }
-
-    // torso: shoulders, then in to the waist
-    ctx.fillStyle = P.a;
+    ctx.globalAlpha *= 0.6;
     ctx.beginPath();
-    ctx.moveTo(-H * 0.175, shoulderY);
-    ctx.quadraticCurveTo(-H * 0.195, headY + headR * 2.9, -H * 0.125, H * 0.07);
-    ctx.lineTo(H * 0.125, H * 0.07);
-    ctx.quadraticCurveTo(H * 0.195, headY + headR * 2.9, H * 0.175, shoulderY);
-    ctx.quadraticCurveTo(0, shoulderY - headR * 0.30, -H * 0.175, shoulderY);
-    ctx.closePath();
-    ctx.fill();
-
-    // the collar, which is most of what says "dressed" at this size
-    ctx.save();
-    ctx.globalAlpha *= 0.45;
-    ctx.fillStyle = P.b;
-    ctx.beginPath();
-    ctx.moveTo(-H * 0.062, shoulderY - headR * 0.12);
-    ctx.lineTo(0, shoulderY + headR * 0.55);
-    ctx.lineTo(H * 0.062, shoulderY - headR * 0.12);
-    ctx.closePath();
+    ctx.ellipse(0, cy + r * 0.56, r * 0.26, r * 0.09 * (1 + Math.sin(tm * 0.8) * 0.3), 0, 0, TAU);
     ctx.fill();
     ctx.restore();
-
-    // neck and head
-    ctx.fillStyle = P.a;
-    ctx.fillRect(-H * 0.040, headY + headR * 0.45, H * 0.080, headR * 1.2);
-    ctx.beginPath();
-    ctx.ellipse(0, headY, headR * 0.84, headR, 0, 0, TAU);
-    ctx.fill();
-
-    // the face stays in shadow under the fringe — one band is enough at any
-    // size this is ever drawn, and a drawn-on face would be worse
-    ctx.save();
-    ctx.globalAlpha *= 0.30;
-    ctx.fillStyle = P.b;
-    ctx.beginPath();
-    ctx.ellipse(0, headY - headR * 0.10, headR * 0.78, headR * 0.42, 0, 0, TAU);
-    ctx.fill();
-    ctx.restore();
-
-    // the hair. Fringe forward, a little length at the back.
-    ctx.fillStyle = P.c;
-    ctx.beginPath();
-    ctx.moveTo(-headR * 0.94, headY + headR * 0.42);
-    ctx.quadraticCurveTo(-headR * 1.14, headY - headR * 0.98,
-                         0, headY - headR * 1.04);
-    ctx.quadraticCurveTo(headR * 1.14, headY - headR * 0.98,
-                         headR * 0.94, headY + headR * 0.34);
-    ctx.quadraticCurveTo(headR * 0.74, headY - headR * 0.10,
-                         headR * 0.22, headY - headR * 0.22);
-    ctx.quadraticCurveTo(-headR * 0.52, headY - headR * 0.26,
-                         -headR * 0.94, headY + headR * 0.42);
-    ctx.closePath();
-    ctx.fill();
   }
 
   function drawBeing(ctx, fish, size, opts) {
@@ -1532,16 +2143,8 @@
     ctx.fillStyle = g;
     ctx.fillRect(-L, -L, L * 2, L * 2);
 
-    beingShape(ctx, art.being, L, H, { a: pal.c1, b: pal.c2, c: pal.c3 }, tm);
+    beingModel(ctx, art.being, L, H, art, pal, tm, size >= 90 ? 1 : 0.62);
 
-    // one rim along the lit edge, so it is a body and not a cut-out
-    ctx.globalCompositeOperation = 'lighter';
-    ctx.globalAlpha = 0.16;
-    ctx.translate(-Math.max(0.6, L * 0.004), -Math.max(0.6, L * 0.004));
-    beingShape(ctx, art.being, L, H,
-               { a: U.rgbToCss(U.mixRgb(pal.r1, [255, 255, 255], 0.6)),
-                 b: U.rgbToCss(U.mixRgb(pal.r2, [255, 255, 255], 0.45)),
-                 c: U.rgbToCss(pal.r3) }, tm);
     ctx.restore();
   }
 
@@ -1580,12 +2183,28 @@
        makes the last few seconds of the fight work. */
     if (art.body === 'being') {
       const lb = U.clamp(near === undefined ? 0 : near, 0, 1);
+      const H0 = L * bodyRatio('being', art.being);
       const flatB = U.rgbToCss(U.mixRgb([2, 3, 6], U.shade(U.hexToRgb(art.c1), -0.40), lb * 0.85));
-      const accB = U.rgbToCss(U.mixRgb([2, 3, 6], U.shade(U.hexToRgb(art.c3), -0.35), lb * 0.9));
       ctx.save();
       ctx.globalAlpha = alpha === undefined ? 0.8 : alpha;
-      beingShape(ctx, art.being, L, L * bodyRatio('being', art.being),
-                 { a: flatB, b: flatB, c: accB }, 0);
+      /* One path, one fill. Every part of her is a subpath of it, so the
+         coils, the flippers and the neck cannot show through each other —
+         which at this alpha is exactly what they used to do, and is why what
+         came up out of the dark looked like a stack of ovals. */
+      beingSilhouette(ctx, art.being, L, H0, 0);
+      ctx.fillStyle = flatB;
+      ctx.fill();
+      /* And the thin edge where the surface light lands, once she is near it —
+         the same one every fish gets. Only along the trunk: stroking the whole
+         silhouette follows every subpath, so it would draw the flippers' own
+         edges straight through the body. */
+      if (lb > 0.15) {
+        beingSilhouette(ctx, art.being, L, H0, 0, true);
+        ctx.strokeStyle = U.rgbToCss(U.mixRgb(U.hexToRgb(art.c3), [190, 215, 245], 0.5), 0.30 * lb);
+        ctx.lineWidth = Math.max(0.7, L * 0.005);
+        ctx.lineJoin = 'round';
+        ctx.stroke();
+      }
       ctx.restore();
       return;
     }

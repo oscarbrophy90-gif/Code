@@ -18,15 +18,18 @@
   /* `c` fields are read by the renderers; every one is purely visual. */
   const LIST = [
     /* ---------------- rod finishes ---------------- */
-    { id: 'rod_bone',   slot: 'rodSkin', name: 'Bonewhite', rarity: 'common',   c: { c1: '#e8e2d2', c2: '#a8a294', tip: '#ffffff' } },
-    { id: 'rod_tar',    slot: 'rodSkin', name: 'Tarblack',  rarity: 'common',   c: { c1: '#2a2a30', c2: '#0e0e12', tip: '#6a6a78' } },
-    { id: 'rod_verd',   slot: 'rodSkin', name: 'Verdigris', rarity: 'uncommon', c: { c1: '#4a8a78', c2: '#22463c', tip: '#9fe8d0' } },
-    { id: 'rod_rose',   slot: 'rodSkin', name: 'Rosewood',  rarity: 'uncommon', c: { c1: '#8a4a48', c2: '#4a2422', tip: '#e0a090' } },
-    { id: 'rod_ember',  slot: 'rodSkin', name: 'Ember',     rarity: 'rare',     c: { c1: '#8a3a18', c2: '#3a1206', tip: '#ffb066', glow: 0.5 } },
-    { id: 'rod_frost',  slot: 'rodSkin', name: 'Hoarfrost', rarity: 'rare',     c: { c1: '#cfe8f5', c2: '#7fa8bc', tip: '#ffffff', glow: 0.4 } },
-    { id: 'rod_orbit',  slot: 'rodSkin', name: 'Orbital',   rarity: 'epic',     c: { c1: '#3a4a8a', c2: '#141a38', tip: '#c8e0ff', glow: 0.8, style: 'celestial' } },
-    { id: 'rod_null',   slot: 'rodSkin', name: 'Null',      rarity: 'legendary',c: { c1: '#0a0812', c2: '#000000', tip: '#b48aff', glow: 1, style: 'void' } },
-    { id: 'rod_gilt',   slot: 'rodSkin', name: 'Gilt',      rarity: 'mythic',   c: { c1: '#e8b83a', c2: '#7a5a10', tip: '#fff0b0', glow: 0.9, style: 'lunar' } },
+    /* A finish carries a metal and a stone as well as the blank's two colours:
+       the apex flourishes are built out of those, so without them a Gilt rod
+       came out gold with somebody else's purple dragon still on it. */
+    { id: 'rod_bone',   slot: 'rodSkin', name: 'Bonewhite', rarity: 'common',   c: { c1: '#e8e2d2', c2: '#a8a294', tip: '#ffffff', metal: '#f4f0e2', stone: '#d8cfae' } },
+    { id: 'rod_tar',    slot: 'rodSkin', name: 'Tarblack',  rarity: 'common',   c: { c1: '#2a2a30', c2: '#0e0e12', tip: '#6a6a78', metal: '#8a8a9a', stone: '#4a4a58' } },
+    { id: 'rod_verd',   slot: 'rodSkin', name: 'Verdigris', rarity: 'uncommon', c: { c1: '#4a8a78', c2: '#22463c', tip: '#9fe8d0', metal: '#7cc8ac', stone: '#d0fff0' } },
+    { id: 'rod_rose',   slot: 'rodSkin', name: 'Rosewood',  rarity: 'uncommon', c: { c1: '#8a4a48', c2: '#4a2422', tip: '#e0a090', metal: '#c88878', stone: '#ffd0b8' } },
+    { id: 'rod_ember',  slot: 'rodSkin', name: 'Ember',     rarity: 'rare',     c: { c1: '#8a3a18', c2: '#3a1206', tip: '#ffb066', glow: 0.5, metal: '#ff8a3a', stone: '#ffe0a0' } },
+    { id: 'rod_frost',  slot: 'rodSkin', name: 'Hoarfrost', rarity: 'rare',     c: { c1: '#cfe8f5', c2: '#7fa8bc', tip: '#ffffff', glow: 0.4, metal: '#eaf6ff', stone: '#a8dcff' } },
+    { id: 'rod_orbit',  slot: 'rodSkin', name: 'Orbital',   rarity: 'epic',     c: { c1: '#3a4a8a', c2: '#141a38', tip: '#c8e0ff', glow: 0.8, style: 'celestial', metal: '#8aa8f0', stone: '#ffffff' } },
+    { id: 'rod_null',   slot: 'rodSkin', name: 'Null',      rarity: 'legendary',c: { c1: '#0a0812', c2: '#000000', tip: '#b48aff', glow: 1, style: 'void', metal: '#8a5cff', stone: '#d8c0ff' } },
+    { id: 'rod_gilt',   slot: 'rodSkin', name: 'Gilt',      rarity: 'mythic',   c: { c1: '#e8b83a', c2: '#7a5a10', tip: '#fff0b0', glow: 0.9, style: 'lunar', metal: '#ffd75e', stone: '#fff8d8' } },
 
     /* ---------------- bobbers ---------------- */
     { id: 'bob_classic', slot: 'bobber', name: 'Classic Red', rarity: 'common',   c: { top: '#c8402f', bot: '#e8e4dc' } },

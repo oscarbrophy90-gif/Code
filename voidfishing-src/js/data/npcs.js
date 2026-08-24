@@ -68,6 +68,27 @@
           lines: ['take it out of here.', 'i am not being dramatic. i am being specific. take it out of this room.'] }
       ],
       quest: [
+        /* Count Backwards. Her own thread, and the reason she has had the
+           plate on the table instead of in a drawer. */
+        { at: function () { return VF.quests.started('firstshore'); },
+          lines: ['sit down. no — bring that lamp over first.',
+                  'eleven names, a date, and then four hundred and six years later the same eleven names in a hand that is trying to look like the first hand. i have had this plate eleven years and i have not been able to make it mean anything else.',
+                  'the note in the bottle says count backwards. everybody who reads it counts years. i want you to count shores.',
+                  'four fish. one from each of the first four waters. do not tell me they are the same fish. show me.'],
+          quest: { id: 'firstshore', advance: true }, journal: 'oldnames' },
+        { at: function () { return VF.quests.reached('firstshore', 4); },
+          lines: ['put them here. no, in that order. that order matters.',
+                  'the scales thin as you go down. the bones get older. the objects get further from anything anybody would drop on purpose.',
+                  'it is not four waters. it is one water, four times, and something is holding all four of them open at once.',
+                  'i want the other end of it. the three that are not shores. go down and bring me one from each.'],
+          quest: { id: 'firstshore', advance: true }, journal: 'shores' },
+        { at: function () { return VF.quests.reached('firstshore', 6); },
+          lines: ['eight. i have counted eight.',
+                  'the shore is the newest. the thing under the nowhere sea is the oldest, and it is not old the way a rock is old, it is old the way a habit is old.',
+                  'here. face down, and do not turn it over while i am looking at it. it is the third list.',
+                  'there is room left at the bottom of it. i have measured the room. it is exactly enough for eleven more.'],
+          quest: { id: 'firstshore', advance: true } },
+
         { at: function (d) { return VF.quests.reached('heavens', 6) && Object.keys(d.fishdex).length >= 40; },
           lines: ['forty species. forty. i have been asking people to do that for a very long time and they keep going fishing instead.',
                   'the glass wedge from the compass, yes. it is catalogued under objects that point at things. it is the only entry in that category.',
@@ -82,6 +103,17 @@
         { at: function (d) { return d.stats.catches >= 12; },
           lines: ['keep it in the bar. that is all of it. everything else is decoration.',
                   'and you do not lose them because the fish is strong. you lose them because you chased it instead of waiting for it to come back.'] },
+        /* The thread is planted here, out loud, before it opens. It used to
+           become available in silence — the engine simply started it once
+           three hidden conditions passed — so a player had no way of knowing
+           there was anything to start or what to do about it. He says what he
+           is waiting for, and the log holds him to it. */
+        { at: function (d) { return d.stats.catches >= 45; },
+          lines: ['you are still here. most are not, by now.',
+                  'there is a thing i will tell you about. not yet — i have told it twice in sixty years and both of them were in a hurry.',
+                  'come back when you are not new. a hundred and twenty fish, say, and enough experience behind you that the water has stopped surprising you. level twenty-two is where that happened for me.',
+                  'and keep coming back in the meantime. i say more when you have done more.'] },
+
         { at: function (d) { return VF.locations.index(d.location) >= 3 || d.level >= 18; },
           lines: ['the trench, is it. mm.',
                   'it has no bottom. people say that meaning it is very deep. i say it meaning it has no bottom.'] },
@@ -157,6 +189,27 @@
           lines: ['ah.', 'i will not be coming with you. i have been. that is why i drift.'] }
       ],
       quest: [
+        /* What The Drifter Left. He is the only one who moves, and the lantern
+           turns up wherever he has been. */
+        { at: function () { return VF.quests.started('errand'); },
+          lines: ['oh. that.',
+                  'where. no — say the water, not the spot. i want to know which water.',
+                  'i did not lose it. i put it down. there is a difference and i have stopped explaining it to people.',
+                  'keep it on you. it points. it has been pointing the whole time and you have not noticed yet, which is how it works.'],
+          quest: { id: 'errand', advance: true } },
+        { at: function () { return VF.quests.reached('errand', 4); },
+          lines: ['you found one. of course you did.',
+                  'i remembered something on the way here. i have not remembered anything on the way anywhere in a long time.',
+                  'a name. i said it twice to keep hold of it. then i asked myself whose it was and i did not have an answer, so it is not mine, is it.',
+                  'one more thing out of the water. a big one. i will know it when you are holding it.'],
+          quest: { id: 'errand', advance: true }, journal: 'driftname' },
+        { at: function () { return VF.quests.reached('errand', 6); },
+          lines: ['stand still a moment. i am going to as well.',
+                  'that is the third time somebody has brought the lantern back to me. i put it down three times and it came back three times and every one of you found the hidden water first.',
+                  'take this instead. it is ground flat on one side. hold it up to something dark.',
+                  'keep it. — i am sorry. i will not say which of those i meant.'],
+          quest: { id: 'errand', advance: true } },
+
         { at: function (d) { return VF.quests.reached('heavens', 6) && VF.charms.owned('lantern'); },
           lines: ['you have got it. the lantern. i wondered where that had ended up and now i know, which is worse.',
                   'i was not going to say a word about the compass. not to you, not to anybody. i have been not saying a word about it for a very long time.',
@@ -280,13 +333,88 @@
     return n;
   }
   function availableStage(npc) { return availableIn(npc.stages || []); }
-  function availableQuest(npc) { return npc.quest ? availableIn(npc.quest) : -1; }
+
+  /* One person can be on more than one thread, so their quest lines are
+     grouped by the thread they belong to and each group is counted on its own.
+
+     They used to share a single ordered track and a single counter, which
+     works for exactly one quest and only one: `availableIn` stops at the first
+     entry whose condition fails, so with two threads on the same person the
+     opening line of the second sits behind the closing line of the first, and
+     a player who has not started the first can never reach it. With the two
+     new threads that would have meant the compass piece becoming unreachable
+     for anybody who took the archivist's thread first. */
+  function questTracks(npc) {
+    if (!npc.quest) return [];
+    if (npc._qt) return npc._qt;
+    const out = [], by = {};
+    for (let i = 0; i < npc.quest.length; i++) {
+      const e = npc.quest[i];
+      const id = (e.quest && e.quest.id) || '_';
+      if (!by[id]) { by[id] = { id: id, list: [] }; out.push(by[id]); }
+      by[id].list.push(e);
+    }
+    npc._qt = out;
+    return out;
+  }
+
+  /* How many of a thread's lines this person has already given up. Older saves
+     hold a bare number, which was always the first thread on that person. */
+  function consumed(npc, r, qid) {
+    const st = r.qstage;
+    if (typeof st === 'number') {
+      const tracks = questTracks(npc);
+      return (tracks.length && tracks[0].id === qid) ? (st | 0) : 0;
+    }
+    return (st && st[qid] | 0) || 0;
+  }
+
+  /* The thread this person leads with: the first one with a line the player
+     has not heard. */
+  function questTurn(npc, r) {
+    const tracks = questTracks(npc);
+    for (let i = 0; i < tracks.length; i++) {
+      const avail = availableIn(tracks[i].list);
+      if (avail < 0) continue;
+      if (avail >= consumed(npc, r, tracks[i].id)) {
+        return { qid: tracks[i].id, list: tracks[i].list, avail: avail };
+      }
+    }
+    return null;
+  }
+
+  /* Kept for the quest engine's repair pass, which asks how far along one
+     particular thread this person is. */
+  function availableQuest(npc, qid) {
+    const tracks = questTracks(npc);
+    for (let i = 0; i < tracks.length; i++) {
+      if (qid === undefined || tracks[i].id === qid) return availableIn(tracks[i].list);
+    }
+    return -1;
+  }
+  function questConsumed(id, qid) {
+    const npc = BY_ID[id];
+    return npc ? consumed(npc, peek(id), qid) : 0;
+  }
+  function setQuestConsumed(id, qid, n) {
+    const npc = BY_ID[id];
+    if (!npc) return;
+    const r = rec(id);
+    if (typeof r.qstage === 'number') {
+      const tracks = questTracks(npc);
+      const old = r.qstage | 0;
+      r.qstage = {};
+      if (tracks.length) r.qstage[tracks[0].id] = old;
+    }
+    if (!r.qstage || typeof r.qstage !== 'object') r.qstage = {};
+    r.qstage[qid] = Math.max(0, n | 0);
+  }
 
   function hasNew(id) {
     const npc = BY_ID[id];
     if (!npc) return false;
     const r = peek(id);
-    if (availableQuest(npc) > (r.qstage | 0) - 1) return true;
+    if (questTurn(npc, r)) return true;
     return availableStage(npc) > r.stage - 1;
   }
 
@@ -318,12 +446,12 @@
     if (!npc) return null;
     const r = rec(id);
     // a thread that is actually running is what they lead with
-    const qa = availableQuest(npc);
-    const onQuest = qa >= (r.qstage | 0);
-    const list = onQuest ? npc.quest : (npc.stages || []);
-    const avail = onQuest ? qa : availableStage(npc);
+    const turn = questTurn(npc, r);
+    const onQuest = !!turn;
+    const list = onQuest ? turn.list : (npc.stages || []);
+    const avail = onQuest ? turn.avail : availableStage(npc);
     if (avail < 0) return null;
-    const cur = onQuest ? (r.qstage | 0) : r.stage;
+    const cur = onQuest ? consumed(npc, r, turn.qid) : r.stage;
     const stage = Math.min(avail, cur);
     const def = list[stage];
     if (!def) return null;
@@ -334,7 +462,7 @@
       if (done || !first) return;
       done = true;
       if (onQuest) {
-        r.qstage = stage + 1;
+        setQuestConsumed(id, turn.qid, stage + 1);
       } else {
         r.stage = stage + 1;
         if (r.heard.indexOf(stage) < 0) r.heard.push(stage);
@@ -353,7 +481,7 @@
   function unlocked(id) {
     const npc = BY_ID[id];
     if (!npc) return false;
-    return availableStage(npc) >= 0 || availableQuest(npc) >= 0 || peek(id).met > 0;
+    return availableStage(npc) >= 0 || !!questTurn(npc, peek(id)) || peek(id).met > 0;
   }
 
   VF.npcs = {
@@ -362,6 +490,7 @@
     rec: rec, peek: peek, talk: talk, hasNew: hasNew, anyNew: anyNew,
     met: function (id) { return peek(id).met > 0; },
     name: nameOf,
-    unlocked: unlocked, availableStage: availableStage, availableQuest: availableQuest
+    unlocked: unlocked, availableStage: availableStage, availableQuest: availableQuest,
+    questConsumed: questConsumed, setQuestConsumed: setQuestConsumed
   };
 })(window.VF = window.VF || {});

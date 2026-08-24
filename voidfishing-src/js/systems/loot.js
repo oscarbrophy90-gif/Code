@@ -30,23 +30,34 @@
     return Math.max(1, rp);
   }
 
-  /* Species not native to a spot can still stray in from one or two locations
-     away, at heavily reduced odds. Keeps every tier populated everywhere without
-     making the deep spots feel like the shallow ones. */
-  const STRAY = [1, 0.22, 0.045, 0];
+  /* Where a species belongs, and how far it wanders.
+
+     `locs[0]` is its home water; anything after that is a neighbour it also
+     turns up in, at a fraction of the odds. Every species now lives in a band
+     of at most two adjacent waters, so a spot's catch is mostly its own —
+     before, a fish listed in four scattered places was equally native to all
+     of them and the trench drew the same things as the shore.
+
+     Straying is what keeps a tier from being empty somewhere. It used to reach
+     two waters, which is how shore species turned up in the abyss; one water
+     at a tenth is enough to fill a gap without erasing the difference. */
+  const HOME = 1;
+  const RANGE = 0.34;                             // its own band, but not home
+  const STRAY = [1, 0.10, 0];
 
   function strayFactor(f, locIdx) {
     if (!f.locs.length) return 1;                 // "anywhere" species
-    let best = 99;
+    let best = 99, own = -1;
     for (let i = 0; i < f.locs.length; i++) {
       // a spot nobody has discovered yet is not a spot: locations.index()
       // answers 0 for an unknown id, which would put its fish on the shore
       if (!VF.locations.isRegistered(f.locs[i])) continue;
       const d = Math.abs(VF.locations.index(f.locs[i]) - locIdx);
-      if (d < best) best = d;
+      if (d < best) { best = d; own = i; }
     }
     if (best === 99) return 0;
-    if (f.strict) return best === 0 ? 1 : 0;      // never one spot over
+    if (best === 0) return own === 0 ? HOME : RANGE;
+    if (f.strict) return 0;                       // never one spot over
     return best < STRAY.length ? STRAY[best] : 0;
   }
 
@@ -126,6 +137,11 @@
       counts[candidates[i].f.rarity] = (counts[candidates[i].f.rarity] || 0) + candidates[i].stray;
     }
     const means = prefMeans(p, loc.id);
+    /* A rod may lean on the tier draw itself. Nothing on the shelf does, and
+       nothing on the shelf should: the exponents in rarities.js are the shape
+       of the game. This is for the admin rod, which is meant to pull the top
+       of the table rather than whatever the curve happens to give. */
+    const tier = VF.rods.get(VF.state.data.rod).tierBoost;
 
     const chosen = VF.rng.weighted(candidates, function (e) {
       const r = VF.rarities.get(e.f.rarity);
@@ -136,6 +152,7 @@
       let w = (VF.rarities.weightAt(r, rp) * presence * e.stray / n) * (prefBonus(e.f) / mean);
       // an event is only an event if the things it brings actually turn up
       if (e.f.event && e.f.evWeight) w *= e.f.evWeight;
+      if (tier && tier[e.f.rarity]) w *= tier[e.f.rarity];
       return w;
     }, VF.rng.g);
 
@@ -183,8 +200,14 @@
     const traitMult = VF.traits.multiplier(traits);
 
     const sizeValue = 0.55 + size.pct * 1.75;
+    /* The run of clean catches is worth something now. It was counted, stored,
+       shown next to your level as `×7`, and multiplied nothing at all — a
+       number that looks like a reward and is not one. It pays on the fish's
+       value, so a long run is worth protecting and losing one costs you
+       something you can feel. */
     const value = Math.max(1, Math.round(
-      f.value * sizeValue * traitMult * loc.valueBoost * (build ? build.value : 1)
+      f.value * sizeValue * traitMult * loc.valueBoost * (build ? build.value : 1) *
+      VF.progression.streakMult()
     ));
     const xp = Math.max(1, Math.round(
       rarity.xp * (0.8 + size.pct * 0.6) * loc.xpBoost * (build ? build.xp : 1)
@@ -215,11 +238,18 @@
      its own so a scripted fight can apply the same loadout to numbers it wrote
      itself. Gear has to matter in the heaven's trial too, or the trial is not
      a test of the player, it is a test of a constant. */
+  /* How far reel force is allowed to carry. It was 1.25, which the three rods
+     at the top of the list were all sitting against — so their stated numbers
+     stopped moving while their reel kept going up. The shop reads the same two
+     constants, or the row and the fight disagree. */
+  const Q_MAX = 2.0;
+  const SLOW_FLOOR = 0.30;
+
   function loadout() {
     const rod = VF.rods.get(VF.state.data.rod);
     const b = (VF.build ? VF.build.stats() : null) ||
               { line: 1, reel: 1, barSize: 1, barSpeed: 1 };
-    const q = U.clamp((rod.reel * b.reel - 0.40) / 2.70, 0, 1.25);
+    const q = U.clamp((rod.reel * b.reel - 0.40) / 2.70, 0, Q_MAX);
 
     /* One rule for every rod. Width comes from line strength and steadiness
        from reel force, exactly as it always has — and a rod may then declare
@@ -232,7 +262,7 @@
       q: q,
       rodBar: (1 + 0.155 * (Math.log(lineTotal) / Math.LN2)) * (rod.barSize || 1),
       barSize: b.barSize,
-      barMul: U.clamp(b.barSpeed * (1 - 0.20 * q) * (rod.barSpeed || 1), 0.30, 2.2),
+      barMul: U.clamp(b.barSpeed * (1 - 0.20 * q) * (rod.barSpeed || 1), SLOW_FLOOR, 2.2),
       fillMul: (1 + 0.35 * q) * (rod.barFill || 1)
     };
   }
@@ -245,10 +275,10 @@
      hardest fights into a formality. The knee sits just above the Lunar Rod,
      which is what the heaven's trial was tuned against, so that fight is
      untouched by this. */
-  const TRIAL_KNEE = 1.35;
+  const TRIAL_KNEE = 1.42;
 
   function trialBar(rodBar) {
-    return rodBar <= TRIAL_KNEE ? rodBar : TRIAL_KNEE + (rodBar - TRIAL_KNEE) * 0.55;
+    return rodBar <= TRIAL_KNEE ? rodBar : TRIAL_KNEE + (rodBar - TRIAL_KNEE) * 0.36;
   }
 
   /* One phase of a scripted fight. The phase writes the shape of it; the
@@ -332,6 +362,7 @@
   }
 
   VF.loot = {
+    Q_MAX: Q_MAX, SLOW_FLOOR: SLOW_FLOOR,
     roll: roll,
     pickFish: pickFish,
     fightParams: fightParams,

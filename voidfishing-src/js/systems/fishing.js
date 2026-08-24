@@ -236,6 +236,7 @@
       outsideT: 0,
       lastEdge: -9,        // when grip/slip last spoke, so it cannot chatter
       perfect: true,
+      saved: false,          // whether a rod has already pulled this one back
       elapsed: 0,
 
       /* derived each frame for the scene, the angler and the audio */
@@ -519,7 +520,36 @@
   }
 
   function lose(reason) {
-    const c = S.fight ? S.fight.c : null;
+    const f = S.fight;
+
+    /* A rod may be allowed to not have lost. The line goes, and then it has
+       not gone: the fish is still on, the meter restarts partway down and the
+       fight carries on from there. Once per fish, and it costs the clean-fight
+       flag, because whatever that was it was not clean. */
+    if (f && !f.saved && VF.rods.get(VF.state.data.rod).secondChance) {
+      f.saved = true;
+      /* It costs, or it is not a perk, it is a better rod with a nicer name.
+         The meter restarts well down rather than partway, and whatever that was
+         has learned something on its way off the hook: for the rest of this
+         fight it is quicker, it runs more often, and it takes the meter back
+         faster when it is out of the bar. */
+      f.progress = Math.max(0.10, f.p.start * 0.45);
+      f.p.fishSpeed *= 1.22;
+      f.p.dart = Math.min(0.95, f.p.dart * 1.30);
+      f.p.drain *= 1.18;
+      f.bar = 0.5; f.barV = 0;
+      f.fish = 0.5; f.fishV = 0; f.target = 0.5;
+      f.inside = true; f.outsideT = 0;
+      f.lastEdge = -9;
+      f.perfect = false;
+      f.held = false;
+      const d0 = VF.state.data;
+      d0.stats.secondChances = (d0.stats.secondChances | 0) + 1;
+      VF.bus.emit('fishing:saved', { reason: reason, catch: f.c });
+      return;
+    }
+
+    const c = f ? f.c : null;
     VF.state.data.stats.escapes++;
     VF.state.data.streak = 0;
     if (reason === 'snap') VF.state.data.stats.linesSnapped++;

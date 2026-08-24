@@ -39,7 +39,7 @@
 
   /* The full resolved palette for this frame. */
   const P = {
-    skyTop: [0, 0, 0], skyBot: [0, 0, 0],
+    skyTop: [0, 0, 0], skyBot: [0, 0, 0], void: 0,
     waterTop: [0, 0, 0], waterBot: [0, 0, 0],
     glow: [255, 255, 255], glowSize: 1,
     fog: [0, 0, 0], fogAmt: 0,
@@ -48,10 +48,16 @@
     bright: 1, warm: 0
   };
 
-  function apply(base, day, wx, k) {
-    let c = U.mixRgb(base, day.tint, day.k);
-    c = c.map(function (v) { return v * U.lerp(1, day.bright, 0.78) * k; });
-    if (wx) c = U.mixRgb(c, rgb(wx.c), wx.k * 0.30);
+  /* What is left of a colour once the void has had it. Nothing down there is
+     lit by the sky, so the day cycle stops reaching the tones long before the
+     tones stop existing. */
+  const VOID_TONE = [6, 3, 14];
+
+  function apply(base, day, wx, k, vd) {
+    let c = U.mixRgb(base, day.tint, day.k * (1 - vd * 0.85));
+    c = c.map(function (v) { return v * U.lerp(1, day.bright, 0.78 * (1 - vd * 0.7)) * k; });
+    if (wx) c = U.mixRgb(c, rgb(wx.c), wx.k * 0.30 * (1 - vd * 0.5));
+    if (vd > 0) c = U.mixRgb(c, VOID_TONE, Math.pow(vd, 1.35) * 0.88);
     return c;
   }
 
@@ -61,16 +67,36 @@
     const wx = VF.weather.tint();
     const light = VF.weather.light();
 
-    P.skyTop = apply(rgb(loc.sky[0]), day, wx, light);
-    P.skyBot = apply(rgb(loc.sky[1]), day, wx, light);
-    P.waterTop = apply(rgb(loc.water[0]), day, wx, light * 0.92);
-    P.waterBot = apply(rgb(loc.water[1]), day, wx, light * 0.86);
+    const vd = U.clamp(loc.void || 0, 0, 1);
+    P.void = vd;
+    P.skyTop = apply(rgb(loc.sky[0]), day, wx, light, vd);
+    P.skyBot = apply(rgb(loc.sky[1]), day, wx, light, vd);
+    /* Past about three quarters the surface stops being a surface: the water
+       tone is pulled up to meet the sky so there is no seam left to read as a
+       horizon, which is most of what makes a place look like a place. */
+    const merge = U.clamp((vd - 0.55) / 0.45, 0, 1);
+    /* The sky lightening toward the horizon is what puts a bright band across
+       the middle of the frame. It is the right instinct on a shore and the
+       wrong one in a place with no horizon, so it flattens out as it goes. */
+    P.skyBot = U.mixRgb(P.skyBot, P.skyTop, merge);
+    P.waterTop = U.mixRgb(apply(rgb(loc.water[0]), day, wx, light * 0.92, vd),
+                          P.skyBot, merge);
+    /* And the water tone ends where it starts. Anything left between the two
+       is a band across the middle of the frame saying there is a surface. */
+    P.waterBot = U.mixRgb(apply(rgb(loc.water[1]), day, wx, light * 0.86, vd),
+                          P.waterTop, merge);
     P.glow = U.mixRgb(rgb(loc.glow), day.glow, 0.45);
     P.glowSize = day.glowSize;
     P.fog = U.mixRgb(rgb(loc.fog), day.tint, day.k * 0.6);
-    P.fogAmt = U.clamp(loc.fogAmt + VF.weather.fog() * 0.55, 0, 1);
+    /* Fog is a thing air does. The band across the middle of the last water
+       was this, at a tenth of an alpha, in a tone six times lighter than the
+       ground it was sitting on. */
+    P.fogAmt = U.clamp((loc.fogAmt + VF.weather.fog() * 0.55) * (1 - vd), 0, 1);
     P.star = rgb(loc.starTint);
-    P.starAlpha = U.clamp(day.star * loc.stars * U.lerp(1, 0.35, VF.weather.fog()), 0, 1);
+    /* Some of them stay. Whatever those are, they are not stars, and there
+       are fewer of them the further down you go. */
+    P.starAlpha = U.clamp(day.star * loc.stars * U.lerp(1, 0.35, VF.weather.fog()) *
+                          (1 - vd * 0.72), 0, 1);
     P.accent = rgb(loc.glow);
     P.bright = day.bright * light;
     P.warm = day.warm;

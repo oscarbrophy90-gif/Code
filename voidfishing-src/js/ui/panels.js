@@ -34,6 +34,25 @@
     rodCanvases = [];
   }
 
+  /* Owning a rod and being allowed to swing it are two different things — the
+     one at the end of the long thread arrives well before its level. Both
+     places that offer an Equip button go through here so they cannot disagree
+     about it. */
+  function equipButton(rod, onDone, cls) {
+    if (!VF.rods.canEquip(rod)) {
+      const wait = U.el('div', 'row-price', 'needs lv ' + rod.level);
+      wait.style.color = 'var(--warn)';
+      return wait;
+    }
+    const btn = U.el('button', 'btn btn-sm' + (cls || ''), 'Equip');
+    btn.addEventListener('click', function () {
+      VF.state.data.rod = rod.id;
+      VF.audio.click(); VF.bus.emit('gear:changed'); VF.save.save();
+      onDone();
+    });
+    return btn;
+  }
+
   function rodPreview(rod, i, dim) {
     const cv = U.el('canvas', 'rod-art');
     cv.width = 300; cv.height = 132;
@@ -43,7 +62,7 @@
     rodCanvases.push({ cv: cv, ctx: g, rod: rod, phase: i * 0.9 });
     return cv;
   }
-  let dexFilter = 'all', dexMode = 'all';
+  let dexFilter = 'all', dexMode = 'all', dexTab = 'waters', dexLoc = 'all';
 
   function init() {
     host = document.getElementById('modal');
@@ -99,8 +118,17 @@
     if (!current) return;
     stopRodLoop();
     const id = current, prev = node;
+    /* Where the reader was. A panel is rebuilt from scratch on every change,
+       and settings is long enough that acting on something near the bottom —
+       loading a slot, erasing one — used to throw the page back to the top and
+       leave them hunting for the row they had just pressed. */
+    const wasAt = prev ? (prev.querySelector('.panel-body') || {}).scrollTop || 0 : 0;
     node = build(id, tab);
     if (prev && prev.parentNode) prev.parentNode.replaceChild(node, prev);
+    if (wasAt) {
+      const bodyEl = node.querySelector('.panel-body');
+      if (bodyEl) bodyEl.scrollTop = wasAt;
+    }
     startRodLoop();
   }
 
@@ -185,7 +213,7 @@
         const owned = d.ownedRods.indexOf(rod.id) >= 0;
         // earned rods and the wanderer's stock are never on the shelf; they
         // turn up here once they are yours
-        if ((rod.quest || rod.merchant) && !owned) return;
+        if ((rod.quest || rod.merchant || rod.admin) && !owned) return;
         const block = owned ? null : VF.rods.blocked(rod);
         const locked = !!block || (!owned && rod.noShop);
         const can = VF.economy.canAfford(rod.cost);
@@ -211,6 +239,14 @@
         main.appendChild(name);
         // a rod that is never sold has no purchase requirement worth stating —
         // the level it sits at is not what is standing between you and it
+        /* A rod that does something no other rod does has to say so on its own
+           row rather than leaving it in the prose, because the stat grid below
+           has nowhere to put it. */
+        if (rod.perk && (!locked || owned)) {
+          const pk = U.el('div', 'row-desc', rod.perk);
+          pk.style.color = 'var(--good)';
+          main.appendChild(pk);
+        }
         main.appendChild(U.el('div', 'row-desc', !locked || owned ? rod.desc
           : rod.noShop ? (rod.notForSale || 'Not for sale. Somebody has to give you this one.')
           : block.note));
@@ -232,12 +268,7 @@
         const side = U.el('div', 'row-side');
         if (owned) {
           if (d.rod !== rod.id) {
-            const btn = U.el('button', 'btn btn-sm', 'Equip');
-            btn.addEventListener('click', function () {
-              d.rod = rod.id; VF.audio.click(); VF.bus.emit('gear:changed');
-              VF.save.save(); refresh('rods');
-            });
-            side.appendChild(btn);
+            side.appendChild(equipButton(rod, function () { refresh('rods'); }));
           } else {
             side.appendChild(U.el('div', 'row-price', 'in hand'));
           }
@@ -331,11 +362,15 @@
   /* The totals, not the parts: what this rod does to the white bar once its
      line, its reel force and anything it declares for itself are all in. */
   function rodBarNote(rod) {
-    const q = U.clamp((rod.reel - 0.40) / 2.70, 0, 1.25);
+    /* An admin rod is outside this contract and says so itself. Nothing that
+       can be bought is allowed to. */
+    if (rod.barNote) return rod.barNote;
+    const q = U.clamp((rod.reel - 0.40) / 2.70, 0, VF.loot.Q_MAX);
     const bar = (1 + 0.155 * (Math.log(Math.max(0.25, rod.line)) / Math.LN2)) * (rod.barSize || 1);
     const wider = Math.round((bar - 1) * 100);
-    // it cannot promise more slowing than the fairness floor allows
-    const capped = Math.max(1.08 / 1.55, (1 - 0.20 * q) * (rod.barSpeed || 1));
+    /* It cannot promise more slowing than the fight will actually give, and
+       what the fight will actually give is the floor barMul clamps to. */
+    const capped = Math.max(VF.loot.SLOW_FLOOR, (1 - 0.20 * q) * (rod.barSpeed || 1));
     const move = Math.round((capped - 1) * 100);
     const sharper = Math.round(60 * q);
     // reel force drives the meter as well as the key, so this carries the same
@@ -838,11 +873,20 @@
 
     if (tab === 'quests') {
       const open = VF.quests.visible();
-      if (!open.length) {
+      /* Threads that have not opened, and what each is waiting for. Without
+         this a quest becomes available in silence and the only way to find out
+         is to go round talking to everybody again on the off chance. */
+      const soon = VF.quests.locked();
+      if (!open.length && !soon.length) {
         b.appendChild(U.el('div', 'empty',
           'nothing is asking anything of you yet. keep fishing, and talk to people.'));
       } else {
         open.forEach(function (v) { b.appendChild(questCard(v)); });
+        if (soon.length) {
+          const h = U.el('div', 'quest-sep', open.length ? 'not yet' : 'somebody has something to say');
+          b.appendChild(h);
+          soon.forEach(function (l) { b.appendChild(lockedCard(l)); });
+        }
       }
     } else if (tab === 'entries') {
       if (!d.journal.length) {
@@ -934,6 +978,51 @@
     return p;
   }
 
+  /* A thread that has not opened: who is carrying it, what it is about, and
+     the list of what is still missing with how far along each one is. The list
+     is the quest's own — the same one the engine tests — so it cannot say one
+     thing and require another. */
+  function lockedCard(l) {
+    const def = l.def;
+    const card = U.el('div', 'quest locked' + (l.ready ? ' ready' : ''));
+
+    const head = U.el('div', 'quest-head');
+    head.appendChild(U.el('span', 'quest-name', l.ready ? def.name : '?????'));
+    if (def.difficulty) {
+      const t = U.el('span', 'quest-tag', def.difficulty);
+      t.style.color = 'var(--ink-4)';
+      head.appendChild(t);
+    }
+    head.appendChild(U.el('span', 'quest-of',
+      l.ready ? 'go and see ' + VF.npcs.name(def.giver).toLowerCase()
+              : VF.npcs.name(def.giver).toLowerCase()));
+    card.appendChild(head);
+    card.appendChild(U.el('div', 'quest-blurb', l.ready ? def.blurb : (def.rumour || def.blurb)));
+
+    if (l.ready) {
+      card.appendChild(U.el('div', 'quest-where',
+        VF.npcs.name(def.giver).toLowerCase() + ' is waiting to say it'));
+      return card;
+    }
+
+    const list = U.el('div', 'quest-check');
+    l.needs.forEach(function (n) {
+      const row = U.el('div', 'quest-need' + (n.done ? ' done' : ''));
+      row.appendChild(U.el('span', 'quest-box', n.done ? '✓' : ''));
+      const main = U.el('div');
+      main.appendChild(U.el('span', null, n.label));
+      if (n.note) main.appendChild(U.el('div', 'quest-need-note', n.note));
+      row.appendChild(main);
+      if (n.need > 1) {
+        row.appendChild(U.el('span', 'quest-need-at',
+          U.commas(Math.min(n.have, n.need)) + ' / ' + U.commas(n.need)));
+      }
+      list.appendChild(row);
+    });
+    card.appendChild(list);
+    return card;
+  }
+
   /* One quest, and where in it the player currently is. Everything drawn here
      comes off the quest definition, so a second quest needs no new UI. */
   function questCard(v) {
@@ -1012,6 +1101,97 @@
 
   /* ------------------------------------------------------------- fishdex */
 
+  /* Which waters the index can talk about: the ones the player has been to.
+     A spot they have not found is not a gap in their record, it is a place
+     that does not exist yet. */
+  function dexWaters() {
+    return VF.locations.list.filter(function (l) {
+      return VF.state.data.seenLocations.indexOf(l.id) >= 0 ||
+             VF.locations.isUnlocked(l.id);
+    });
+  }
+
+  /* One water: what lives in it, what comes up out of it, and how much of both
+     is in the record. The index is built around this now — a spot's roster is
+     its own, and seeing them side by side is the point of having eight of them. */
+  function waterCard(loc) {
+    const d = VF.state.data;
+    const here = d.location === loc.id;
+    const fish = VF.fish.nativeTo(loc.id).filter(function (f) { return !f.hidden || d.fishdex[f.id]; });
+    const home = fish.filter(function (f) { return f.locs[0] === loc.id; });
+    const got = fish.filter(function (f) { return !!d.fishdex[f.id]; }).length;
+    const objs = VF.treasureData.nativeTo(loc.id);
+    const sig = objs.filter(function (t) { return t.locs && t.locs.length === 1; });
+    const gotObj = objs.filter(function (t) { return (d.treasures[t.id] | 0) > 0; }).length;
+
+    const card = U.el('div', 'water' + (here ? ' here' : ''));
+    const head = U.el('div', 'water-head');
+    const mark = U.el('div', 'water-mark');
+    mark.style.background = loc.glow;
+    head.appendChild(mark);
+    const nm = U.el('div');
+    const line = U.el('div', 'water-name');
+    line.appendChild(U.el('span', null, loc.name));
+    if (here) {
+      const t = U.el('span', 'tag', 'here');
+      t.style.color = 'var(--accent)';
+      line.appendChild(t);
+    }
+    nm.appendChild(line);
+    nm.appendChild(U.el('div', 'water-tag', loc.tag));
+    head.appendChild(nm);
+    head.appendChild(U.el('div', 'water-of', got + ' / ' + fish.length));
+    card.appendChild(head);
+
+    const track = U.el('div', 'water-track');
+    const fill = U.el('div', 'water-fill');
+    fill.style.width = (fish.length ? got / fish.length * 100 : 0).toFixed(1) + '%';
+    fill.style.background = 'linear-gradient(90deg, ' +
+      U.rgbToCss(U.shade(U.hexToRgb(loc.glow), -0.45)) + ', ' + loc.glow + ')';
+    track.appendChild(fill);
+    card.appendChild(track);
+
+    /* The tier mix, which is most of what makes one water not another. */
+    const pips = U.el('div', 'water-tiers');
+    VF.rarities.visible().forEach(function (r) {
+      const n = fish.filter(function (f) { return f.rarity === r.id; }).length;
+      if (!n) return;
+      const pip = U.el('span', 'water-tier');
+      const dot = U.el('span', 'water-dot');
+      dot.style.background = r.color;
+      dot.style.boxShadow = '0 0 6px ' + U.rgbToCss(U.hexToRgb(r.glow), 0.6);
+      pip.appendChild(dot);
+      pip.appendChild(U.el('span', null, String(n)));
+      pip.title = n + ' ' + r.name.toLowerCase();
+      pips.appendChild(pip);
+    });
+    card.appendChild(pips);
+
+    const foot = U.el('div', 'water-foot');
+    foot.appendChild(U.el('span', null, home.length + ' live only here'));
+    foot.appendChild(U.el('span', null, gotObj + ' / ' + objs.length + ' objects'));
+    if (sig.length) {
+      const s1 = sig[0];
+      const has = (d.treasures[s1.id] | 0) > 0;
+      const el = U.el('span', 'water-sig');
+      el.appendChild(U.el('span', 'water-sig-k', 'only here'));
+      const v = U.el('span', null, has ? s1.name : '?????');
+      v.style.color = has ? s1.color : 'var(--ink-4)';
+      el.appendChild(v);
+      el.title = has ? s1.desc : 'one object comes up here and nowhere else';
+      foot.appendChild(el);
+    }
+    card.appendChild(foot);
+
+    const go = U.el('button', 'btn btn-sm', here ? 'Show its species' : 'Show its species');
+    go.addEventListener('click', function () {
+      dexTab = 'species'; dexLoc = loc.id; dexFilter = 'all';
+      VF.audio.click(); refresh();
+    });
+    card.appendChild(go);
+    return card;
+  }
+
   function buildDex() {
     const d = VF.state.data;
     /* Species in a hidden tier are not in the total, not in the filter row and
@@ -1020,9 +1200,51 @@
     const shown = VF.fish.knownList();
     const found = shown.filter(function (f) { return !!d.fishdex[f.id]; }).length;
     const p = shell('Fishdex', found + ' of ' + shown.length + ' species recorded');
+
+    p.appendChild(tabs([
+      { id: 'waters', label: 'waters' },
+      { id: 'species', label: 'species' }
+    ], dexTab, function (t) { dexTab = t; refresh(); }));
+
     const b = body();
 
+    if (dexTab === 'waters') {
+      const grid = U.el('div', 'water-grid');
+      dexWaters().forEach(function (l) { grid.appendChild(waterCard(l)); });
+      b.appendChild(grid);
+      /* And the ones that are not from anywhere, which is its own fact about
+         them rather than a hole in the record. */
+      const odd = VF.fish.unplaced().filter(function (f) { return !f.hidden || d.fishdex[f.id]; });
+      const oddGot = odd.filter(function (f) { return !!d.fishdex[f.id]; }).length;
+      const note = U.el('div', 'water-odd');
+      note.appendChild(U.el('div', 'water-odd-k', 'from no particular water'));
+      note.appendChild(U.el('div', 'water-odd-v', oddGot + ' / ' + odd.length +
+        ' — the wrong ones, and whatever a falling sky brings'));
+      const oddGo = U.el('button', 'btn btn-sm', 'Show them');
+      oddGo.addEventListener('click', function () {
+        dexTab = 'species'; dexLoc = 'none'; dexFilter = 'all';
+        VF.audio.click(); refresh();
+      });
+      note.appendChild(oddGo);
+      b.appendChild(note);
+      p.appendChild(b);
+      return p;
+    }
+
     const bar = U.el('div', 'dex-toolbar');
+
+    /* Which water's roster is on screen. This is the spine of the index now:
+       a spot's species are its own, and browsing all four hundred at once was
+       the only way to look at them. */
+    const segL = U.el('div', 'seg');
+    [{ id: 'all', label: 'Everywhere' }].concat(dexWaters().map(function (l) {
+      return { id: l.id, label: l.name.replace(/^The /, '') };
+    })).concat([{ id: 'none', label: 'Nowhere' }]).forEach(function (o) {
+      const btn = U.el('button', dexLoc === o.id ? 'active' : '', o.label);
+      btn.addEventListener('click', function () { dexLoc = o.id; VF.audio.click(); refresh(); });
+      segL.appendChild(btn);
+    });
+    bar.appendChild(segL);
     const segR = U.el('div', 'seg');
     [{ id: 'all', label: 'All' }].concat(VF.rarities.visible().map(function (r) {
       return { id: r.id, label: r.name };
@@ -1052,12 +1274,21 @@
     b.appendChild(bar);
 
     const list = shown.filter(function (f) {
+      if (dexLoc === 'none' && f.locs.length) return false;
+      if (dexLoc !== 'all' && dexLoc !== 'none' && f.locs.indexOf(dexLoc) < 0) return false;
       if (dexFilter !== 'all' && f.rarity !== dexFilter) return false;
       const has = !!d.fishdex[f.id];
       if (dexMode === 'found' && !has) return false;
       if (dexMode === 'missing' && has) return false;
       return true;
     });
+    /* Home water first, so a spot's own species lead and the ones that merely
+       range in from next door follow. */
+    if (dexLoc !== 'all' && dexLoc !== 'none') {
+      list.sort(function (a, b) {
+        return (a.locs[0] === dexLoc ? 0 : 1) - (b.locs[0] === dexLoc ? 0 : 1);
+      });
+    }
 
     const cnt = U.el('div', 'dex-count', list.length + ' shown');
     bar.appendChild(cnt);
@@ -1361,11 +1592,7 @@
           row.appendChild(main);
           const side = U.el('div', 'row-side');
           if (d.rod !== rod.id) {
-            const btn = U.el('button', 'btn btn-sm btn-primary', 'Equip');
-            btn.addEventListener('click', function () {
-              d.rod = rod.id; VF.audio.click(); VF.bus.emit('gear:changed'); VF.save.save(); refresh('rods');
-            });
-            side.appendChild(btn);
+            side.appendChild(equipButton(rod, function () { refresh('rods'); }, ' btn-primary'));
           }
           row.appendChild(side);
           list.appendChild(row);
@@ -1425,17 +1652,31 @@
       const rare = VF.fish.byId(s.rarestFish);
       const tiles = [
         ['Fish landed', U.commas(s.catches), U.commas(s.casts) + ' casts'],
+        (d.level >= VF.progression.MAX_LEVEL
+          ? ['Fathoms', U.commas(d.fathoms | 0),
+             U.commas(d.fathomXp | 0) + ' / ' + U.commas(VF.progression.FATHOM_XP) + ' to the next']
+          : ['Level', String(d.level), U.commas(d.xp) + ' / ' + U.commas(VF.progression.xpToNext())]),
         ['Discovered', Object.keys(d.fishdex).length + ' / ' + VF.fish.count, 'species'],
         ['Biggest catch', s.biggestKg ? U.weight(s.biggestKg) : '—', big ? big.name : ''],
         ['Rarest catch', rare ? VF.rarities.get(rare.rarity).name : '—', rare ? rare.name : ''],
         ['Total earned', '◈ ' + U.money(s.earned), '◈ ' + U.money(s.spent) + ' spent'],
         ['Fish sold', U.commas(s.sold), U.commas(s.released) + ' released'],
         ['Legendary+', U.commas(s.legendaryCatches), U.commas(s.voidCatches) + ' void'],
+        /* The two rarest tiers were counted and never shown anywhere. A tier
+           you can catch and cannot see the count of may as well not be kept. */
+        ['!@#$%^&$#', U.commas(s.glitchCatches | 0),
+         (s.unknownCatches | 0) ? U.commas(s.unknownCatches | 0) + ' of the other thing' : 'and one tier above it'],
         ['Mutations', U.commas(s.mutationsFound), U.commas(s.recordsBroken) + ' records broken'],
         ['Escapes', U.commas(s.escapes), U.commas(s.linesSnapped) + ' lines snapped'],
         ['Clean fights', U.commas(s.perfectReels), 'never in the red'],
+        ['Second chances', U.commas(s.secondChances | 0), 'the rod would not have it'],
         ['Encounters', U.commas(s.encounters), 'something below'],
-        ['Time at the water', U.duration(s.playSeconds), 'reputation ' + U.commas(d.reputation)]
+        /* Reputation stops paying into luck at 480 and nothing said so, which
+           made releasing quietly worthless from a point nobody could see. */
+        ['Reputation', U.commas(d.reputation),
+         d.reputation >= VF.progression.REP_FULL ? 'the water knows you'
+           : Math.round(d.reputation / VF.progression.REP_FULL * 100) + '% of what it is worth'],
+        ['Time at the water', U.duration(s.playSeconds), 'longest run ' + U.commas(d.records.bestStreak | 0)]
       ];
       tiles.forEach(function (t) {
         const tile = U.el('div', 'stat-tile');
@@ -1638,14 +1879,58 @@
     const info = U.el('div');
     info.style.cssText = 'font-size:11.5px;color:var(--ink-3);margin-bottom:12px;line-height:1.6';
     info.textContent = VF.save.isAvailable()
-      ? 'Progress saves automatically to this browser. Closing the tab is safe.'
-      : 'Storage is unavailable in this browser, so progress will not persist.';
+      ? 'Four games. The one you are playing saves itself; the others sit where you left them.'
+      : 'Storage is unavailable in this browser, so nothing here will persist.';
     data.appendChild(info);
-    const row = U.el('div', 'set-row');
-    const resetBtn = U.el('button', 'btn btn-sm btn-danger', 'Reset everything');
-    resetBtn.addEventListener('click', confirmReset);
-    row.appendChild(resetBtn);
-    data.appendChild(row);
+    /* Four games, side by side. A row says what is in the slot so the choice
+       is made on what the game looks like rather than on a number. */
+    const list = U.el('div', 'saveslot-list');
+    VF.save.slots().forEach(function (sl) {
+      const here = sl.slot === VF.save.slot();
+      /* `blank`, not `empty`: a global `.empty` already exists for the
+         placeholder a panel shows when a list has nothing in it, and it is
+         centred with forty-four pixels of padding. */
+      const row = U.el('div', 'saveslot' + (here ? ' here' : '') + (sl.empty ? ' blank' : ''));
+
+      const mark = U.el('div', 'saveslot-mark');
+      mark.style.background = here ? 'var(--accent)' : (sl.empty ? 'var(--line-2)' : 'var(--good)');
+      row.appendChild(mark);
+
+      const main = U.el('div', 'saveslot-main');
+      const name = U.el('div', 'saveslot-name');
+      name.appendChild(U.el('span', null, 'slot ' + (sl.slot + 1)));
+      if (here) {
+        const t = U.el('span', 'tag', 'playing');
+        t.style.color = 'var(--accent)';
+        name.appendChild(t);
+      }
+      main.appendChild(name);
+      main.appendChild(U.el('div', 'saveslot-desc', sl.empty ? 'empty'
+        : (sl.level >= VF.progression.MAX_LEVEL
+             ? 'lv 99 · ' + sl.fathoms + ' fathoms' : 'lv ' + sl.level) +
+          ' · ' + U.commas(sl.species) + ' species · ◈ ' + U.money(sl.money)));
+      if (!sl.empty) {
+        main.appendChild(U.el('div', 'saveslot-sub',
+          VF.locations.get(sl.location).name + ' · ' + U.duration(sl.playSeconds)));
+      }
+      row.appendChild(main);
+
+      const acts = U.el('div', 'saveslot-acts');
+      if (!here) {
+        const go = U.el('button', 'btn btn-sm' + (sl.empty ? '' : ' btn-primary'),
+                        sl.empty ? 'Start here' : 'Load');
+        go.addEventListener('click', function () { switchSlot(sl); });
+        acts.appendChild(go);
+      }
+      if (!sl.empty) {
+        const del = U.el('button', 'btn btn-sm btn-danger', 'Erase');
+        del.addEventListener('click', function () { confirmErase(sl); });
+        acts.appendChild(del);
+      }
+      row.appendChild(acts);
+      list.appendChild(row);
+    });
+    data.appendChild(list);
     b.appendChild(data);
 
     p.appendChild(b);
@@ -1690,32 +1975,58 @@
     return row;
   }
 
-  function confirmReset() {
+  /* The one door that discards a game. It shows what is about to be replaced
+     and what is about to replace it, and it puts the outgoing save in the box
+     on the way past so a mistaken paste is recoverable. */
+  /* Everything the world has to be told when the game underneath it changes.
+     Both slot doors go through here, and so does erasing the one in play. */
+  function adoptGame() {
+    VF.catchUI.close();
+    VF.fishing.hardReset();
+    VF.loot.invalidatePool();
+    VF.encounters.reset();
+    VF.fx.reset();
+    VF.particles.clearAll();
+    VF.scene.rebuild();
+    VF.scene.seedAmbient();
+    VF.audio.setVolumes();
+    document.body.className = 'q-' + VF.state.data.settings.quality;
+    VF.bus.emit('gear:changed');
+    VF.bus.emit('location:changed');
+    VF.hud.refreshAll();
+  }
+
+  function switchSlot(sl) {
     VF.audio.click();
+    const res = VF.save.use(sl.slot);
+    adoptGame();
+    if (res.fresh) VF.tutorial.reset();
+    refresh('settings');
+    VF.toast.plain(res.fresh
+      ? 'slot ' + (sl.slot + 1) + ' · a new game'
+      : 'slot ' + (sl.slot + 1) + ' · level ' + sl.level + ' · ' +
+        U.commas(sl.species) + ' species', 'good', 3600);
+  }
+
+  function confirmErase(sl) {
+    VF.audio.click();
+    const here = sl.slot === VF.save.slot();
     const dlg = U.el('div', 'dialog');
-    dlg.appendChild(U.el('h3', null, 'Reset everything?'));
+    dlg.appendChild(U.el('h3', null, 'Erase slot ' + (sl.slot + 1) + '?'));
     dlg.appendChild(U.el('p', null,
-      'This erases your money, level, collection, records and settings. It cannot be undone.'));
+      'Level ' + sl.level + ', ' + U.commas(sl.species) + ' species and ' +
+      U.duration(sl.playSeconds) + ' at the water.' +
+      (here ? ' It is the game you are playing, and it will start again empty.' : '') +
+      ' This cannot be undone.'));
     const acts = U.el('div', 'dialog-actions');
     const no = U.el('button', 'btn', 'Cancel');
-    no.addEventListener('click', function () { VF.audio.back(); refresh(); });
-    const yes = U.el('button', 'btn btn-danger', 'Reset');
+    no.addEventListener('click', function () { VF.audio.back(); refresh('settings'); });
+    const yes = U.el('button', 'btn btn-danger', 'Erase');
     yes.addEventListener('click', function () {
-      VF.save.reset();
-      VF.catchUI.close();
-      VF.fishing.hardReset();
-      VF.loot.invalidatePool();
-      VF.encounters.reset();
-      VF.fx.reset();
-      VF.particles.clearAll();
-      VF.scene.rebuild();
-      VF.scene.seedAmbient();
-      VF.audio.setVolumes();
-      document.body.className = 'q-' + VF.state.data.settings.quality;
-      VF.hud.refreshAll();
-      VF.tutorial.reset();
-      close();
-      VF.toast.plain('Everything reset', 'warn');
+      const wasHere = VF.save.erase(sl.slot);
+      if (wasHere) { adoptGame(); VF.tutorial.reset(); }
+      refresh('settings');
+      VF.toast.plain('slot ' + (sl.slot + 1) + ' erased', 'warn', 3000);
     });
     acts.appendChild(no); acts.appendChild(yes);
     dlg.appendChild(acts);
@@ -1723,6 +2034,7 @@
     node = dlg;
     if (prev && prev.parentNode) prev.parentNode.replaceChild(dlg, prev);
   }
+
 
   /* ------------------------------------------------- the case opening
      The result is decided before the animation starts. The strip is then

@@ -3,10 +3,21 @@
 (function (VF) {
   'use strict';
 
+  /* Four games, not one. `KEY` is where the single save used to live and is
+     read once, on the first boot after this change, so nobody's game is left
+     behind in it. */
   const KEY = 'voidfishing.save.v1';
+  const SLOT_KEY = 'voidfishing.save.v1.s';
+  const ACTIVE_KEY = 'voidfishing.slot';
+  const SLOTS = 4;
+
   const AUTOSAVE_INTERVAL = 8; // seconds
   let sinceSave = 0;
   let available = true;
+  let active = 0;
+
+  function slotKey(i) { return SLOT_KEY + (i | 0); }
+  function clampSlot(i) { return Math.max(0, Math.min(SLOTS - 1, i | 0)); }
 
   function storage() {
     try {
@@ -124,8 +135,8 @@
     const st = storage();
     if (!st) return false;
     try {
-      const payload = JSON.stringify(VF.state.data);
-      st.setItem(KEY, payload);
+      st.setItem(slotKey(active), JSON.stringify(VF.state.data));
+      st.setItem(ACTIVE_KEY, String(active));
       sinceSave = 0;
       VF.bus.emit('save:written');
       return true;
@@ -135,44 +146,110 @@
     }
   }
 
+  /* Whatever is in a slot, as game state, or null. Nothing here touches the
+     game that is running — the panel asks this four times to draw the list. */
+  function readSlot(i) {
+    const st = storage();
+    if (!st) return null;
+    let raw = null;
+    try { raw = st.getItem(slotKey(i)); } catch (e) { return null; }
+    if (!raw) return null;
+    let parsed = null;
+    try { parsed = JSON.parse(raw); } catch (e) {
+      console.warn('[save] slot ' + i + ' is corrupt');
+      return null;
+    }
+    if (!parsed || typeof parsed !== 'object') return null;
+    return sanitise(merge(VF.state.defaults(), parsed));
+  }
+
+  /* The one line the slot list draws per row. */
+  function summary(i) {
+    const d = readSlot(i);
+    if (!d) return { slot: i, empty: true };
+    return {
+      slot: i, empty: false,
+      level: d.level, fathoms: d.fathoms | 0,
+      money: d.money, species: Object.keys(d.fishdex).length,
+      playSeconds: d.stats.playSeconds | 0,
+      location: d.location,
+      created: d.created || 0
+    };
+  }
+  function slots() {
+    const out = [];
+    for (let i = 0; i < SLOTS; i++) out.push(summary(i));
+    return out;
+  }
+
+  /* Anything left in the old single-save key belongs to whoever was playing
+     it, so it becomes slot one the first time this build opens. */
+  function migrate(st) {
+    let legacy = null;
+    try { legacy = st.getItem(KEY); } catch (e) { return; }
+    if (!legacy) return;
+    try {
+      if (!st.getItem(slotKey(0))) st.setItem(slotKey(0), legacy);
+      st.removeItem(KEY);
+    } catch (e) { /* a full disk is not worth breaking the boot over */ }
+  }
+
   function load() {
     const st = storage();
     const fresh = VF.state.defaults();
     if (!st) { VF.state.data = fresh; return { loaded: false, reason: 'unavailable' }; }
-    let raw = null;
-    try { raw = st.getItem(KEY); } catch (e) { /* ignore */ }
-    if (!raw) { VF.state.data = fresh; return { loaded: false, reason: 'empty' }; }
-    let parsed = null;
-    try { parsed = JSON.parse(raw); }
-    catch (e) {
-      console.warn('[save] corrupt save discarded');
-      VF.state.data = fresh;
-      return { loaded: false, reason: 'corrupt' };
-    }
-    VF.state.data = sanitise(merge(fresh, parsed));
-    return { loaded: true };
+    migrate(st);
+    let want = 0;
+    try { want = clampSlot(parseInt(st.getItem(ACTIVE_KEY), 10) || 0); } catch (e) { want = 0; }
+    active = want;
+    const d = readSlot(active);
+    if (!d) { VF.state.data = fresh; return { loaded: false, reason: 'empty', slot: active }; }
+    VF.state.data = d;
+    return { loaded: true, slot: active };
   }
 
-  function reset() {
+  /* Put the running game down and pick another one up. The game being left is
+     written first, or switching away from it loses up to eight seconds. */
+  function use(i) {
+    i = clampSlot(i);
+    save();
+    active = i;
     const st = storage();
-    if (st) { try { st.removeItem(KEY); } catch (e) { /* ignore */ } }
-    VF.state.data = VF.state.defaults();
-    VF.bus.emit('save:reset');
+    if (st) { try { st.setItem(ACTIVE_KEY, String(active)); } catch (e) { /* ignore */ } }
+    const d = readSlot(active);
+    const startedFresh = !d;
+    VF.state.data = d || VF.state.defaults();
+    if (startedFresh) save();
+    VF.bus.emit('save:slot', { slot: active, fresh: startedFresh });
+    return { slot: active, fresh: startedFresh };
   }
+
+  /* Empty a slot. Emptying the one being played leaves a new game in it,
+     because there has to be a game. */
+  function erase(i) {
+    i = clampSlot(i);
+    const st = storage();
+    if (st) { try { st.removeItem(slotKey(i)); } catch (e) { /* ignore */ } }
+    if (i === active) {
+      VF.state.data = VF.state.defaults();
+      VF.bus.emit('save:reset');
+    }
+    VF.bus.emit('save:slot', { slot: active, fresh: i === active });
+    return i === active;
+  }
+
+  function reset() { erase(active); }
 
   function tick(dt) {
     sinceSave += dt;
     if (sinceSave >= AUTOSAVE_INTERVAL) save();
   }
 
-  function exportString() {
-    try { return btoa(unescape(encodeURIComponent(JSON.stringify(VF.state.data)))); }
-    catch (e) { return null; }
-  }
-
   VF.save = {
     save: save, load: load, reset: reset, tick: tick,
-    exportString: exportString,
+    SLOTS: SLOTS,
+    slots: slots, summary: summary, use: use, erase: erase,
+    slot: function () { return active; },
     isAvailable: function () { return available; }
   };
 

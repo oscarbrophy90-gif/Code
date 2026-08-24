@@ -35,7 +35,12 @@ const path = require('path');
         d.location = locs[i % locs.length];
         VF.loot.invalidatePool(); VF.weather.reconcile();
         VF.bus.emit('location:changed');
-        const rods = VF.rods.list.filter(r => d.level >= r.level);
+        /* What a player at this level could actually be holding. The registry
+           also carries the wanderer's stock and the console-only admin rod,
+           both at level 0 — picking the last of those equipped a rod with
+           rare 999 and turned the whole run into ? tier, which tells us
+           nothing about the game anybody plays. */
+        const rods = VF.rods.list.filter(r => d.level >= r.level && !r.admin && !r.merchant);
         d.ownedRods = rods.map(r => r.id);
         d.rod = rods[rods.length - 1].id;
         const baits = VF.bait.list.filter(b => d.level >= b.level);

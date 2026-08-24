@@ -14,7 +14,7 @@
 
   function init() {
     [
-      'hud', 'moneyVal', 'levelVal', 'xpFill', 'xpText', 'locName', 'wxName', 'timeName',
+      'hud', 'moneyVal', 'levelVal', 'xpFill', 'xpText', 'streakVal', 'locName', 'wxName', 'timeName',
       'chipLoc', 'gearRod', 'gearBait', 'rodName', 'baitName', 'baitCount',
       'castMeter', 'castFill', 'actionBtn', 'actionLabel', 'actionHint',
       'fightUI', 'fightName', 'fightWarn', 'mgTrack', 'mgBar', 'mgFish',
@@ -90,6 +90,44 @@
     window.addEventListener('pointercancel', pressEnd);
     window.addEventListener('blur', pressEnd);
 
+    /* A door for the owner of the game. Type the word and the rod that is not
+       in the game is in your hands.
+
+       It has to swallow its own letters on the way through: `m` opens the map,
+       so without this you would get the map three letters in and never finish
+       the word. Only letters that are still spelling it are eaten — press `m`
+       on its own and the map opens exactly as before. */
+    const CODE = 'admin';
+    let typed = '', typedAt = 0;
+
+    function typedCode(e) {
+      if (e.ctrlKey || e.metaKey || e.altKey) return false;
+      if (!/^Key[A-Z]$/.test(e.code)) { typed = ''; return false; }
+      const now = Date.now();
+      // a long pause between letters is a new word, not the middle of this one
+      if (now - typedAt > 1400) typed = '';
+      typedAt = now;
+
+      const next = typed + e.code.slice(3).toLowerCase();
+      if (CODE.indexOf(next) !== 0) {
+        /* Not this word any more. Keep whatever tail of it could still be the
+           start of one, so `mmadmin` and a fumbled first letter both work. */
+        typed = '';
+        for (let i = 1; i < next.length; i++) {
+          if (CODE.indexOf(next.slice(i)) === 0) { typed = next.slice(i); break; }
+        }
+        return typed.length > 0;
+      }
+
+      typed = next;
+      e.preventDefault();
+      if (typed !== CODE) return true;
+      typed = '';
+      // the grant announces itself through rod:granted like any other rod does
+      if (VF.rods.admin()) VF.fx.shake(5, 4);
+      return true;
+    }
+
     window.addEventListener('keydown', function (e) {
       if (e.repeat) return;
       const tag = document.activeElement && document.activeElement.tagName;
@@ -118,6 +156,7 @@
         pressStart(e);
         return;
       }
+      if (typedCode(e)) return;
       if (VF.state.rt.panelOpen) return;
       switch (e.code) {
         case 'KeyQ': e.preventDefault(); VF.panels.open('shop'); break;
@@ -221,6 +260,29 @@
     // fish and the bar losing it, which is the thing the player needs to hear
     VF.bus.on('fishing:grip', function () { VF.audio.nibble(); });
     VF.bus.on('fishing:slip', function () { VF.audio.strain(0.9); });
+    /* Not a loss. It has to read as the rod doing something rather than as the
+       game failing to notice you lost, so it gets the snap's whole treatment
+       and then takes it back in gold. */
+    VF.bus.on('fishing:saved', function (e) {
+      VF.audio.snap();
+      VF.fx.shake(6, 4);
+      VF.fx.flash('rgba(255,214,130,0.34)', 0.42);
+      VF.toast.plain(e.reason === 'snap'
+        ? 'the line went — and then it had not gone'
+        : 'the hook came out — and then it was back in', 'good', 3000);
+      showPrompt('Second chance', '#ffd782', 1.35);
+    });
+
+    /* Past the cap, this is the only progression beat left, so it gets one. */
+    VF.bus.on('fathom:reached', function (e) {
+      VF.audio.stinger('grand', 3);
+      VF.fx.flash('rgba(180,138,255,0.22)', 0.36);
+      VF.fx.pulse(0.5);
+      showPrompt('fathom ' + e.fathoms, '#c9a8ff', 1.6);
+      VF.toast.plain('another fathom down. the water is still counting.', 'good', 3600);
+      refreshLevel();
+    });
+
     VF.bus.on('fishing:lost', function (e) {
       VF.audio.reelStop();
       if (e.reason === 'snap') {
@@ -276,8 +338,15 @@
     VF.bus.on('quest:started', function (def) {
       VF.audio.discover();
       VF.fx.pulse(0.4);
+      /* Say who to go and see. A thread opening used to be a name and a line of
+         flavour, and the person carrying it was somewhere on a shore with no
+         indication that they were now the point. */
+      const who = def.giver ? VF.npcs.name(def.giver).toLowerCase() : null;
       VF.toast.show('<strong>' + U.esc(def.name) + '</strong><br><span style="color:var(--ink-3)">' +
-        U.esc(def.blurb) + '</span>', null, 7000);
+        U.esc(def.blurb) + '</span>' +
+        (who ? '<br><span style="color:var(--accent)">go and see ' + U.esc(who) + '</span>' : ''),
+        null, 8000);
+      showPrompt('a thread opens', '#9ec6ff', 1.3);
       flashMenu('journal');
     });
 
@@ -662,11 +731,38 @@
 
   function refreshLevel() {
     const d = VF.state.data;
-    D.levelVal.textContent = 'LV ' + d.level + (d.streak >= 5 ? '  ×' + d.streak : '');
-    const need = VF.progression.xpToNext();
-    const pctv = U.clamp(d.xp / Math.max(1, need), 0, 1);
-    D.xpFill.style.width = (pctv * 100).toFixed(1) + '%';
-    D.xpText.textContent = U.commas(d.xp) + ' / ' + U.commas(need);
+    const capped = d.level >= VF.progression.MAX_LEVEL;
+
+    /* At the cap the bar used to freeze part-filled and never move again,
+       because the experience was being thrown away. It counts fathoms now, so
+       there is still something arriving. */
+    if (capped) {
+      D.levelVal.textContent = 'LV 99';
+      D.levelVal.classList.add('deep');
+      D.xpFill.classList.add('deep');
+      D.xpFill.style.width = (VF.progression.fathomPct() * 100).toFixed(1) + '%';
+      D.xpText.textContent = (d.fathoms | 0) + ' fathoms · ' +
+        U.commas(d.fathomXp | 0) + ' / ' + U.commas(VF.progression.FATHOM_XP);
+    } else {
+      D.levelVal.textContent = 'LV ' + d.level;
+      D.levelVal.classList.remove('deep');
+      D.xpFill.classList.remove('deep');
+      const need = VF.progression.xpToNext();
+      D.xpFill.style.width = (U.clamp(d.xp / Math.max(1, need), 0, 1) * 100).toFixed(1) + '%';
+      D.xpText.textContent = U.commas(d.xp) + ' / ' + U.commas(need);
+    }
+
+    /* And the run, saying what it is worth rather than sitting next to the
+       level looking like a multiplier on everything. */
+    const n = d.streak | 0;
+    const bonus = Math.round((VF.progression.streakMult() - 1) * 100);
+    if (n >= 3 && bonus > 0) {
+      D.streakVal.textContent = n + ' in a row · +' + bonus + '% value';
+      D.streakVal.classList.remove('hidden');
+      D.streakVal.classList.toggle('hot', bonus >= Math.round(VF.progression.STREAK_CAP * 100));
+    } else {
+      D.streakVal.classList.add('hidden');
+    }
   }
 
   /* --------------------------------------------------------------- tick */
