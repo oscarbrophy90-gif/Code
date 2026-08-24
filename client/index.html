@@ -10,6 +10,10 @@
   </head>
   <body>
     <div id="app"></div>
+    <!-- Served by the Socket.IO server. Missing (404) when the game is opened
+         from a file or a plain static host, which is fine: the game checks for
+         it and carries on single-player. -->
+    <script src="/socket.io/socket.io.js"></script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

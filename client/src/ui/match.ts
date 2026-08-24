@@ -40,6 +40,7 @@ import { store } from '../state/store.ts';
 import { el, clear, toast } from './dom.ts';
 import { buildTouchControls } from './touch.ts';
 import { playLiveReplay, snapshotFrame, type ReplayFrame } from './livereplay.ts';
+import { remotePlayers, sendPosition, updateRemotes } from '../net/multiplayer.ts';
 
 export interface MatchResult {
   won: boolean;
@@ -376,6 +377,13 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
     if (mateSquad) for (const [pid, inp] of mateSquad.update(state, dt)) inputs[pid] = inp;
 
     stepWorld(inputs, dt);
+
+    // Multiplayer: the local player's actual court position, straight off the
+    // simulation, sent only when it has really changed. Everything above this
+    // line is the game exactly as it was.
+    const mine = state.players[localPid];
+    sendPosition(mine.x, mine.z);
+
     if (drill) updateDrill(dt);
     playDribbleBounce();
     playNetSwish();
@@ -717,7 +725,16 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
     const rimBend = Math.max(spring, hanging ? 0.5 : 0);
     courtRenderer.drawHoop(ctx, cam, park, netSwing, rimBend);
 
+    // Multiplayer: bring remote players toward wherever the server last put
+    // them. They are drawn alongside the local cast below; they are not part
+    // of the simulation, so nothing here changes how the game plays.
+    updateRemotes(dt);
+    const guests = remotePlayers();
+
     // Shadows first so nobody's shadow lands on a body.
+    for (const g of guests) {
+      playerRenderer.drawShadow(ctx, cam, g.body.x, g.body.z, g.body.y, 0.9 + (g.body.cfg.heightIn - 70) * 0.012);
+    }
     for (const p of state.players) {
       playerRenderer.drawShadow(ctx, cam, p.x, p.z, p.y, 0.9 + (p.cfg.heightIn - 70) * 0.012);
     }
@@ -740,6 +757,13 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
             state.ball.owner === p.pid,
             carried === p.pid ? state.ball : null,
           ),
+      })),
+      // Other people on the court, drawn by the same renderer, in the same
+      // depth order, wearing real kit. Never flagged local, never given the
+      // ball — you control your player and nobody else's.
+      ...guests.map((g) => ({
+        z: g.body.z,
+        draw: () => playerRenderer.draw(ctx, cam, g.body, state.time, false, false, null),
       })),
       ...(carried === null
         ? [{ z: state.ball.z, draw: () => playerRenderer.drawBall(ctx, cam, state.ball, state.time) }]

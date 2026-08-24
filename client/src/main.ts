@@ -26,6 +26,7 @@ import { renderOnline } from './ui/screens/online.ts';
 import { inParty, leaveParty, LOBBY_ROUTES } from './state/party.ts';
 import { unreadCount } from './state/social.ts';
 import { grandChampLabel, onlineRank } from '@hoops/shared';
+import { connectMultiplayer } from './net/multiplayer.ts';
 
 export type Route =
   | 'home'
@@ -313,6 +314,11 @@ function routeFromHash(): Route {
   const hash = location.hash.replace('#', '') as Route;
   return SCREENS[hash] ? hash : 'home';
 }
+
+// Multiplayer: joins the Socket.IO server when the game is served by one.
+// A no-op with no server (file://, or any other host), so the game plays
+// exactly as before in every offline case.
+connectMultiplayer();
 
 navigate(routeFromHash());
 
