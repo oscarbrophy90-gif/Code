@@ -14,3 +14,8 @@ client/standalone-build/
 # Recovery copies the server writes when it finds a board it cannot parse.
 server/data/*.corrupt-*
 server/data/*.tmp
+
+# The admin authenticator. Built by voidfishing-src/tools/build-authenticator.js
+# and deliberately not committed: it is the page that shows you the door code,
+# and this repository is public. Rebuild it rather than publish it.
+void-fishing-authenticator.html

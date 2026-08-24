@@ -245,7 +245,8 @@
        over and no level reaches it — the shop skips it, the wanderer never
        stocks it, and `blocked` refuses it outright. It exists so the person
        who built the game can hold the thing, and the only way in is to ask
-       for it from the console: VF.rods.admin() */
+       for it at the admin console — `/give admin rod`, which is behind the
+       four-digit door. */
 
     { id: 'm_abyssal_dragon', name: 'Abyssal Dragon', admin: true, noShop: true,
       cost: 0, level: 0,
@@ -408,8 +409,9 @@
     return true;
   }
 
-  /* The console door. Nothing in the game calls this and nothing ever should:
-     it is here so the game's owner can hold the admin rod. */
+  /* The console door. Exactly one thing calls this — the `/give admin rod`
+     command in js/ui/console.js, which cannot be reached without the code —
+     and nothing else ever should. */
   function admin() {
     const rod = BY_ID.m_abyssal_dragon;
     if (!rod) return false;

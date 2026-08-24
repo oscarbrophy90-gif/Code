@@ -90,67 +90,51 @@
     window.addEventListener('pointercancel', pressEnd);
     window.addEventListener('blur', pressEnd);
 
-    /* A door for the owner of the game. Type the word and the rod that is not
-       in the game is in your hands.
+    /* There used to be a second door here: typing the word `admin` handed over
+       the rod that is not in the game. It has been removed, because it made
+       the lock on the other door pointless — that rod is `/give admin rod`,
+       which is behind the code, and a five-letter word standing next to a
+       gate that grants the same thing is not a gate. One way in now, and it
+       asks. */
 
-       It has to swallow its own letters on the way through: `m` opens the map,
-       so without this you would get the map three letters in and never finish
-       the word. Only letters that are still spelling it are eaten — press `m`
-       on its own and the map opens exactly as before. */
-    const CODE = 'admin';
-    let typed = '', typedAt = 0;
+    /* Three hashes in a row, quickly, and the admin door is knocked on. `#`
+       does nothing else in this game, so unlike the word above it has nothing
+       to swallow — but it still has to be three in a row rather than three in
+       a minute, or leaning on the key would eventually get there.
 
-    function typedCode(e) {
-      if (e.ctrlKey || e.metaKey || e.altKey) return false;
-      if (!/^Key[A-Z]$/.test(e.code)) { typed = ''; return false; }
+       Two things about `#` that `/` did not have. It is Shift+3 on most
+       layouts, which fires a keydown of its own for the Shift before every
+       one of them: counting that as "a different key" would reset the run
+       every time and the door would never open at all. And it is AltGr+3 on
+       some European layouts, which Windows reports as ctrl+alt — so what is
+       tested is the character that arrived rather than how it was produced.
+       `e.code` is no good for the same reason: `#` is Digit3 here and
+       Backslash on a UK keyboard. */
+    let hashes = 0, hashAt = 0;
+
+    function hashCode(e) {
+      // a modifier on its own is part of typing `#`, not an interruption
+      if (e.key === 'Shift' || e.key === 'Control' || e.key === 'Alt' || e.key === 'Meta') return false;
+      if (e.key !== '#' || e.metaKey) { hashes = 0; return false; }
       const now = Date.now();
-      // a long pause between letters is a new word, not the middle of this one
-      if (now - typedAt > 1400) typed = '';
-      typedAt = now;
-
-      const next = typed + e.code.slice(3).toLowerCase();
-      if (CODE.indexOf(next) !== 0) {
-        /* Not this word any more. Keep whatever tail of it could still be the
-           start of one, so `mmadmin` and a fumbled first letter both work. */
-        typed = '';
-        for (let i = 1; i < next.length; i++) {
-          if (CODE.indexOf(next.slice(i)) === 0) { typed = next.slice(i); break; }
-        }
-        return typed.length > 0;
-      }
-
-      typed = next;
+      if (now - hashAt > 2500) hashes = 0;   // AltGr+3 is slower to repeat than Shift+3
+      hashAt = now;
+      hashes++;
       e.preventDefault();
-      if (typed !== CODE) return true;
-      typed = '';
-      // the grant announces itself through rod:granted like any other rod does
-      if (VF.rods.admin()) VF.fx.shake(5, 4);
-      return true;
-    }
-
-    /* Three slashes in a row, quickly, and the admin console opens. `/` does
-       nothing else in this game, so unlike the word above it has nothing to
-       swallow — but it still has to be three in a row rather than three in a
-       minute, or leaning on the key would eventually get there. */
-    let slashes = 0, slashAt = 0;
-
-    function slashCode(e) {
-      if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) { slashes = 0; return false; }
-      const now = Date.now();
-      if (now - slashAt > 1400) slashes = 0;
-      slashAt = now;
-      slashes++;
-      e.preventDefault();
-      if (slashes < 3) return true;
-      slashes = 0;
+      if (hashes < 3) return true;
+      hashes = 0;
       VF.adminConsole.open();
       return true;
     }
 
     window.addEventListener('keydown', function (e) {
       if (e.repeat) return;
-      const tag = document.activeElement && document.activeElement.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      /* Stand down for text entry only. A focused volume slider is an INPUT
+         too, and treating it as one used to deaden the whole keyboard — Escape
+         included, so a panel could not be closed without the mouse. */
+      const el = document.activeElement;
+      const tag = el && el.tagName;
+      if (tag === 'TEXTAREA' || (tag === 'INPUT' && el.type !== 'range')) return;
 
       if (VF.cutscene && VF.cutscene.active()) {
         if (e.code === 'Space' || e.code === 'Enter' || e.code === 'Escape') {
@@ -175,9 +159,13 @@
         pressStart(e);
         return;
       }
-      if (typedCode(e)) return;
-      // the console door works with a panel already open, so it is checked first
-      if (slashCode(e)) return;
+      /* Checked ahead of the panel guard below, so the door works with the shop
+         or the bag already open. Deliberately NOT ahead of the cutscene and
+         visit guards above: a cutscene clears rt.panelOpen when it finishes,
+         so a panel opened over one would still be on screen while the game
+         believed nothing was open. Six seconds of waiting is the cheaper of
+         the two. */
+      if (hashCode(e)) return;
       if (VF.state.rt.panelOpen) return;
       switch (e.code) {
         case 'KeyQ': e.preventDefault(); VF.panels.open('shop'); break;

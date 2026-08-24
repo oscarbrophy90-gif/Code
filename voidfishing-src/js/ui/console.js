@@ -1,7 +1,11 @@
 /* VOID FISHING — the admin console.
 
    Not in the game. There is no button for it and nothing links to it: three
-   slashes in a row open it and that is the only door. Everything it does is
+   hashes in a row knock on the door, and then the door asks for a four-digit
+   code that rolls every thirty minutes (js/systems/authcode.js works out what
+   it is; tools/build-authenticator.js builds the page that tells you).
+
+   Everything it does past the door is
    something the game already knows how to do — granting a rod goes through
    the same rod:granted the shop uses, and setting money writes the same field
    an economy payout does — so nothing here is a second way of being wrong. */
@@ -12,7 +16,33 @@
   const LOG_MAX = 60;
 
   let log = [];          // { text, kind } — survives closing the panel
-  let unlocked = false;  // has the door been opened this session
+  let unlocked = false;  // has the code been given correctly this session
+  let knocked = false;   // has the door been knocked on at all this session
+
+  /* Who the code belongs to, shown on the gate. Left blank on purpose.
+
+     It was a real address, and it is decoration — nothing is posted anywhere
+     (see RELAY below), so the door works identically without it. What it did
+     do was put a named person's school address into a public repository, in
+     plaintext, for as long as the repository exists. Put yours back here if
+     you want it; it will then be in every copy of the game you send anybody. */
+  const EMAIL = '';
+
+  /* A URL that accepts a POST and sends an email, if you ever stand one up.
+     Left empty on purpose and shipping that way: putting a live third-party
+     key in here would put it in every copy of the game you ever send anybody,
+     for them to read and use to post mail to that address as often as they
+     liked. Empty means nothing is sent and the panel says nothing was sent
+     rather than pretending otherwise.
+
+     Worth being straight about what it would buy if you did set it: the code
+     is worked out by this file, so it is already here before any mail goes
+     anywhere. Emailing it is a convenience — the code on your phone instead
+     of in another tab — and not a second lock. */
+  const RELAY = '';
+
+  const MAX_TRIES = 5;   // per code, so guessing all ten thousand is not a plan
+  let tries = 0, triesWindow = -1, sentWindow = -1, sentState = '';
 
   /* ------------------------------------------------------------- commands */
 
@@ -149,9 +179,164 @@
     out.scrollTop = out.scrollHeight;
   }
 
+  /* ----------------------------------------------------------------- door */
+
+  /* Attempts belong to a code, not to a session: when the code rolls, the
+     count starts again. Five guesses every thirty minutes against four digits
+     is roughly two years of guessing, which is enough. */
+  function triesLeft() {
+    const w = VF.authcode.windowAt(Date.now());
+    if (w !== triesWindow) { triesWindow = w; tries = 0; }
+    return Math.max(0, MAX_TRIES - tries);
+  }
+
+  /* Posts the code, if and only if somewhere to post it has been configured.
+     Once per code — knocking five times should not send five emails. */
+  function deliver(onState) {
+    const w = VF.authcode.windowAt(Date.now());
+    if (!RELAY) { sentState = 'norelay'; onState(sentState); return; }
+    if (w === sentWindow) { onState(sentState); return; }
+    sentWindow = w;
+    sentState = 'sending';
+    onState(sentState);
+    const body = JSON.stringify({
+      to: EMAIL,   // set EMAIL above, or there is nobody to send it to
+      subject: 'void fishing · admin code',
+      text: 'The code is ' + VF.authcode.current() + '. It is good for the next ' +
+            Math.ceil(VF.authcode.remaining() / 60000) + ' minutes.'
+    });
+    // no-cors would hide the failure, so the failure is allowed to be visible
+    fetch(RELAY, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body })
+      .then(function (r) { sentState = r.ok ? 'sent' : 'failed'; onState(sentState); })
+      .catch(function () { sentState = 'failed'; onState(sentState); });
+  }
+
+  function statusLine(state) {
+    const who = EMAIL || 'the owner';
+    if (state === 'sending') return 'sending a code to ' + who + '…';
+    if (state === 'sent') return 'code sent to ' + who + '.';
+    if (state === 'failed') return 'could not reach the relay — nothing was sent to ' + who + '.';
+    /* The honest one. No relay is configured, so no mail left this machine and
+       the panel is not going to stand here claiming it did. */
+    return 'for ' + who + ' only · nothing was sent from here · the code is in your authenticator';
+  }
+
+  function clock(ms) {
+    const s = Math.max(0, Math.ceil(ms / 1000));
+    return Math.floor(s / 60) + ':' + ('0' + (s % 60)).slice(-2);
+  }
+
+  /* The locked half of the panel. Nothing behind it is built until the code is
+     right, so there is no console in the DOM to go looking through. */
+  function buildGate(shell, body) {
+    const p = shell('admin', 'locked · four digits, and they change every thirty minutes');
+    const b = body();
+
+    const status = U.el('div', 'gate-status');
+    b.appendChild(status);
+
+    const form = U.el('form', 'gate-form');
+    const label = U.el('label', 'gate-label', 'give the code');
+    label.setAttribute('for', 'gateCode');
+    form.appendChild(label);
+
+    const input = U.el('input', 'gate-input');
+    input.id = 'gateCode';
+    input.type = 'text';
+    input.inputMode = 'numeric';
+    input.maxLength = 4;
+    input.placeholder = '····';
+    input.setAttribute('autocomplete', 'off');
+    input.setAttribute('spellcheck', 'false');
+    form.appendChild(input);
+    b.appendChild(form);
+
+    const msg = U.el('div', 'gate-msg');
+    b.appendChild(msg);
+
+    const foot = U.el('div', 'gate-foot');
+    b.appendChild(foot);
+
+    let state = sentState;
+    function paint() {
+      const left = triesLeft();
+      status.textContent = statusLine(state);
+      foot.textContent = left
+        ? 'this code expires in ' + clock(VF.authcode.remaining()) + ' · ' +
+          left + ' attempt' + (left === 1 ? '' : 's') + ' left'
+        : 'too many wrong guesses · the next code, in ' +
+          clock(VF.authcode.remaining()) + ', will be listened to';
+      /* Coming back from a burnt-out lockout: the red 'that was the last try'
+         has to go with it, and the field has to take the keyboard again — it
+         could not be focused while it was disabled, so nothing typed would
+         have appeared and the gate would look broken at the exact moment it
+         started working again. */
+      const was = input.disabled;
+      input.disabled = !left;
+      if (was && left) {
+        msg.textContent = '';
+        msg.className = 'gate-msg';
+        input.value = '';
+        input.focus();
+      }
+    }
+
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      if (!triesLeft()) return;
+      const given = input.value.trim();
+      if (!/^\d{4}$/.test(given)) {
+        msg.textContent = 'four digits.';
+        msg.className = 'gate-msg bad';
+        return;
+      }
+      if (VF.authcode.accepts(given)) {
+        unlocked = true;
+        tries = 0;
+        VF.audio.stinger('void', 4);
+        VF.fx.pulse(0.4);
+        VF.fx.shake(3, 1.6);
+        // the console is built for the first time only now
+        VF.panels.refresh();
+        return;
+      }
+      tries++;
+      input.value = '';
+      const left = triesLeft();
+      /* Two in a row is usually a typo. Three is usually the other thing, and
+         the other thing is invisible: the authenticator is on a phone whose
+         clock disagrees with this machine's by more than half an hour, and
+         every code it shows will be refused with nothing on screen to say so. */
+      msg.textContent = !left ? 'that is not the code. that was the last try.'
+        : tries >= 3 ? 'that is not the code. if your authenticator is on another device, check the two clocks agree.'
+        : 'that is not the code.';
+      msg.className = 'gate-msg bad';
+      VF.audio.back();
+      VF.fx.shake(2, 1.2);
+      paint();
+    });
+
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') { e.preventDefault(); VF.panels.close(); }
+    });
+
+    deliver(function (st) { state = st; paint(); });
+    paint();
+    // the countdown has to keep counting; panels.js drops the node on close
+    const timer = setInterval(function () {
+      if (!p.isConnected) { clearInterval(timer); return; }
+      paint();
+    }, 1000);
+
+    p.appendChild(b);
+    setTimeout(function () { input.focus(); }, 30);
+    return p;
+  }
+
   /* Built by panels.js like any other panel, so it inherits the shell, the
      close button, the overlay and the fact that the world pauses behind it. */
   function build(shell, body) {
+    if (!unlocked) return buildGate(shell, body);
     const p = shell('admin', 'not in the game · nothing here is meant to be here');
     const b = body();
 
@@ -179,11 +364,10 @@
     return p;
   }
 
+  /* Three hashes land here. All this does is knock — what opens is the gate,
+     unless the code has already been given once this session. */
   function open() {
-    if (!unlocked) {
-      unlocked = true;
-      VF.audio.stinger('void', 4);
-    }
+    if (!knocked) { knocked = true; VF.audio.stinger('void', 3); }
     VF.fx.pulse(0.25);
     VF.panels.open('admin');
   }
@@ -191,6 +375,10 @@
   VF.adminConsole = {
     open: open, run: run, build: build,
     help: HELP,
+    isUnlocked: function () { return unlocked; },
+    /* The door locks itself again on reload — nothing about it is written to
+       the save, so a save file carries no way in. */
+    lock: function () { unlocked = false; tries = 0; triesWindow = -1; },
     /* what the panel is showing, for anything that wants to check */
     lines: function () { return log.slice(); },
     clear: function () { log = []; }

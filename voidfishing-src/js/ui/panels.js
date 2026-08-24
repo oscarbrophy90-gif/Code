@@ -188,8 +188,10 @@
       case 'wardrobe': return buildWardrobe(tab || 'all');
       // a running quest is what the journal is for while there is one
       case 'journal': return buildJournal(tab || (VF.quests.activeCount() ? 'quests' : 'entries'));
-      /* Built by its own module. There is no button for it — three slashes
-         are the only way in — so it is not in the menu bar either. */
+      /* Built by its own module, and it builds its own lock: until the code
+         is given, `build` returns the gate and the console is not in the DOM
+         at all. There is no button for it either — three hashes are the only
+         way to knock. */
       case 'admin': return VF.adminConsole.build(shell, body);
       default: return shell('—');
     }
@@ -2159,5 +2161,9 @@
   }
 
   VF.panels = { init: init, open: open, close: close, isOpen: isOpen, refresh: refresh,
+                /* The catch card shares #modal with these and wins when a fish
+                   lands over an open panel. It has to be able to say so, or
+                   `current` stays set to a panel that is no longer on screen. */
+                closeNow: closeNow,
                 openCase: openCase };
 })(window.VF = window.VF || {});

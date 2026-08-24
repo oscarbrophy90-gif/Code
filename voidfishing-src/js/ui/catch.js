@@ -159,6 +159,11 @@
     body.appendChild(acts);
 
     card.appendChild(body);
+    /* A fish can land while a panel is open, and the card takes the host off
+       it. Saying so matters: panels.js otherwise goes on believing its panel
+       is up, and the overlay it left behind outlives the card — an invisible
+       sheet over the whole game that swallows every click. */
+    if (VF.panels.isOpen()) VF.panels.closeNow();
     U.clear(host);
     host.appendChild(card);
     host.classList.remove('hidden');
@@ -288,6 +293,8 @@
     body.appendChild(acts);
     card.appendChild(body);
 
+    // same as the fish card above: the host has to be taken from panels openly
+    if (VF.panels.isOpen()) VF.panels.closeNow();
     U.clear(host);
     host.appendChild(card);
     host.classList.remove('hidden');
@@ -405,8 +412,10 @@
     if (card) card.classList.add('out');
     const myGen = ++gen;
     setTimeout(function () {
-      // something else may own the modal host by now
-      if (myGen !== gen || open || VF.panels.isOpen()) return;
+      /* Something else may own the modal host by now — but ask the host, not
+         panels' bookkeeping, because a panel that was open when this card
+         appeared has already been closed above. */
+      if (myGen !== gen || open || (host.firstChild && host.firstChild !== card)) return;
       host.classList.add('hidden');
       U.clear(host);
       card = null; art = null; artCtx = null; current = null;
