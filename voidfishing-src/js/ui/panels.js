@@ -188,6 +188,9 @@
       case 'wardrobe': return buildWardrobe(tab || 'all');
       // a running quest is what the journal is for while there is one
       case 'journal': return buildJournal(tab || (VF.quests.activeCount() ? 'quests' : 'entries'));
+      /* Built by its own module. There is no button for it — three slashes
+         are the only way in — so it is not in the menu bar either. */
+      case 'admin': return VF.adminConsole.build(shell, body);
       default: return shell('—');
     }
   }

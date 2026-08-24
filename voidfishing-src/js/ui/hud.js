@@ -128,6 +128,25 @@
       return true;
     }
 
+    /* Three slashes in a row, quickly, and the admin console opens. `/` does
+       nothing else in this game, so unlike the word above it has nothing to
+       swallow — but it still has to be three in a row rather than three in a
+       minute, or leaning on the key would eventually get there. */
+    let slashes = 0, slashAt = 0;
+
+    function slashCode(e) {
+      if (e.key !== '/' || e.ctrlKey || e.metaKey || e.altKey) { slashes = 0; return false; }
+      const now = Date.now();
+      if (now - slashAt > 1400) slashes = 0;
+      slashAt = now;
+      slashes++;
+      e.preventDefault();
+      if (slashes < 3) return true;
+      slashes = 0;
+      VF.adminConsole.open();
+      return true;
+    }
+
     window.addEventListener('keydown', function (e) {
       if (e.repeat) return;
       const tag = document.activeElement && document.activeElement.tagName;
@@ -157,6 +176,8 @@
         return;
       }
       if (typedCode(e)) return;
+      // the console door works with a panel already open, so it is checked first
+      if (slashCode(e)) return;
       if (VF.state.rt.panelOpen) return;
       switch (e.code) {
         case 'KeyQ': e.preventDefault(); VF.panels.open('shop'); break;
