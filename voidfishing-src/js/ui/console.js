@@ -89,6 +89,9 @@
         return { kind: 'good', text: 'brophys set to ' + U.money(d.money) + '.' };
       }
     },
+    /* Undocumented on purpose. Nothing offers it — not the placeholder, not
+       the opening line, not the error a wrong command gets, and it is not in
+       its own listing. It only exists for somebody who already knows. */
     {
       match: /^\/help$/,
       run: function () {
@@ -101,8 +104,7 @@
     '/give admin rod      the one that is not in the game',
     '/give heavens rod    the one at the end of the long thread',
     '/give every rod      all of them, the wanderer\'s included',
-    '/set brophys(500)    500, or 1.2m, or 4b',
-    '/help                this'
+    '/set brophys(500)    500, or 1.2m, or 4b'
   ];
 
   /* Runs one line and returns what to print. Exposed so it can be driven
@@ -117,7 +119,7 @@
         catch (e) { return { kind: 'bad', text: 'that went wrong: ' + e.message }; }
       }
     }
-    return { kind: 'bad', text: 'no such command. /help lists them.' };
+    return { kind: 'bad', text: 'no such command.' };
   }
 
   function push(text, kind) {
@@ -159,7 +161,7 @@
     const form = U.el('form', 'con-form');
     const input = U.el('input', 'con-input');
     input.type = 'text';
-    input.placeholder = 'type a command · /help';
+    input.placeholder = 'type a command';
     input.setAttribute('autocomplete', 'off');
     input.setAttribute('spellcheck', 'false');
     form.appendChild(input);
@@ -171,7 +173,7 @@
     b.appendChild(form);
     p.appendChild(b);
 
-    if (!log.length) { push('admin console. /help lists what it takes.', 'note'); }
+    if (!log.length) { push('admin console.', 'note'); }
     draw(out);
     setTimeout(function () { input.focus(); }, 30);
     return p;
