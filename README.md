@@ -44,10 +44,17 @@ Online never touches any other mode.
 
 What the server owns: pairing, the check count (0/2 → 2/2), the score, and
 disconnects. What the host client owns: the basketball, run through the very
-same `stepMatch` every offline mode runs, published to the other player at
-30 Hz. That split is deliberate — it means online plays with the physics,
-shooting, dunks and animation the game already has rather than a second
-implementation that drifts.
+same `stepMatch` every offline mode runs. That split is deliberate — it means
+online plays with the physics, shooting, dunks and animation the game already
+has rather than a second implementation that drifts.
+
+The guest simulates nothing at all. Not the ball, not possession, not a shot,
+not a rebound: a client running its own physics collects its own rebound a
+fraction of a second before or after the host does, and from that moment the
+two people are playing different matches. So the host publishes the whole
+match thirty times a second — both players, the ball, possession, the phase,
+the score — and the guest draws it, filling in the 33 ms between packets so a
+30 Hz feed does not look like a 30 fps dribble.
 
 ## What actually works
 

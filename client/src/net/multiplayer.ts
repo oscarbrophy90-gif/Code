@@ -27,30 +27,62 @@ export interface MatchFound {
   opponentBuild: SimPlayerConfig | null;
 }
 
-/** One frame of the world, as the host sees it. Small enough for 30 Hz. */
+/**
+ * One frame of the world, as the host sees it.
+ *
+ * This is the WHOLE match, not a summary of it: everything the guest needs to
+ * draw the same game the host is drawing, and nothing the guest is left to work
+ * out for itself. The guest runs no simulation — an independent ball is an
+ * independent game, and two of those diverge the first time somebody grabs a
+ * rebound — so anything missing here is something the two screens can disagree
+ * about. The static half (who the players are, their build, their kit, the
+ * rules of the game) is set up identically on both clients at tip-off and never
+ * travels.
+ */
 export interface NetSnapshot {
+  frame: number;
   t: number;
+  /** the simulation's RNG cursor, so the guest is never a different roll */
+  rng: number;
   phase: string;
+  phaseTimer: number;
   shotClock: number;
+  clock: number;
   score: [number, number];
+  /** which team is on offence */
+  possession: number;
   needsClear: boolean;
   /** the team that won, once the game is over */
   winner: number | null;
   /** the check ceremony, so the guest sees the ball passed out and back */
   check: { stage: string; timer: number; from: number; to: number } | null;
+  /** the stripe, so a free throw looks the same on both screens */
+  freeThrow: { side: number; remaining: number } | null;
+  /** shoot held through a check-in, per player */
+  checkGuard: boolean[];
+  /** somebody calling for the ball */
+  passRequest: { pid: number; timer: number } | null;
+  players: NetPlayer[];
+  ball: NetBall;
+  /**
+   * The box score — sent only on the frames it actually changes.
+   *
+   * Nineteen long-named counters per player is a fifth of the payload, thirty
+   * times a second, to re-state numbers that move once a possession. Omitted
+   * means unchanged, and the guest keeps what it has.
+   */
+  stats?: NetStats[];
   /**
    * The host's own input on the frame this went out.
    *
-   * The guest simulates forward between snapshots, and a player standing still
-   * for 33 ms and then teleporting is worse than no prediction at all. With the
-   * host's input the guest can carry them on the same course the host is
-   * actually running, and the next snapshot corrects it.
+   * Not for simulating — the guest simulates nothing. It is what lets the guest
+   * carry the host's player on the course they are actually running for the
+   * 33 ms until the next snapshot, instead of standing still and then jumping.
    */
   hostInput: PlayerInput | null;
-  players: NetPlayer[];
-  ball: NetBall;
 }
 
+/** Everything about a player that the simulation changes as the game is played. */
 export interface NetPlayer {
   x: number; z: number; y: number;
   vx: number; vz: number; vy: number;
@@ -59,12 +91,34 @@ export interface NetPlayer {
   stateTimer: number;
   stamina: number;
   stagger: number;
+  staggerTimer: number;
+  reboundLock: number;
   moveId: string | null;
   moveTimer: number;
   moveDuration: number;
+  moveDirX: number;
+  moveDirZ: number;
+  moveCooldown: number;
   dribbleHand: number;
   shotElapsed: number;
   shotType: string;
+  shotFromX: number;
+  shotFromZ: number;
+  shotIsThree: boolean;
+  shotDrift: number;
+  shotOnMoveKey: boolean;
+  /** the raised arm on a contest — the pose, not a statistic */
+  handUp: boolean;
+  contestTimer: number;
+  stealCooldown: number;
+  fakeTimer: number;
+  greenStreak: number;
+  makeStreak: number;
+  distanceRun: number;
+  fumbleChecked: boolean;
+  ankledStreak: number;
+  ankledResetIn: number;
+  outOfBoundsTimer: number;
   /** just enough of the shot profile for the meter to draw on the guest */
   meter: {
     duration: number;
@@ -77,8 +131,11 @@ export interface NetPlayer {
   } | null;
   emoteTimer: number;
   emoteSlot: number;
+  emoteCooldown: number;
   celebration: string | null;
   celebrationTimer: number;
+  comboCount: number;
+  comboTimer: number;
   dunk: unknown | null;
 }
 
@@ -86,11 +143,14 @@ export interface NetBall {
   x: number; y: number; z: number;
   vx: number; vy: number; vz: number;
   state: string;
+  /** who is holding or carrying it — the single answer to "who has the ball" */
   owner: number | null;
   shotBy: number | null;
   passTo: number | null;
+  passFrom: number | null;
   shotWillGoIn: boolean;
   shotValue: number;
+  shotGrade: string | null;
   flightTime: number;
   flightDuration: number;
   fromX: number; fromY: number; fromZ: number;
@@ -98,6 +158,9 @@ export interface NetBall {
   apex: number;
   settled: boolean;
 }
+
+/** The box score, so the guest's own end screen is not a different game's. */
+export type NetStats = Record<string, number>;
 
 type Sock = {
   id?: string;
