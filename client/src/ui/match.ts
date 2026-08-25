@@ -24,6 +24,8 @@ import {
   type SimPlayerConfig,
   type Side,
   STORE_BY_ID,
+  JUMPSHOT_BY_ID,
+  type ShotProfile,
   ballThroughRim,
   dribbleBounceIndex,
   type CourtSurface,
@@ -41,12 +43,18 @@ import { el, clear, toast } from './dom.ts';
 import { buildTouchControls } from './touch.ts';
 import { playLiveReplay, snapshotFrame, type ReplayFrame } from './livereplay.ts';
 import {
-  currentMatchup,
-  onMatchup,
-  opponentPosition,
-  remotePlayers,
-  sendPosition,
-  updateRemotes,
+  onCheckGo,
+  onGuestInput,
+  onMatchEnded,
+  onReadyCount,
+  onScore,
+  onSnapshot,
+  sendInput,
+  sendNewCheck,
+  sendReady,
+  sendScore,
+  sendSnapshot,
+  type NetSnapshot,
 } from '../net/multiplayer.ts';
 
 export interface MatchResult {
@@ -80,20 +88,15 @@ export interface MatchOptions {
   /** extra sharpening on top of the difficulty preset, 0 to 1 */
   aiEdge?: number;
   /**
-   * Online match. 'host' runs the simulation and publishes it; 'guest' sends
-   * its input and draws what the host sends back. Absent for every offline
-   * game, which is everything except ranked.
-   */
-  net?: 'host' | 'guest' | null;
-  /**
    * A real 1v1 against another person.
    *
-   * Present ONLY for Online mode. When set, no CPU controller is created and
-   * the opposing player is driven by that human's networked position instead.
-   * Absent everywhere else, so single-player, the difficulty ladder, ranked,
-   * 3v3 and the practice gym all run precisely the code they always ran.
+   * Present ONLY for Online mode. When set no CPU controller is created at all;
+   * the host client runs the simulation for both people and publishes it, and
+   * the guest sends its input and draws what comes back. Absent everywhere
+   * else, so single-player, the difficulty ladder, ranked, 3v3 and the practice
+   * gym all run precisely the code they always ran.
    */
-  online?: { opponentId: string; localSide: Side } | null;
+  online?: { role: 'host' | 'guest' } | null;
   /** the court drawn for this game; falls back to the park's own palette */
   surface?: CourtSurface | null;
   onFinish: (result: MatchResult) => void;
@@ -180,6 +183,8 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
         return {
           time: state.time,
           phase: state.phase,
+          // Online only: which end of the wire this is and the server's count.
+          net: netRole ? { role: netRole, ready: readyCount, total: readyTotal } : null,
           shotClock: state.shotClock,
           score: [state.score[0], state.score[1]],
           ball: { state: ball.state, owner: ball.owner, x: ball.x, y: ball.y, z: ball.z, settled: ball.settled },
@@ -198,30 +203,92 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
       },
     };
   }
-  // Online: the two people start on opposite sides of the court.
-  if (online) {
-    const mine = state.players[localSide];
-    const theirs = state.players[remoteSide];
-    const side = online.localSide === 0 ? -1 : 1;
-    mine.x = side * 9;
-    mine.z = 24;
-    mine.facing = Math.PI;
-    theirs.x = -side * 9;
-    theirs.z = 24;
-    theirs.facing = Math.PI;
-  }
+  // --------------------------------------------------------------- online 1v1
+  // Everything from here to `netReleases` is reached ONLY by Online. Single
+  // player, the difficulty ladder, ranked, 3v3 and the practice gym all leave
+  // `online` null, so none of it runs and the CPU game is the game it was.
+  //
+  // The split: the server owns the match — pairing, the check count, the score
+  // and disconnects — and the host client owns the basketball, running the very
+  // same `stepMatch` every offline mode runs. The guest simulates nothing; it
+  // sends its input and draws the host's snapshots. That is what keeps the
+  // physics, shooting, dunks and animation identical on both screens instead of
+  // two simulations quietly drifting apart.
+  const netRole = online?.role ?? null;
 
-  // Online: if the other person leaves, say so and close the match cleanly
-  // rather than leaving somebody playing against a frozen body.
-  const releaseMatchup = online
-    ? onMatchup((m) => {
+  /** Server-authoritative check count, drawn as 0/2 → 2/2. */
+  let readyCount = 0;
+  let readyTotal = 2;
+  /** SPACE checked in; the button stays dead until it is let go. */
+  let shootLock = false;
+  let prevShoot = false;
+  /** Host: the server reached 2/2, so the ball gets checked in. */
+  let checkGoPending = false;
+  /** Host: this check has already been announced to the server. */
+  let checkAnnounced = false;
+  /** Host: the guest's latest input. Edge presses are consumed exactly once. */
+  let guestInput: PlayerInput = emptyInput();
+  /** Host: seconds since the last snapshot went out. */
+  let netAccum = 0;
+  /** Host: the score the server was last told about. */
+  let lastNetScore: [number, number] = [0, 0];
+  /** Guest: the world as the host last drew it. */
+  let netTarget: NetSnapshot | null = null;
+  let netSendAccum = 0;
+  let pendingInput: PlayerInput | null = null;
+
+  const netReleases: (() => void)[] = [];
+  if (netRole) {
+    netReleases.push(
+      onReadyCount((r) => {
+        readyCount = r.count;
+        readyTotal = r.total;
+      }),
+      onCheckGo(() => {
+        checkGoPending = true;
+      }),
+      onMatchEnded(() => {
         if (finished) return;
-        if (!m || m.opponentId !== online.opponentId) {
-          toast('Your opponent disconnected — leaving the online match', 'info');
-          closeAndFinish(true);
-        }
-      })
-    : null;
+        toast('Your opponent left — back to matchmaking', 'info');
+        closeAndFinish(true);
+      }),
+    );
+  }
+  if (netRole === 'host') {
+    netReleases.push(
+      onGuestInput((i) => {
+        // Held buttons take the newest value; edge presses stick until the
+        // simulation has consumed them, so a tap between two sim frames is
+        // never swallowed and never fires twice.
+        guestInput = {
+          ...guestInput,
+          mx: i.mx,
+          mz: i.mz,
+          sprint: i.sprint,
+          shoot: i.shoot,
+          moveShoot: i.moveShoot,
+          drive: i.drive,
+          contest: i.contest,
+          moveDirX: i.moveDirX,
+          moveDirZ: i.moveDirZ,
+          move: i.move ?? guestInput.move,
+          steal: guestInput.steal || i.steal,
+          fake: guestInput.fake || i.fake,
+          pass: guestInput.pass || i.pass,
+          emote: i.emote ?? guestInput.emote,
+        };
+      }),
+    );
+  }
+  if (netRole === 'guest') {
+    netReleases.push(
+      onSnapshot((snap) => applySnapshot(snap)),
+      onScore((s2) => {
+        state.score[0] = s2.score[0];
+        state.score[1] = s2.score[1];
+      }),
+    );
+  }
 
   const courtRenderer = new CourtRenderer();
   const playerRenderer = new PlayerRenderer();
@@ -303,7 +370,7 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
     finished = true;
     loop.stop();
     input.detach();
-    releaseMatchup?.();
+    for (const release of netReleases) release();
     resizeObserver.disconnect();
     window.removeEventListener('resize', resize);
     const winner = state.winner;
@@ -415,43 +482,351 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
       }
     }
 
+    // Online: SPACE is the check-in and the SERVER counts it, so both screens
+    // agree on 0/2 → 2/2. The button stays dead until the ball is live, which
+    // is the same protection `checkGuard` gives the offline game: a space still
+    // held from the check can never fire a shot the instant play starts.
+    if (netRole) {
+      const checking = state.phase === 'checkball';
+      const pressed = localInput.shoot && !prevShoot;
+      prevShoot = localInput.shoot;
+      if (checking && pressed && !shootLock) {
+        sendReady();
+        shootLock = true;
+      }
+      if (shootLock && !localInput.shoot) shootLock = false;
+      if (checking || shootLock) localInput.shoot = false;
+    }
+
+    // The guest runs no simulation at all. Running one would be a second
+    // basketball game drifting away from the first; instead it sends what it is
+    // doing and draws the world the host publishes.
+    if (netRole === 'guest') {
+      queueInput(localInput);
+      netSendAccum += dt;
+      if (netSendAccum >= 1 / 60) {
+        netSendAccum = 0;
+        if (pendingInput) sendInput(pendingInput);
+        pendingInput = null;
+      }
+      advanceGuest(dt);
+      playDribbleBounce();
+      return;
+    }
+
     const inputs: PlayerInput[] = state.players.map(() => emptyInput());
     inputs[localPid] = localInput;
     if (ai) inputs[remoteSide] = ai.update(state, dt);
     if (oppSquad) for (const [pid, inp] of oppSquad.update(state, dt)) inputs[pid] = inp;
     if (mateSquad) for (const [pid, inp] of mateSquad.update(state, dt)) inputs[pid] = inp;
 
-    stepWorld(inputs, dt);
-
-    // Multiplayer: the local player's actual court position, straight off the
-    // simulation, sent only when it has really changed. Everything above this
-    // line is the game exactly as it was.
-    const mine = state.players[localPid];
-    sendPosition(mine.x, mine.z);
-
-    // Online: the opposing player IS the other person. Their body follows the
-    // position their client reported — no CPU, no local decisions, and their
-    // input can never reach your player because only `localPid` is fed by the
-    // keyboard above.
-    if (online) {
-      const them = state.players[remoteSide];
-      const at = opponentPosition(online.opponentId);
-      if (at) {
-        const prevX = them.x;
-        const prevZ = them.z;
-        const k = Math.min(1, dt * 12); // ease the network steps into movement
-        them.x += (at.x - prevX) * k;
-        them.z += (at.z - prevZ) * k;
-        them.vx = (them.x - prevX) / dt;
-        them.vz = (them.z - prevZ) / dt;
-        const speed = Math.hypot(them.vx, them.vz);
-        if (speed > 0.6) them.facing = Math.atan2(them.vx, -them.vz);
+    // Online host: the other player on the floor is the other person, driven by
+    // their keyboard down the wire. Their input reaches only their own pid, and
+    // yours reaches only yours.
+    if (netRole === 'host') {
+      inputs[remoteSide] = guestInput;
+      guestInput = { ...guestInput, move: null, steal: false, fake: false, pass: false, emote: null };
+      // 2/2. Pressing the check for the offence here runs the game's own
+      // check-ball ceremony — ball out, ball back, then play — rather than a
+      // second copy of it written for online.
+      if (checkGoPending && state.check && state.check.stage === 'wait' && state.phaseTimer <= 0) {
+        inputs[state.check.from] = { ...inputs[state.check.from], shoot: true };
+        checkGoPending = false;
       }
     }
+
+    stepWorld(inputs, dt);
+
+    if (netRole === 'host') hostPublish(dt);
 
     if (drill) updateDrill(dt);
     playDribbleBounce();
     playNetSwish();
+  };
+
+  // ------------------------------------------------------------ host → guest
+
+  /**
+   * What the host tells the server and the guest, once per simulated frame.
+   *
+   * The two authoritative facts — a new check has begun, and the score changed
+   * — go to the server the moment they happen. The world itself goes out at
+   * 30 Hz, which the guest smooths back up to its own frame rate.
+   */
+  const hostPublish = (dt: number) => {
+    if (state.phase === 'checkball') {
+      if (!checkAnnounced) {
+        checkAnnounced = true;
+        // Tip-off, or the restart after a bucket: the server puts both players
+        // back to 0/2 and waits for two presses.
+        sendNewCheck();
+      }
+    } else {
+      checkAnnounced = false;
+    }
+
+    if (state.score[0] !== lastNetScore[0] || state.score[1] !== lastNetScore[1]) {
+      lastNetScore = [state.score[0], state.score[1]];
+      sendScore(lastNetScore);
+    }
+
+    netAccum += dt;
+    if (netAccum < 1 / 30) return;
+    netAccum = 0;
+    sendSnapshot(takeSnapshot());
+  };
+
+  const takeSnapshot = (): NetSnapshot => ({
+    t: state.time,
+    phase: state.phase,
+    shotClock: state.shotClock,
+    score: [state.score[0], state.score[1]],
+    needsClear: state.needsClear,
+    winner: state.winner,
+    check: state.check
+      ? { stage: state.check.stage, timer: state.check.timer, from: state.check.from, to: state.check.to }
+      : null,
+    players: state.players.map((p) => ({
+      x: p.x,
+      z: p.z,
+      y: p.y,
+      vx: p.vx,
+      vz: p.vz,
+      vy: p.vy,
+      facing: p.facing,
+      state: p.state,
+      stateTimer: p.stateTimer,
+      stamina: p.stamina,
+      stagger: p.stagger,
+      moveId: p.moveId,
+      moveTimer: p.moveTimer,
+      moveDuration: p.moveDuration,
+      dribbleHand: p.dribbleHand,
+      shotElapsed: p.shotElapsed,
+      shotType: p.shotType,
+      meter: p.shotProfile
+        ? {
+            duration: p.shotProfile.meterDuration,
+            ideal: p.shotProfile.idealPoint,
+            green: p.shotProfile.greenHalfWidth,
+            excellent: p.shotProfile.excellentHalfWidth,
+            slight: p.shotProfile.slightHalfWidth,
+            early: p.shotProfile.earlyHalfWidth,
+            contested: p.shotProfile.heavilyContested,
+          }
+        : null,
+      emoteTimer: p.emoteTimer,
+      emoteSlot: p.emoteSlot,
+      celebration: p.celebration,
+      celebrationTimer: p.celebrationTimer,
+      dunk: p.dunk,
+    })),
+    ball: {
+      x: state.ball.x,
+      y: state.ball.y,
+      z: state.ball.z,
+      vx: state.ball.vx,
+      vy: state.ball.vy,
+      vz: state.ball.vz,
+      state: state.ball.state,
+      owner: state.ball.owner,
+      shotBy: state.ball.shotBy,
+      passTo: state.ball.passTo,
+      shotWillGoIn: state.ball.shotWillGoIn,
+      shotValue: state.ball.shotValue,
+      flightTime: state.ball.flightTime,
+      flightDuration: state.ball.flightDuration,
+      fromX: state.ball.fromX,
+      fromY: state.ball.fromY,
+      fromZ: state.ball.fromZ,
+      toX: state.ball.toX,
+      toY: state.ball.toY,
+      toZ: state.ball.toZ,
+      apex: state.ball.apex,
+      settled: state.ball.settled,
+    },
+  });
+
+  // ------------------------------------------------------------ guest ← host
+
+  /**
+   * One frame of input, merged into whatever has not been sent yet.
+   *
+   * Held buttons take the latest reading. Edge presses — a dribble move, a
+   * strip, a pump fake, an emote — are sticky, so a press that lands between
+   * two sends still gets there.
+   */
+  const queueInput = (i: PlayerInput) => {
+    if (!pendingInput) {
+      pendingInput = { ...i };
+      return;
+    }
+    const q = pendingInput;
+    q.mx = i.mx;
+    q.mz = i.mz;
+    q.sprint = i.sprint;
+    q.shoot = i.shoot;
+    q.moveShoot = i.moveShoot;
+    q.drive = i.drive;
+    q.contest = i.contest;
+    q.moveDirX = i.moveDirX;
+    q.moveDirZ = i.moveDirZ;
+    q.move = i.move ?? q.move;
+    q.steal = q.steal || i.steal;
+    q.fake = q.fake || i.fake;
+    q.pass = q.pass || i.pass;
+    q.emote = i.emote ?? q.emote;
+  };
+
+  /**
+   * A snapshot from the host.
+   *
+   * The discrete facts — phase, the check, who has the ball, what everybody is
+   * doing — are copied straight across, because being a frame late on those is
+   * far better than disagreeing about them. Positions are left to
+   * `advanceGuest`, which eases toward them so 30 Hz of network does not look
+   * like 30 frames a second of basketball.
+   */
+  const applySnapshot = (snap: NetSnapshot) => {
+    const before = state.phase;
+    netTarget = snap;
+    state.phase = snap.phase as MatchState['phase'];
+    state.shotClock = snap.shotClock;
+    state.needsClear = snap.needsClear;
+    state.winner = snap.winner as Side | null;
+    state.check = snap.check
+      ? {
+          stage: snap.check.stage as 'wait' | 'out' | 'back',
+          timer: snap.check.timer,
+          from: snap.check.from,
+          to: snap.check.to,
+        }
+      : null;
+
+    const scored = snap.score[0] !== state.score[0] || snap.score[1] !== state.score[1];
+    state.score[0] = snap.score[0];
+    state.score[1] = snap.score[1];
+    // The guest gets no sim events, so the net is sounded off the thing it can
+    // see: the score going up.
+    if (scored) {
+      netSwing = 1;
+      audio.swish();
+    }
+
+    for (let i = 0; i < state.players.length && i < snap.players.length; i++) {
+      const p = state.players[i];
+      const n = snap.players[i];
+      p.state = n.state as typeof p.state;
+      p.stateTimer = n.stateTimer;
+      p.stamina = n.stamina;
+      p.stagger = n.stagger;
+      p.moveId = n.moveId as typeof p.moveId;
+      p.moveTimer = n.moveTimer;
+      p.moveDuration = n.moveDuration;
+      p.dribbleHand = n.dribbleHand as typeof p.dribbleHand;
+      p.shotElapsed = n.shotElapsed;
+      p.shotType = n.shotType as typeof p.shotType;
+      p.emoteTimer = n.emoteTimer;
+      p.emoteSlot = n.emoteSlot;
+      p.celebration = n.celebration as typeof p.celebration;
+      p.celebrationTimer = n.celebrationTimer;
+      p.dunk = n.dunk as typeof p.dunk;
+      // Enough of the shot profile to draw the meter the host is running. The
+      // jumpshot is looked up locally — both clients have the same catalogue —
+      // so the release animation is the shooter's own.
+      p.shotProfile = n.meter
+        ? ({
+            meterDuration: n.meter.duration,
+            idealPoint: n.meter.ideal,
+            greenHalfWidth: n.meter.green,
+            excellentHalfWidth: n.meter.excellent,
+            slightHalfWidth: n.meter.slight,
+            earlyHalfWidth: n.meter.early,
+            greenMakeChance: 1,
+            slightMakeChance: 0.5,
+            falloff: 2,
+            heavilyContested: n.meter.contested,
+            jumpshot: JUMPSHOT_BY_ID[p.cfg.jumpshotId] ?? JUMPSHOT_BY_ID['jumpshot-classic'],
+          } as ShotProfile)
+        : null;
+    }
+
+    const b = state.ball;
+    const nb = snap.ball;
+    b.state = nb.state as typeof b.state;
+    b.owner = nb.owner;
+    b.shotBy = nb.shotBy;
+    b.passTo = nb.passTo;
+    b.shotWillGoIn = nb.shotWillGoIn;
+    b.shotValue = nb.shotValue as 1 | 2;
+    b.flightTime = nb.flightTime;
+    b.flightDuration = nb.flightDuration;
+    b.fromX = nb.fromX;
+    b.fromY = nb.fromY;
+    b.fromZ = nb.fromZ;
+    b.toX = nb.toX;
+    b.toY = nb.toY;
+    b.toZ = nb.toZ;
+    b.apex = nb.apex;
+    b.settled = nb.settled;
+    b.vx = nb.vx;
+    b.vy = nb.vy;
+    b.vz = nb.vz;
+
+    if (before !== 'over' && state.phase === 'over') {
+      audio.play('buzzer');
+      setTimeout(() => closeAndFinish(false), 1800);
+    }
+  };
+
+  /** Shortest signed way round from `from` to `to`, so facing never spins. */
+  const angleDelta = (from: number, to: number): number => {
+    let d = (to - from) % (Math.PI * 2);
+    if (d > Math.PI) d -= Math.PI * 2;
+    if (d < -Math.PI) d += Math.PI * 2;
+    return d;
+  };
+
+  /**
+   * The guest's own clock, between snapshots.
+   *
+   * Bodies and the ball ease toward wherever the host last put them; a jump big
+   * enough to be a reset rather than a step — a bucket, a new check — is taken
+   * whole, because easing through one would draw a player skating across the
+   * floor. The animation timers keep running locally so nothing stutters at the
+   * snapshot rate.
+   */
+  const advanceGuest = (dt: number) => {
+    state.time += dt;
+    const snap = netTarget;
+    if (!snap) return;
+    const k = Math.min(1, dt * 18);
+    const fast = Math.min(1, dt * 30);
+    for (let i = 0; i < state.players.length && i < snap.players.length; i++) {
+      const p = state.players[i];
+      const n = snap.players[i];
+      const jumped = Math.hypot(n.x - p.x, n.z - p.z) > 8;
+      p.x = jumped ? n.x : p.x + (n.x - p.x) * k;
+      p.z = jumped ? n.z : p.z + (n.z - p.z) * k;
+      p.y = jumped ? n.y : p.y + (n.y - p.y) * fast;
+      p.vx = n.vx;
+      p.vz = n.vz;
+      p.vy = n.vy;
+      p.facing += angleDelta(p.facing, n.facing) * Math.min(1, dt * 14);
+      p.stateTimer += dt;
+      p.moveTimer += dt;
+      if (p.state === 'shooting') p.shotElapsed += dt;
+      if (p.emoteTimer > 0) p.emoteTimer = Math.max(0, p.emoteTimer - dt);
+      if (p.celebrationTimer > 0) p.celebrationTimer = Math.max(0, p.celebrationTimer - dt);
+    }
+
+    const b = state.ball;
+    const nb = snap.ball;
+    const jumped = Math.hypot(nb.x - b.x, nb.z - b.z) > 8 || Math.abs(nb.y - b.y) > 6;
+    b.x = jumped ? nb.x : b.x + (nb.x - b.x) * fast;
+    b.y = jumped ? nb.y : b.y + (nb.y - b.y) * fast;
+    b.z = jumped ? nb.z : b.z + (nb.z - b.z) * fast;
+    if (b.state === 'shot' || b.state === 'pass') b.flightTime += dt;
   };
 
   /**
@@ -790,18 +1165,7 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
     const rimBend = Math.max(spring, hanging ? 0.5 : 0);
     courtRenderer.drawHoop(ctx, cam, park, netSwing, rimBend);
 
-    // Multiplayer: bring remote players toward wherever the server last put
-    // them. They are drawn alongside the local cast below; they are not part
-    // of the simulation, so nothing here changes how the game plays.
-    updateRemotes(dt);
-    // In an online match the person you are playing is already on the court as
-    // the opposing player, so they must not also appear as a bystander.
-    const guests = remotePlayers().filter((g) => g.id !== online?.opponentId);
-
     // Shadows first so nobody's shadow lands on a body.
-    for (const g of guests) {
-      playerRenderer.drawShadow(ctx, cam, g.body.x, g.body.z, g.body.y, 0.9 + (g.body.cfg.heightIn - 70) * 0.012);
-    }
     for (const p of state.players) {
       playerRenderer.drawShadow(ctx, cam, p.x, p.z, p.y, 0.9 + (p.cfg.heightIn - 70) * 0.012);
     }
@@ -825,13 +1189,6 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
             carried === p.pid ? state.ball : null,
           ),
       })),
-      // Other people on the court, drawn by the same renderer, in the same
-      // depth order, wearing real kit. Never flagged local, never given the
-      // ball — you control your player and nobody else's.
-      ...guests.map((g) => ({
-        z: g.body.z,
-        draw: () => playerRenderer.draw(ctx, cam, g.body, state.time, false, false, null),
-      })),
       ...(carried === null
         ? [{ z: state.ball.z, draw: () => playerRenderer.drawBall(ctx, cam, state.ball, state.time) }]
         : []),
@@ -854,7 +1211,16 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
     } else {
       hud.drawScoreBug(ctx, state, width, localSide, squads ? teamLabels : null);
     }
-    hud.drawCallouts(ctx, state, localPid, width, height);
+    // Online replaces the single-player check prompt with the shared one: the
+    // server's count, so both people see the same 0/2 → 2/2.
+    hud.drawCallouts(
+      ctx,
+      state,
+      localPid,
+      width,
+      height,
+      netRole ? { count: readyCount, total: readyTotal } : null,
+    );
     drawFooter(ctx, width, height, loop.fps, null, settings.touchControls, !!squads);
 
   };

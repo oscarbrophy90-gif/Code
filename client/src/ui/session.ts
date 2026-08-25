@@ -48,7 +48,7 @@ export interface StartMatchOptions {
    * the other player is driven by their own client. Every other mode leaves
    * this unset and behaves exactly as it always has.
    */
-  online?: { opponentId: string; localSide: 0 | 1 } | null;
+  online?: { role: 'host' | 'guest' } | null;
   /**
    * Skip the walkout and the court draw. Online uses it so both people drop
    * onto the floor at the same moment instead of watching separate cutscenes.

@@ -515,7 +515,20 @@ export class Hud {
   }
 
   // ---------------------------------------------------------------- callouts
-  drawCallouts(ctx: CanvasRenderingContext2D, state: MatchState, side: Side, w: number, h: number): void {
+  drawCallouts(
+    ctx: CanvasRenderingContext2D,
+    state: MatchState,
+    side: Side,
+    w: number,
+    h: number,
+    /**
+     * Online only: the server's check count. When it is present the check
+     * prompt is the shared one — SPACE TO CHECK and 0/2 → 2/2 — because two
+     * people have to check in, not one. Every offline mode passes null and gets
+     * the prompt it always had.
+     */
+    net: { count: number; total: number } | null = null,
+  ): void {
     const p = state.players[side];
 
     // Stamina bar, bottom-left.
@@ -599,15 +612,36 @@ export class Hud {
 
     if (state.phase === 'checkball') {
       // A backdrop so the prompt reads over a bright skyline or a pale court.
-      const panelH = state.config.manualCheck ? 96 : 46;
+      const panelH = state.config.manualCheck || net ? 96 : 46;
+      // Online's hint line names both players, so it needs the wider panel.
+      const panelW = net ? 460 : 380;
       ctx.fillStyle = 'rgba(8,10,16,0.72)';
-      roundRect(ctx, w / 2 - 190, h / 2 - 68, 380, panelH, 6);
+      roundRect(ctx, w / 2 - panelW / 2, h / 2 - 68, panelW, panelH, 6);
       ctx.fill();
 
       ctx.font = '900 26px Inter, system-ui, sans-serif';
       ctx.fillStyle = '#eef2f8';
-      ctx.fillText('CHECK BALL', w / 2, h / 2 - 40);
-      if (state.config.manualCheck) {
+      const netPassing = net !== null && state.check !== null && state.check.stage !== 'wait';
+      ctx.fillText(net && !netPassing ? 'SPACE TO CHECK' : 'CHECK BALL', w / 2, h / 2 - 40);
+      if (net) {
+        // Both players have to check in, so the count is the instruction.
+        ctx.font = '900 22px Inter, system-ui, sans-serif';
+        ctx.fillStyle = net.count >= net.total ? '#3ef07a' : '#ffc53d';
+        ctx.fillText(`${net.count}/${net.total}`, w / 2, h / 2 - 12);
+        ctx.font = '700 11px Inter, system-ui, sans-serif';
+        ctx.fillStyle = '#97a2b8';
+        ctx.fillText(
+          netPassing
+            ? 'Ball out and back, then play'
+            : net.count >= net.total
+              ? 'Both checked in'
+              : this.touch
+                ? 'Tap shoot to check — nobody moves until you both do'
+                : 'Press space bar to check — nobody moves until you both do',
+          w / 2,
+          h / 2 + 8,
+        );
+      } else if (state.config.manualCheck) {
         // You check it in yourself. Whether you have the ball or you are
         // checking it back, it is the same button.
         const mine = state.possession === side;

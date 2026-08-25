@@ -15,8 +15,9 @@ runtime.
 Open **`dist-standalone/HoopsElite.html`** in any browser. It is a single self-contained
 file — no install, no terminal, no server. Progress saves to your browser.
 
-Everything runs from that one file, Ranked included — there is no server and no
-online play. See [Ranked](#ranked).
+Everything runs from that one file, Ranked included — every mode there is played
+against the CPU. See [Ranked](#ranked). The one exception is **Online**, which is
+a real 1v1 against another person and needs the server below.
 
 ### Run from source
 
@@ -26,11 +27,27 @@ npm run dev                # play at http://localhost:5173
 npm run build:standalone   # regenerate dist-standalone/HoopsElite.html
 ```
 
-Every game is against the CPU. The project is structured so online multiplayer can be
-added later without a rewrite — see [Online later](#online-later).
-
 `npm test` runs the simulation and balance tests. `npm run typecheck` covers all three
 packages. `npm run build` produces the production client bundle.
+
+### Online 1v1
+
+```
+npm run build:standalone
+npm run serve              # then open http://localhost:3000/HoopsElite.html
+```
+
+Open it in two browsers (or on two machines pointed at the same host), pick
+**Online** in both, and the two of you are paired into the same game. Everything
+else in Hoops Elite is unchanged by this: the CPU never appears in Online, and
+Online never touches any other mode.
+
+What the server owns: pairing, the check count (0/2 → 2/2), the score, and
+disconnects. What the host client owns: the basketball, run through the very
+same `stepMatch` every offline mode runs, published to the other player at
+30 Hz. That split is deliberate — it means online plays with the physics,
+shooting, dunks and animation the game already has rather than a second
+implementation that drifts.
 
 ## What actually works
 

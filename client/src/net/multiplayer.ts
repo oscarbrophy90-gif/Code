@@ -1,175 +1,146 @@
-import {
-  clampToCourt,
-  generateOpponent,
-  hashString,
-  makePlayer,
-  type SimPlayer,
-} from '@hoops/shared';
+import type { PlayerInput, SimPlayerConfig } from '@hoops/shared';
 
 /**
- * Socket.IO multiplayer: other people, drawn inside the running game.
+ * Online 1v1 netcode.
  *
- * Deliberately a *layer over* the existing match rather than a change to it.
- * The simulation, the ball, the AI, the shooting and the scoring are all
- * untouched and keep running exactly as they always have; this adds remote
- * players as extra bodies the renderer draws, positioned by the server.
+ * The server owns the match: it pairs people, counts the readies for the
+ * check (0/2 → 2/2), decides when the ball may be checked in, keeps the score
+ * and handles disconnects. The basketball itself is simulated by one of the
+ * two clients — the host — so the game keeps the exact physics, shooting,
+ * animation and rules it already has instead of a second implementation
+ * living on the server. The host publishes snapshots; the guest sends input
+ * and draws what comes back.
  *
- * That is the honest shape for this step. Making remote players part of
- * `MatchState.players` would put them into collisions, rebounds, contests and
- * the AI's reads — which would rewrite the very systems that are meant to stay
- * as they are. Ball, shooting, scoring and game state come later; the hooks
- * for them are at the bottom of this file.
+ * Nothing here is reachable from single-player: the CPU modes never call into
+ * this file.
  *
- * Coordinates: the court's ground plane is x (left/right) and z (toward the
- * basket); `y` is height off the floor. The server protocol speaks x/y, so the
- * wire's `y` carries this game's `z`. Mapped in one place, here.
+ * Court coordinates are x (left/right) and z (toward the basket); y is height.
  */
 
-/** What the server sends about a player. Tolerant: servers differ. */
-interface WirePlayer {
+export type Role = 'host' | 'guest';
+
+export interface MatchFound {
+  matchId: string;
+  role: Role;
+  side: 0 | 1;
+  seed: number;
+  opponentBuild: SimPlayerConfig | null;
+}
+
+/** One frame of the world, as the host sees it. Small enough for 30 Hz. */
+export interface NetSnapshot {
+  t: number;
+  phase: string;
+  shotClock: number;
+  score: [number, number];
+  needsClear: boolean;
+  /** the team that won, once the game is over */
+  winner: number | null;
+  /** the check ceremony, so the guest sees the ball passed out and back */
+  check: { stage: string; timer: number; from: number; to: number } | null;
+  players: NetPlayer[];
+  ball: NetBall;
+}
+
+export interface NetPlayer {
+  x: number; z: number; y: number;
+  vx: number; vz: number; vy: number;
+  facing: number;
+  state: string;
+  stateTimer: number;
+  stamina: number;
+  stagger: number;
+  moveId: string | null;
+  moveTimer: number;
+  moveDuration: number;
+  dribbleHand: number;
+  shotElapsed: number;
+  shotType: string;
+  /** just enough of the shot profile for the meter to draw on the guest */
+  meter: {
+    duration: number;
+    ideal: number;
+    green: number;
+    excellent: number;
+    slight: number;
+    early: number;
+    contested: boolean;
+  } | null;
+  emoteTimer: number;
+  emoteSlot: number;
+  celebration: string | null;
+  celebrationTimer: number;
+  dunk: unknown | null;
+}
+
+export interface NetBall {
+  x: number; y: number; z: number;
+  vx: number; vy: number; vz: number;
+  state: string;
+  owner: number | null;
+  shotBy: number | null;
+  passTo: number | null;
+  shotWillGoIn: boolean;
+  shotValue: number;
+  flightTime: number;
+  flightDuration: number;
+  fromX: number; fromY: number; fromZ: number;
+  toX: number; toY: number; toZ: number;
+  apex: number;
+  settled: boolean;
+}
+
+type Sock = {
   id?: string;
-  playerId?: string;
-  x?: number;
-  y?: number;
-}
+  emit: (ev: string, ...a: unknown[]) => void;
+  on: (ev: string, fn: (...a: unknown[]) => void) => void;
+};
 
-export interface RemotePlayer {
-  id: string;
-  /** the body the renderer draws — a real SimPlayer, so it looks like a player */
-  body: SimPlayer;
-  /** where the server last said they are, in court feet */
-  targetX: number;
-  targetZ: number;
-  lastSeen: number;
-}
-
-type Listener = () => void;
-
-const remotes = new Map<string, RemotePlayer>();
-const listeners = new Set<Listener>();
-
-// ---------------------------------------------------------------- matchmaking
-//
-// The server speaks five events and knows nothing about pairing, so pairing is
-// worked out on the clients — from the one thing both of them already agree
-// on: the roster. Sort every connected id and take them two at a time. Both
-// players sort the same list, so both reach the same answer without a single
-// extra message, and the lower id takes side 0. No server change needed.
-
-export interface OnlineMatchup {
-  opponentId: string;
-  /** 0 or 1 — decided by id order, so the two clients never disagree */
-  localSide: 0 | 1;
-}
-
-type MatchListener = (m: OnlineMatchup | null) => void;
-const matchListeners = new Set<MatchListener>();
-let currentMatch: OnlineMatchup | null = null;
-let queued = false;
-
-/** Everyone connected, including you, in a stable order both clients share. */
-function roster(): string[] {
-  return [selfId, ...remotes.keys()].filter(Boolean).sort();
-}
-
-/** Who you are paired with right now, or null while nobody is free. */
-function computeMatchup(): OnlineMatchup | null {
-  if (!selfId) return null;
-  const ids = roster();
-  const i = ids.indexOf(selfId);
-  if (i < 0) return null;
-  // Pairs are (0,1), (2,3), (4,5)… so an even index waits for the id after it.
-  const partnerIndex = i % 2 === 0 ? i + 1 : i - 1;
-  const opponentId = ids[partnerIndex];
-  if (!opponentId) return null;
-  return { opponentId, localSide: selfId < opponentId ? 0 : 1 };
-}
-
-/** Recomputes the pairing and tells the Online screen when it changed. */
-function refreshMatchup(): void {
-  if (!queued) return;
-  const next = computeMatchup();
-  const changed = next?.opponentId !== currentMatch?.opponentId;
-  currentMatch = next;
-  if (changed) for (const fn of [...matchListeners]) fn(currentMatch);
-}
-
-/** Enter Online: start looking for a real opponent. */
-export function joinOnlineQueue(): void {
-  queued = true;
-  currentMatch = null;
-  refreshMatchup();
-}
-
-/** Leave Online, or the match. */
-export function leaveOnlineQueue(): void {
-  queued = false;
-  currentMatch = null;
-  for (const fn of [...matchListeners]) fn(null);
-}
-
-export function onMatchup(fn: MatchListener): () => void {
-  matchListeners.add(fn);
-  return () => matchListeners.delete(fn);
-}
-
-export function currentMatchup(): OnlineMatchup | null {
-  return currentMatch;
-}
-
-/** How many real people are connected, you included. */
-export function onlineCount(): number {
-  return roster().length;
-}
-
-/** The live position of one specific opponent, for the online match to read. */
-export function opponentPosition(id: string): { x: number; z: number } | null {
-  const r = remotes.get(id);
-  return r ? { x: r.targetX, z: r.targetZ } : null;
-}
-
-let socket: { emit: (ev: string, ...a: unknown[]) => void; on: (ev: string, fn: (...a: unknown[]) => void) => void; id?: string } | null = null;
-let selfId = '';
+let socket: Sock | null = null;
 let connected = false;
+let selfId = '';
 
-/** Remote bodies get pids well clear of the sim's, so nothing ever collides. */
-let nextPid = 1000;
+// ------------------------------------------------------------------- events
 
-// How often position updates go out, and how far you must move to bother.
-const SEND_HZ = 20;
-const SEND_INTERVAL = 1000 / SEND_HZ;
-const MOVE_EPSILON = 0.05; // feet
-let lastSentAt = 0;
-let lastSentX = Number.NaN;
-let lastSentZ = Number.NaN;
+type Handler<T> = (payload: T) => void;
+const bus = {
+  searching: new Set<Handler<void>>(),
+  found: new Set<Handler<MatchFound>>(),
+  ready: new Set<Handler<{ count: number; total: number }>>(),
+  go: new Set<Handler<void>>(),
+  ended: new Set<Handler<{ reason: string }>>(),
+  state: new Set<Handler<NetSnapshot>>(),
+  input: new Set<Handler<PlayerInput>>(),
+  score: new Set<Handler<{ score: [number, number] }>>(),
+};
 
-// ------------------------------------------------------------------ connection
+function fire<T>(set: Set<Handler<T>>, payload: T): void {
+  for (const fn of [...set]) fn(payload);
+}
 
-/**
- * Connects to the Socket.IO server, if one is there.
- *
- * Safe to call when Socket.IO is absent — opened from `file://`, or served by
- * anything that is not the game server. In that case the game simply carries
- * on single-player, which is what keeps the standalone build working.
- */
+export const onSearching = (fn: Handler<void>) => sub(bus.searching, fn);
+export const onMatchFound = (fn: Handler<MatchFound>) => sub(bus.found, fn);
+export const onReadyCount = (fn: Handler<{ count: number; total: number }>) => sub(bus.ready, fn);
+export const onCheckGo = (fn: Handler<void>) => sub(bus.go, fn);
+export const onMatchEnded = (fn: Handler<{ reason: string }>) => sub(bus.ended, fn);
+export const onSnapshot = (fn: Handler<NetSnapshot>) => sub(bus.state, fn);
+export const onGuestInput = (fn: Handler<PlayerInput>) => sub(bus.input, fn);
+export const onScore = (fn: Handler<{ score: [number, number] }>) => sub(bus.score, fn);
+
+function sub<T>(set: Set<Handler<T>>, fn: Handler<T>): () => void {
+  set.add(fn);
+  return () => set.delete(fn);
+}
+
+// --------------------------------------------------------------- connection
+
 export function connectMultiplayer(): void {
   if (socket) return;
-
-  // A read-only window into the multiplayer state, for debugging from the
-  // browser console: window.__mpDebug.remotes() / .connected()
-  (globalThis as { __mpDebug?: unknown }).__mpDebug = {
-    connected: () => connected,
-    selfId: () => selfId,
-    remotes: () => [...remotes.values()].map((r) => ({ id: r.id, x: r.body.x, z: r.body.z, targetX: r.targetX, targetZ: r.targetZ })),
-    lastSent: () => ({ x: lastSentX, z: lastSentZ, at: lastSentAt }),
-  };
-
-  const io = (globalThis as { io?: (...a: unknown[]) => typeof socket }).io;
+  const io = (globalThis as { io?: (...a: unknown[]) => Sock }).io;
   if (typeof io !== 'function') {
-    console.info('[Hoops Elite] Socket.IO not available — running single-player.');
+    console.info('[Hoops Elite] Socket.IO not available — Online is offline, every other mode is unaffected.');
     return;
   }
-
   socket = io();
   if (!socket) return;
 
@@ -177,202 +148,94 @@ export function connectMultiplayer(): void {
     connected = true;
     selfId = socket?.id ?? '';
     console.log('Connected to Hoops Elite multiplayer server', selfId ? `(you are ${selfId})` : '');
-    refreshMatchup();
   });
-
-  socket.on('disconnect', (...args: unknown[]) => {
+  socket.on('disconnect', () => {
     connected = false;
-    console.log('Disconnected from Hoops Elite multiplayer server', args[0] ?? '');
-    // Everyone else goes with the connection; nobody is standing there any more.
-    remotes.clear();
-    notify();
-    refreshMatchup();
+    console.log('Disconnected from Hoops Elite multiplayer server');
+    fire(bus.ended, { reason: 'disconnected' });
+  });
+  socket.on('connect_error', (...a: unknown[]) => console.warn('[Hoops Elite] connection error:', a[0]));
+
+  socket.on('mm:searching', () => {
+    console.log('Searching for opponent...');
+    fire(bus.searching, undefined);
   });
 
-  socket.on('connect_error', (...args: unknown[]) => {
-    console.warn('[Hoops Elite] multiplayer connection error:', args[0]);
+  socket.on('match:found', (...a: unknown[]) => {
+    const p = a[0] as { matchId: string; role: Role; side: 0 | 1; seed: number; opponent?: { build?: SimPlayerConfig | null } };
+    console.log(`Opponent found — match ${p.matchId}, you are the ${p.role} (Player ${p.side + 1})`);
+    fire(bus.found, {
+      matchId: p.matchId,
+      role: p.role,
+      side: p.side,
+      seed: p.seed,
+      opponentBuild: p.opponent?.build ?? null,
+    });
   });
 
-  // ---- the five server events -------------------------------------------
-
-  // Everyone already on the court when you arrive.
-  socket.on('currentPlayers', (...args: unknown[]) => {
-    const payload = args[0];
-    const list = toList(payload);
-    let added = 0;
-    for (const wire of list) {
-      const id = idOf(wire);
-      if (!id || id === selfId) continue;
-      upsert(id, wire);
-      added++;
-    }
-    console.log(`Received currentPlayers — ${added} other player${added === 1 ? '' : 's'} already in the game`);
-    notify();
-    refreshMatchup();
+  socket.on('match:ready', (...a: unknown[]) => {
+    const p = a[0] as { count: number; total: number };
+    console.log(`Check: ${p.count}/${p.total} ready`);
+    fire(bus.ready, p);
   });
 
-  // Somebody new arrived.
-  socket.on('playerJoined', (...args: unknown[]) => {
-    const wire = args[0] as WirePlayer;
-    const id = idOf(wire);
-    if (!id || id === selfId) return;
-    upsert(id, wire);
-    console.log(`Player joined the game: ${id}`);
-    notify();
-    refreshMatchup();
+  socket.on('match:go', () => {
+    console.log('Both players checked in — checking the ball');
+    fire(bus.go, undefined);
   });
 
-  // Somebody moved.
-  socket.on('playerMoved', (...args: unknown[]) => {
-    const wire = args[0] as WirePlayer;
-    const id = idOf(wire);
-    if (!id || id === selfId) return; // never let the wire move your own player
-    upsert(id, wire);
+  socket.on('match:ended', (...a: unknown[]) => {
+    const p = (a[0] as { reason?: string }) ?? {};
+    console.log(`Online match ended (${p.reason ?? 'unknown'})`);
+    fire(bus.ended, { reason: p.reason ?? 'ended' });
   });
 
-  // Somebody left.
-  socket.on('playerLeft', (...args: unknown[]) => {
-    const id = idOf(args[0] as WirePlayer) || String(args[0] ?? '');
-    if (!id) return;
-    if (remotes.delete(id)) {
-      console.log(`Player left the game: ${id}`);
-      notify();
-      refreshMatchup();
-    }
-  });
-}
-
-// ------------------------------------------------------------------- sending
-
-/**
- * Sends the local player's real court position, when it has actually changed.
- *
- * Called from the match loop with the live position of the player you are
- * controlling — nothing invented, nothing simulated separately.
- */
-export function sendPosition(x: number, z: number, now = Date.now()): void {
-  if (!socket || !connected) return;
-  const moved = !(Math.abs(x - lastSentX) < MOVE_EPSILON && Math.abs(z - lastSentZ) < MOVE_EPSILON);
-  if (!moved) return;
-  if (now - lastSentAt < SEND_INTERVAL) return;
-  lastSentAt = now;
-  lastSentX = x;
-  lastSentZ = z;
-  // The wire's y is this game's z — see the note at the top of the file.
-  socket.emit('playerMovement', { x, y: z });
-}
-
-// ------------------------------------------------------------------ readback
-
-export function remotePlayers(): RemotePlayer[] {
-  return [...remotes.values()];
+  socket.on('match:state', (...a: unknown[]) => fire(bus.state, a[0] as NetSnapshot));
+  socket.on('match:input', (...a: unknown[]) => fire(bus.input, a[0] as PlayerInput));
+  socket.on('match:score', (...a: unknown[]) => fire(bus.score, a[0] as { score: [number, number] }));
 }
 
 export function isConnected(): boolean {
   return connected;
 }
 
-export function onRosterChange(fn: Listener): () => void {
-  listeners.add(fn);
-  return () => listeners.delete(fn);
+// ------------------------------------------------------------------ sending
+
+export function joinMatchmaking(build: SimPlayerConfig): void {
+  socket?.emit('mm:join', { build });
 }
 
-/**
- * Eases every remote body toward the position the server last reported, and
- * keeps their velocity honest so the renderer's stride and lean read right.
- * Called once per rendered frame from the match screen.
- */
-export function updateRemotes(dt: number): void {
-  if (dt <= 0) return;
-  for (const r of remotes.values()) {
-    const prevX = r.body.x;
-    const prevZ = r.body.z;
-    // Network positions arrive in steps; easing turns them into movement.
-    const k = Math.min(1, dt * 12);
-    r.body.x += (r.targetX - prevX) * k;
-    r.body.z += (r.targetZ - prevZ) * k;
-    r.body.vx = (r.body.x - prevX) / dt;
-    r.body.vz = (r.body.z - prevZ) / dt;
-    const speed = Math.hypot(r.body.vx, r.body.vz);
-    if (speed > 0.6) r.body.facing = Math.atan2(r.body.vx, -r.body.vz);
-    r.body.state = speed > 0.6 ? 'dribble' : 'idle';
-  }
+export function leaveMatchmaking(): void {
+  socket?.emit('mm:leave');
 }
 
-// -------------------------------------------------------------------- guests
-
-/** Adds or moves a remote player, building their body the first time. */
-function upsert(id: string, wire: WirePlayer): void {
-  const spot = clampToCourt(num(wire.x, 0), num(wire.y, 20));
-  let r = remotes.get(id);
-  if (!r) {
-    r = { id, body: makeRemoteBody(id, spot.x, spot.z), targetX: spot.x, targetZ: spot.z, lastSeen: Date.now() };
-    remotes.set(id, r);
-    return;
-  }
-  r.targetX = spot.x;
-  r.targetZ = spot.z;
-  r.lastSeen = Date.now();
+/** SPACE during the check. The server counts; it never counts twice. */
+export function sendReady(): void {
+  socket?.emit('match:ready');
 }
 
-/**
- * A body for a remote player, built with the game's own player generator so
- * they turn up wearing a real kit, a real build and real proportions — the
- * same appearance system every other player on the court uses.
- */
-function makeRemoteBody(id: string, x: number, z: number): SimPlayer {
-  const cfg = generateOpponent(78, hashString(`net-${id}`));
-  const body = makePlayer(1, { ...cfg, id: `net-${id}`, name: shortName(id) }, nextPid++);
-  body.x = x;
-  body.z = z;
-  body.state = 'idle';
-  return body;
+/** Host only: a new check has begun — tip-off, or after a basket. */
+export function sendNewCheck(): void {
+  socket?.emit('match:newCheck');
 }
 
-function shortName(id: string): string {
-  return `Player ${id.slice(0, 4)}`;
+/** Host only: the authoritative score, after it changed. */
+export function sendScore(score: [number, number]): void {
+  socket?.emit('match:score', { score });
 }
 
-// ------------------------------------------------------------------ plumbing
-
-function idOf(wire: WirePlayer | string | undefined): string {
-  if (typeof wire === 'string') return wire;
-  if (!wire) return '';
-  return String(wire.id ?? wire.playerId ?? '');
+/** Guest only: one frame of input for the host to simulate. */
+export function sendInput(input: PlayerInput): void {
+  socket?.emit('match:input', input);
 }
 
-function num(v: unknown, fallback: number): number {
-  return typeof v === 'number' && Number.isFinite(v) ? v : fallback;
+/** Host only: one snapshot of the world. */
+export function sendSnapshot(snap: NetSnapshot): void {
+  socket?.emit('match:state', snap);
 }
 
-/** `currentPlayers` may be a map keyed by id, or an array. Both are handled. */
-function toList(payload: unknown): WirePlayer[] {
-  if (Array.isArray(payload)) return payload as WirePlayer[];
-  if (payload && typeof payload === 'object') {
-    return Object.entries(payload as Record<string, WirePlayer>).map(([id, p]) => ({ id, ...p }));
-  }
-  return [];
-}
-
-function notify(): void {
-  for (const fn of [...listeners]) fn();
-}
-
-// ------------------------------------------------------- room for what's next
-//
-// Ball, shooting, scoring and game state are NOT synchronised yet, on purpose:
-// they are the systems that were to be left alone for now. When they are ready,
-// they attach here without touching anything above — one emit and one handler
-// each, the same shape the position sync already uses.
-
-/** Sends an arbitrary game event once ball/score sync is designed. */
-export function sendGameEvent(event: string, payload: unknown): void {
-  if (!socket || !connected) return;
-  socket.emit(event, payload);
-}
-
-/** Listens for one, likewise. */
-export function onGameEvent(event: string, fn: (payload: unknown) => void): void {
-  if (!socket) return;
-  socket.on(event, (...args: unknown[]) => fn(args[0]));
-}
+// A read-only window for debugging from the console.
+(globalThis as { __mpDebug?: unknown }).__mpDebug = {
+  connected: () => connected,
+  selfId: () => selfId,
+};
