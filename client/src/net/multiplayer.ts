@@ -48,6 +48,86 @@ type Listener = () => void;
 const remotes = new Map<string, RemotePlayer>();
 const listeners = new Set<Listener>();
 
+// ---------------------------------------------------------------- matchmaking
+//
+// The server speaks five events and knows nothing about pairing, so pairing is
+// worked out on the clients — from the one thing both of them already agree
+// on: the roster. Sort every connected id and take them two at a time. Both
+// players sort the same list, so both reach the same answer without a single
+// extra message, and the lower id takes side 0. No server change needed.
+
+export interface OnlineMatchup {
+  opponentId: string;
+  /** 0 or 1 — decided by id order, so the two clients never disagree */
+  localSide: 0 | 1;
+}
+
+type MatchListener = (m: OnlineMatchup | null) => void;
+const matchListeners = new Set<MatchListener>();
+let currentMatch: OnlineMatchup | null = null;
+let queued = false;
+
+/** Everyone connected, including you, in a stable order both clients share. */
+function roster(): string[] {
+  return [selfId, ...remotes.keys()].filter(Boolean).sort();
+}
+
+/** Who you are paired with right now, or null while nobody is free. */
+function computeMatchup(): OnlineMatchup | null {
+  if (!selfId) return null;
+  const ids = roster();
+  const i = ids.indexOf(selfId);
+  if (i < 0) return null;
+  // Pairs are (0,1), (2,3), (4,5)… so an even index waits for the id after it.
+  const partnerIndex = i % 2 === 0 ? i + 1 : i - 1;
+  const opponentId = ids[partnerIndex];
+  if (!opponentId) return null;
+  return { opponentId, localSide: selfId < opponentId ? 0 : 1 };
+}
+
+/** Recomputes the pairing and tells the Online screen when it changed. */
+function refreshMatchup(): void {
+  if (!queued) return;
+  const next = computeMatchup();
+  const changed = next?.opponentId !== currentMatch?.opponentId;
+  currentMatch = next;
+  if (changed) for (const fn of [...matchListeners]) fn(currentMatch);
+}
+
+/** Enter Online: start looking for a real opponent. */
+export function joinOnlineQueue(): void {
+  queued = true;
+  currentMatch = null;
+  refreshMatchup();
+}
+
+/** Leave Online, or the match. */
+export function leaveOnlineQueue(): void {
+  queued = false;
+  currentMatch = null;
+  for (const fn of [...matchListeners]) fn(null);
+}
+
+export function onMatchup(fn: MatchListener): () => void {
+  matchListeners.add(fn);
+  return () => matchListeners.delete(fn);
+}
+
+export function currentMatchup(): OnlineMatchup | null {
+  return currentMatch;
+}
+
+/** How many real people are connected, you included. */
+export function onlineCount(): number {
+  return roster().length;
+}
+
+/** The live position of one specific opponent, for the online match to read. */
+export function opponentPosition(id: string): { x: number; z: number } | null {
+  const r = remotes.get(id);
+  return r ? { x: r.targetX, z: r.targetZ } : null;
+}
+
 let socket: { emit: (ev: string, ...a: unknown[]) => void; on: (ev: string, fn: (...a: unknown[]) => void) => void; id?: string } | null = null;
 let selfId = '';
 let connected = false;
@@ -97,6 +177,7 @@ export function connectMultiplayer(): void {
     connected = true;
     selfId = socket?.id ?? '';
     console.log('Connected to Hoops Elite multiplayer server', selfId ? `(you are ${selfId})` : '');
+    refreshMatchup();
   });
 
   socket.on('disconnect', (...args: unknown[]) => {
@@ -105,6 +186,7 @@ export function connectMultiplayer(): void {
     // Everyone else goes with the connection; nobody is standing there any more.
     remotes.clear();
     notify();
+    refreshMatchup();
   });
 
   socket.on('connect_error', (...args: unknown[]) => {
@@ -126,6 +208,7 @@ export function connectMultiplayer(): void {
     }
     console.log(`Received currentPlayers — ${added} other player${added === 1 ? '' : 's'} already in the game`);
     notify();
+    refreshMatchup();
   });
 
   // Somebody new arrived.
@@ -136,6 +219,7 @@ export function connectMultiplayer(): void {
     upsert(id, wire);
     console.log(`Player joined the game: ${id}`);
     notify();
+    refreshMatchup();
   });
 
   // Somebody moved.
@@ -153,6 +237,7 @@ export function connectMultiplayer(): void {
     if (remotes.delete(id)) {
       console.log(`Player left the game: ${id}`);
       notify();
+      refreshMatchup();
     }
   });
 }

@@ -40,7 +40,14 @@ import { store } from '../state/store.ts';
 import { el, clear, toast } from './dom.ts';
 import { buildTouchControls } from './touch.ts';
 import { playLiveReplay, snapshotFrame, type ReplayFrame } from './livereplay.ts';
-import { remotePlayers, sendPosition, updateRemotes } from '../net/multiplayer.ts';
+import {
+  currentMatchup,
+  onMatchup,
+  opponentPosition,
+  remotePlayers,
+  sendPosition,
+  updateRemotes,
+} from '../net/multiplayer.ts';
 
 export interface MatchResult {
   won: boolean;
@@ -78,6 +85,15 @@ export interface MatchOptions {
    * game, which is everything except ranked.
    */
   net?: 'host' | 'guest' | null;
+  /**
+   * A real 1v1 against another person.
+   *
+   * Present ONLY for Online mode. When set, no CPU controller is created and
+   * the opposing player is driven by that human's networked position instead.
+   * Absent everywhere else, so single-player, the difficulty ladder, ranked,
+   * 3v3 and the practice gym all run precisely the code they always ran.
+   */
+  online?: { opponentId: string; localSide: Side } | null;
   /** the court drawn for this game; falls back to the park's own palette */
   surface?: CourtSurface | null;
   onFinish: (result: MatchResult) => void;
@@ -115,8 +131,11 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
   // Shooting and finishing drills have nobody guarding you, so the bot is
   // parked out of the way and never given a controller.
   const drill = opts.drill ?? null;
+  const online = opts.online ?? null;
   const parkedBot = !!drill && (drill.mode === 'shooting' || drill.mode === 'finishing');
-  const ai = parkedBot || squads
+  // Online is the one mode with no CPU at all: the other side of the court is
+  // a person. Every other mode builds its controller exactly as before.
+  const ai = parkedBot || squads || online
     ? null
     : new AiController(remoteSide, opts.difficulty, seed ^ 0x5bf03, true, false, opts.aiEdge ?? 0);
   // Team AI: one controller per side's CPU players. Your teammates play at the
@@ -179,6 +198,31 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
       },
     };
   }
+  // Online: the two people start on opposite sides of the court.
+  if (online) {
+    const mine = state.players[localSide];
+    const theirs = state.players[remoteSide];
+    const side = online.localSide === 0 ? -1 : 1;
+    mine.x = side * 9;
+    mine.z = 24;
+    mine.facing = Math.PI;
+    theirs.x = -side * 9;
+    theirs.z = 24;
+    theirs.facing = Math.PI;
+  }
+
+  // Online: if the other person leaves, say so and close the match cleanly
+  // rather than leaving somebody playing against a frozen body.
+  const releaseMatchup = online
+    ? onMatchup((m) => {
+        if (finished) return;
+        if (!m || m.opponentId !== online.opponentId) {
+          toast('Your opponent disconnected — leaving the online match', 'info');
+          closeAndFinish(true);
+        }
+      })
+    : null;
+
   const courtRenderer = new CourtRenderer();
   const playerRenderer = new PlayerRenderer();
   const hud = new Hud();
@@ -259,6 +303,7 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
     finished = true;
     loop.stop();
     input.detach();
+    releaseMatchup?.();
     resizeObserver.disconnect();
     window.removeEventListener('resize', resize);
     const winner = state.winner;
@@ -383,6 +428,26 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
     // line is the game exactly as it was.
     const mine = state.players[localPid];
     sendPosition(mine.x, mine.z);
+
+    // Online: the opposing player IS the other person. Their body follows the
+    // position their client reported — no CPU, no local decisions, and their
+    // input can never reach your player because only `localPid` is fed by the
+    // keyboard above.
+    if (online) {
+      const them = state.players[remoteSide];
+      const at = opponentPosition(online.opponentId);
+      if (at) {
+        const prevX = them.x;
+        const prevZ = them.z;
+        const k = Math.min(1, dt * 12); // ease the network steps into movement
+        them.x += (at.x - prevX) * k;
+        them.z += (at.z - prevZ) * k;
+        them.vx = (them.x - prevX) / dt;
+        them.vz = (them.z - prevZ) / dt;
+        const speed = Math.hypot(them.vx, them.vz);
+        if (speed > 0.6) them.facing = Math.atan2(them.vx, -them.vz);
+      }
+    }
 
     if (drill) updateDrill(dt);
     playDribbleBounce();
@@ -729,7 +794,9 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
     // them. They are drawn alongside the local cast below; they are not part
     // of the simulation, so nothing here changes how the game plays.
     updateRemotes(dt);
-    const guests = remotePlayers();
+    // In an online match the person you are playing is already on the court as
+    // the opposing player, so they must not also appear as a bystander.
+    const guests = remotePlayers().filter((g) => g.id !== online?.opponentId);
 
     // Shadows first so nobody's shadow lands on a body.
     for (const g of guests) {

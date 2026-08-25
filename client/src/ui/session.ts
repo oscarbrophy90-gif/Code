@@ -43,6 +43,19 @@ export interface StartMatchOptions {
   opponent: SimPlayerConfig;
   /** 3v3: the other two opponents and your two AI teammates */
   squads?: { opponents: SimPlayerConfig[]; teammates: SimPlayerConfig[] } | null;
+  /**
+   * Online mode only: a real 1v1 against another person. No CPU is created and
+   * the other player is driven by their own client. Every other mode leaves
+   * this unset and behaves exactly as it always has.
+   */
+  online?: { opponentId: string; localSide: 0 | 1 } | null;
+  /**
+   * Skip the walkout and the court draw. Online uses it so both people drop
+   * onto the floor at the same moment instead of watching separate cutscenes.
+   */
+  skipIntro?: boolean;
+  /** called when the match screen closes, however it ended */
+  onDone?: () => void;
   opponentRankPoints?: number;
   difficulty: Difficulty;
   parkId: string;
@@ -88,9 +101,9 @@ let walkoutUp = false;
 
 export function startMatch(opts: StartMatchOptions): void {
   audio.unlock();
-  // Every game opens with the walkout. Practice and drills are not games, so
-  // they go straight to the floor.
-  if (opts.practice || opts.drill) {
+  // Every game opens with the walkout. Practice, drills and online matches are
+  // not introduced that way — online because two people have to start together.
+  if (opts.practice || opts.drill || opts.skipIntro) {
     launchMatch(opts);
     return;
   }
@@ -134,6 +147,7 @@ function launchMatch(opts: StartMatchOptions): void {
   const node = createMatchScreen({
     opponent: opts.opponent,
     squads: opts.squads ?? null,
+    online: opts.online ?? null,
     difficulty: opts.difficulty,
     parkId: opts.parkId,
     config: { ...opts.config, playlist: opts.playlist === 'event' ? 'casual' : opts.playlist },
@@ -144,6 +158,13 @@ function launchMatch(opts: StartMatchOptions): void {
     surface: opts.surface ?? null,
     onFinish: (result) => {
       dismissFullscreen();
+      // An online match against a person does not feed the CPU career ladder,
+      // the ranked ladder, or any reward path — none of those systems change.
+      if (opts.online) {
+        opts.onDone?.();
+        refresh();
+        return;
+      }
       const rankBefore = opts.ranked ? store.profile.online.rp : null;
       if (opts.drill) {
         showDrillResults(result, opts.drill);

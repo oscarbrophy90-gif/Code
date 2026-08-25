@@ -1,446 +1,152 @@
-import { formatHeight, grandChampLabel, onlineRank, type LadderRival } from '@hoops/shared';
-
 import { store } from '../../state/store.ts';
 import {
-  acceptIncoming,
-  allUsers,
-  declineIncoming,
-  findQuickMatch,
-  isOnline,
-  markNoticesRead,
-  noticeLine,
-  rivalConfig,
-  rivalDifficulty,
-  sendFriendRequest,
-  tickSocial,
-  unreadCount,
-  userById,
-} from '../../state/social.ts';
-import { inParty, invite, leaveParty, partyState, onPartyChange } from '../../state/party.ts';
+  connectMultiplayer,
+  currentMatchup,
+  isConnected,
+  joinOnlineQueue,
+  leaveOnlineQueue,
+  onlineCount,
+  onMatchup,
+  type OnlineMatchup,
+} from '../../net/multiplayer.ts';
 import { navigate, type RouteParams } from '../../main.ts';
-import { el, overlay, panel, toast } from '../dom.ts';
+import { el, panel } from '../dom.ts';
 import { startMatch } from '../session.ts';
-import { buildPreviewCard, drawFigure } from '../walkout.ts';
-import { drawRankBadge } from '../rankbadge.ts';
+import { drawFigure } from '../walkout.ts';
 
 /**
- * The Online hub: your player, the modes, your friends, and the party lobby.
+ * Online: find another real person, play them 1v1.
  *
- * Same world as the leaderboard — the people here are the ladder's rivals,
- * with real builds behind their names. Quick Match finds whoever is playing
- * near your standing; friends are added by username, answer in their own
- * time, and can be invited to a party. A party narrows the game to the lobby:
- * Store, Locker, Settings and Controls stay open, and everything else asks
- * you to leave the lobby first.
+ * Nothing simulated here. Every other mode in the game plays against the CPU
+ * and is untouched; this is the one place the opponent is a human being, and
+ * when there is no human free the screen says so rather than quietly handing
+ * you a bot.
+ *
+ * Pairing is worked out from the roster the server already broadcasts — see
+ * the matchmaking note in net/multiplayer.ts — so it needs no events beyond
+ * the five the server already speaks.
  */
 
-type FriendTab = 'friends' | 'add' | 'notices';
-let tab: FriendTab = 'friends';
-let searchText = '';
+/** True while a match we started is on screen, so we do not start a second. */
+let launching = false;
 
 export function renderOnline(_params: RouteParams): HTMLElement {
-  // Test rig, same gate as the match screen's: lets an automated browser
-  // fast-forward the social clock instead of waiting out real replies.
-  if (new URLSearchParams(window.location.search).has('dunkdebug')) {
-    (window as unknown as { __socialDebug?: unknown }).__socialDebug = {
-      fastForward() {
-        store.update((p) => {
-          for (const r of p.social.outgoing) r.resolvesAt = Date.now() - 1;
-        });
-        tickSocial();
-      },
-    };
-  }
-  tickSocial();
   const root = el('div', { class: 'wrap' });
-  const profile = store.profile;
-  const social = profile.social;
+
+  // Joining Online is what puts you in the queue; leaving takes you out.
+  connectMultiplayer();
+  joinOnlineQueue();
 
   root.append(
     el('h1', { class: 'page' }, 'Online'),
-    el(
-      'p',
-      { class: 'page-sub' },
-      'Play the people on the ladder. Quick Match finds somebody at your level; friends can be invited to a party and played head to head.',
-    ),
+    el('p', { class: 'page-sub' }, 'One on one against another real player. No CPU.'),
   );
 
-  // Re-render when the party answers an invite, and keep the clock ticking
-  // while the screen is open so request answers land without a refresh.
-  const release = onPartyChange(() => {
-    if (root.isConnected) navigate('online');
+  const body = el('div', { style: 'display:grid;gap:14px;max-width:560px' });
+  root.append(body);
+  paint(currentMatchup());
+
+  // Re-paint whenever the pairing changes, and tick so the connection state
+  // and the player count stay honest while you wait.
+  const release = onMatchup((m) => {
+    if (root.isConnected) paint(m);
   });
   const timer = window.setInterval(() => {
     if (!root.isConnected) {
       window.clearInterval(timer);
       release();
+      // Navigating away from Online takes you out of the queue.
+      if (!launching) leaveOnlineQueue();
       return;
     }
-    const before = unreadCount();
-    tickSocial();
-    if (unreadCount() !== before) navigate('online');
-  }, 4000);
+    paint(currentMatchup());
+  }, 1000);
 
-  // ------------------------------------------------------------- your player
-  const me = store.simConfig();
-  const rank = onlineRank(profile.online.rp);
-  const played = profile.online.wins + profile.online.losses > 0;
-  const figure = el('canvas', { class: 'walkout-figure' }) as HTMLCanvasElement;
-  drawFigure(figure, me, 150);
-  const badge = el('canvas', { style: 'width:56px;height:64px' }) as HTMLCanvasElement;
-  requestAnimationFrame(() => drawRankBadge(badge, profile.online.rp, store.position()));
-
-  const left = el(
-    'div',
-    { style: 'display:grid;gap:14px' },
-    panel(
-      'Your player',
-      el(
-        'div',
-        { class: 'online-me' },
-        figure,
-        el(
-          'div',
-          { class: 'online-me-info' },
-          el('div', { class: 'online-me-name' }, profile.username),
-          el('div', { class: 'faint' }, `${me.name} · ${me.position ?? '—'} · ${formatHeight(me.heightIn)}`),
-          el(
-            'div',
-            { class: 'online-me-rank' },
-            badge,
-            el(
-              'div',
-              {},
-              el('b', { style: `color:${rank.tier.color}` }, played ? (rank.grandChamp ? grandChampLabel(store.position()) : rank.label) : 'Unranked'),
-              el('div', { class: 'faint', style: 'font-size:11px' }, `${profile.online.wins}W – ${profile.online.losses}L online`),
-            ),
-          ),
-        ),
-      ),
-    ),
-
-    panel(
-      'Game modes',
-      inParty()
-        ? el('p', { class: 'hint', style: 'margin:0' }, 'You are in a party — the game starts from the lobby.')
-        : el(
-            'div',
-            { class: 'online-modes' },
-            el(
-              'button',
-              { class: 'mode-card', onclick: () => quickMatch() },
-              el('div', { class: 'mode-count' }, '1v1'),
-              el('div', { class: 'mode-title' }, 'Quick Match'),
-              el('div', { class: 'mode-blurb' }, 'Finds somebody playing online near your rank and puts you on a court.'),
-            ),
-          ),
-    ),
-
-    partyPanel(),
-  );
-
-  // ---------------------------------------------------------------- friends
-  const unread = unreadCount();
-  const tabs = el(
-    'div',
-    { class: 'online-tabs' },
-    tabButton('friends', `Friends (${social.friends.length})`),
-    tabButton('add', 'Add Friends'),
-    tabButton('notices', unread > 0 ? `Notifications (${unread})` : 'Notifications'),
-  );
-
-  const right = el('div', { style: 'display:grid;gap:14px' }, panel('Friends', tabs, tabBody()));
-
-  root.append(el('div', { class: 'split' }, left, right));
   return root;
 
-  // ------------------------------------------------------------------ pieces
+  function paint(match: OnlineMatchup | null): void {
+    const me = store.simConfig();
+    const figure = el('canvas', { class: 'walkout-figure' }) as HTMLCanvasElement;
+    drawFigure(figure, me, 130);
 
-  function tabButton(id: FriendTab, label: string): HTMLElement {
-    return el(
-      'button',
-      {
-        class: `btn sm ${tab === id ? 'primary' : ''}`,
-        onclick: () => {
-          tab = id;
-          if (id === 'notices') markNoticesRead();
-          navigate('online');
-        },
-      },
-      label,
-    );
-  }
-
-  function tabBody(): HTMLElement {
-    if (tab === 'add') return addFriends();
-    if (tab === 'notices') return notices();
-    return friendList();
-  }
-
-  function friendList(): HTMLElement {
-    if (social.friends.length === 0) {
-      return el('p', { class: 'hint', style: 'margin:12px 0 0' }, 'Nobody yet. Find people under Add Friends — everyone on the leaderboard is out there.');
-    }
-    return el(
-      'div',
-      { style: 'display:grid;gap:8px;margin-top:12px' },
-      ...social.friends.map((f) => {
-        const rival = userById(f.id);
-        const online = rival ? isOnline(rival) : false;
-        const theirRank = rival ? onlineRank(rival.points) : null;
-        return el(
-          'div',
-          { class: 'kv friend-row' },
+    if (!isConnected()) {
+      body.replaceChildren(
+        panel(
+          'Connecting…',
+          el('div', { class: 'online-wait' }, el('div', { class: 'spinner' }), el('b', {}, 'Connecting to the server…')),
           el(
-            'span',
-            { class: 'k' },
-            el('span', { class: `presence ${online ? 'on' : ''}` }),
-            el('b', {}, f.name),
-            theirRank
-              ? el('span', { class: 'faint', style: `margin-left:8px;color:${theirRank.tier.color}` }, theirRank.label)
-              : null,
-          ),
-          online && rival
-            ? inParty()
-              ? el('span', { class: 'pill' }, partyState()?.member.id === f.id ? 'In your party' : 'In lobby')
-              : el('button', { class: 'btn sm', onclick: () => sendInvite(rival) }, 'Invite to party')
-            : el('span', { class: 'pill' }, 'Offline'),
-        );
-      }),
-    );
-  }
-
-  function addFriends(): HTMLElement {
-    const input = el('input', {
-      class: 'text-input',
-      placeholder: 'Search username…',
-      value: searchText,
-      oninput: (e: Event) => {
-        searchText = (e.target as HTMLInputElement).value;
-        results.replaceChildren(...resultRows());
-      },
-    }) as HTMLInputElement;
-
-    const results = el('div', { style: 'display:grid;gap:8px;margin-top:10px' }, ...resultRows());
-
-    function resultRows(): HTMLElement[] {
-      const q = searchText.trim().toLowerCase();
-      if (q.length < 2) {
-        return [el('p', { class: 'hint', style: 'margin:2px 0 0' }, 'Type at least two letters. The names on the leaderboard are the names you can add.')];
-      }
-      const known = new Set([...social.friends.map((f) => f.id), ...social.outgoing.map((r) => r.id)]);
-      const hits = allUsers().filter((r) => r.name.toLowerCase().includes(q)).slice(0, 8);
-      if (hits.length === 0) return [el('p', { class: 'hint', style: 'margin:2px 0 0' }, 'No player by that name.')];
-      return hits.map((r) => {
-        const theirRank = onlineRank(r.points);
-        const pending = social.outgoing.some((o) => o.id === r.id);
-        return el(
-          'div',
-          { class: 'kv friend-row' },
-          el(
-            'span',
-            { class: 'k' },
-            el('b', {}, r.name),
-            el('span', { class: 'faint', style: `margin-left:8px;color:${theirRank.tier.color}` }, theirRank.label),
-          ),
-          known.has(r.id)
-            ? el('span', { class: 'pill' }, pending ? 'Request sent' : 'Friends')
-            : el(
-                'button',
-                {
-                  class: 'btn sm',
-                  onclick: () => {
-                    const result = sendFriendRequest(r.name);
-                    toast(
-                      result === 'sent'
-                        ? `Friend request sent to ${r.name}`
-                        : result === 'already-pending'
-                          ? 'Request already out'
-                          : result === 'already-friends'
-                            ? 'Already friends'
-                            : 'No player by that name',
-                      result === 'sent' ? 'good' : 'info',
-                    );
-                    navigate('online', { keepTab: 1 });
-                  },
-                },
-                'Send request',
-              ),
-        );
-      });
-    }
-
-    return el('div', { style: 'margin-top:12px' }, input, results);
-  }
-
-  function notices(): HTMLElement {
-    const rows: HTMLElement[] = [];
-    for (const req of social.incoming) {
-      rows.push(
-        el(
-          'div',
-          { class: 'kv friend-row' },
-          el('span', { class: 'k' }, el('b', {}, req.name), el('span', { class: 'faint', style: 'margin-left:8px' }, 'sent you a friend request')),
-          el(
-            'span',
-            { style: 'display:flex;gap:6px' },
-            el(
-              'button',
-              {
-                class: 'btn sm primary',
-                onclick: () => {
-                  acceptIncoming(req.id);
-                  toast(`You and ${req.name} are now friends`, 'good');
-                  navigate('online');
-                },
-              },
-              'Accept',
-            ),
-            el(
-              'button',
-              {
-                class: 'btn sm',
-                onclick: () => {
-                  declineIncoming(req.id);
-                  navigate('online');
-                },
-              },
-              'Decline',
-            ),
+            'p',
+            { class: 'hint', style: 'margin:10px 0 0' },
+            'Online needs the game to be served by the Hoops Elite server — open it at http://localhost:3000/HoopsElite.html.',
           ),
         ),
       );
+      return;
     }
-    for (const n of social.notices) {
-      rows.push(
+
+    if (!match) {
+      // Requirement: one player waiting sees exactly this.
+      body.replaceChildren(
+        panel(
+          'Finding a match',
+          el(
+            'div',
+            { class: 'online-wait' },
+            el('div', { class: 'spinner' }),
+            el('b', { class: 'waiting-text' }, 'Waiting for opponent...'),
+          ),
+          el(
+            'p',
+            { class: 'hint', style: 'margin:12px 0 0' },
+            `${onlineCount()} player${onlineCount() === 1 ? '' : 's'} connected. The match starts the moment somebody else joins.`,
+          ),
+        ),
+        panel('Your player', el('div', { class: 'online-me' }, figure, el('div', {}, el('b', {}, me.name)))),
+      );
+      return;
+    }
+
+    // Paired: say so, then start. Both clients reach this at the same moment
+    // because both computed the same pairing from the same roster.
+    body.replaceChildren(
+      panel(
+        'Opponent found',
         el(
           'div',
-          { class: `kv friend-row ${n.read ? 'read' : ''}` },
-          el('span', { class: 'k' }, noticeLine(n)),
-          el('span', { class: 'faint', style: 'font-size:11px' }, timeAgo(n.at)),
+          { class: 'online-wait' },
+          el('b', {}, `Match found — you are Player ${match.localSide + 1}`),
         ),
-      );
-    }
-    if (rows.length === 0) {
-      rows.push(el('p', { class: 'hint', style: 'margin:12px 0 0' }, 'Nothing yet. Friend requests and their answers land here.'));
-    }
-    return el('div', { style: 'display:grid;gap:8px;margin-top:12px' }, ...rows);
-  }
-
-  function partyPanel(): HTMLElement | null {
-    const party = partyState();
-    if (!party) return null;
-
-    if (party.status === 'invited') {
-      return panel(
-        'Party lobby',
-        el('p', { class: 'hint', style: 'margin:0 0 10px' }, `Invite sent — waiting for ${party.member.name} to join…`),
-        el('button', { class: 'btn sm', onclick: () => leaveParty() }, 'Cancel invite'),
-      );
-    }
-
-    const friendCfg = rivalConfig(party.member);
-    const theirRank = onlineRank(party.member.points);
-    return panel(
-      'Party lobby',
-      el(
-        'div',
-        { class: 'lobby-members' },
-        lobbyCard(profile.username, me, played ? rank.label : 'Unranked', () => previewBuild(me, 'Your build')),
-        el('div', { class: 'lobby-vs' }, 'VS'),
-        lobbyCard(party.member.name, friendCfg, theirRank.label, () => previewBuild(friendCfg, `${party.member.name}'s build`)),
-      ),
-      el(
-        'div',
-        { class: 'row', style: 'margin-top:14px' },
-        el('button', { class: 'btn primary xl', onclick: () => playParty() }, 'Play 1v1'),
-        el('button', { class: 'btn', onclick: () => leaveParty() }, 'Leave lobby'),
-      ),
-      el(
-        'p',
-        { class: 'hint', style: 'margin:10px 0 0' },
-        'While you are in the lobby only the Store, Locker, Settings and Controls are open. The walkout will only show your opponent — Preview Build is how you scout in here.',
+        el('p', { class: 'hint', style: 'margin:10px 0 0' }, 'Starting the 1v1…'),
       ),
     );
+    start(match);
   }
 
-  function lobbyCard(name: string, cfg: ReturnType<typeof store.simConfig>, rankLabel: string, preview: () => void): HTMLElement {
-    const fig = el('canvas', { class: 'walkout-figure' }) as HTMLCanvasElement;
-    drawFigure(fig, cfg, 110);
-    return el(
-      'div',
-      { class: 'lobby-card' },
-      fig,
-      el('b', {}, name),
-      el('div', { class: 'faint', style: 'font-size:11px' }, rankLabel),
-      el('button', { class: 'btn sm', onclick: preview }, 'Preview build'),
-    );
-  }
-
-  function previewBuild(cfg: ReturnType<typeof store.simConfig>, kicker: string): void {
-    overlay((close) =>
-      el(
-        'div',
-        { class: 'box preview-box' },
-        buildPreviewCard(cfg, kicker),
-        el('div', { class: 'row', style: 'justify-content:center;margin-top:10px' }, el('button', { class: 'btn', onclick: close }, 'Close')),
-      ),
-    );
-  }
-
-  function sendInvite(rival: LadderRival): void {
-    invite(rival);
-    toast(`Party invite sent to ${rival.name}`, 'good');
-    navigate('online');
-  }
-
-  function quickMatch(): void {
-    const rival = findQuickMatch();
-    overlay((close) => {
-      const box = el(
-        'div',
-        { class: 'box', style: 'max-width:380px;text-align:center' },
-        el('h2', { style: 'margin:0 0 6px;font-size:20px;font-weight:900' }, 'Quick Match'),
-        el('p', { class: 'dim searching' }, 'Searching for players near your rank…'),
-      );
-      window.setTimeout(() => {
-        if (!box.isConnected) return;
-        const line = box.querySelector('.searching');
-        if (line) line.textContent = `Found ${rival.name} — ${onlineRank(rival.points).label}`;
-        window.setTimeout(() => {
-          close();
-          startVs(rival);
-        }, 1100);
-      }, 2400);
-      return box;
-    });
-  }
-
-  function playParty(): void {
-    const party = partyState();
-    if (!party) return;
-    const rival = party.member;
-    leaveParty();
-    startVs(rival, 'Party 1v1');
-  }
-
-  function startVs(rival: LadderRival, label = 'Online 1v1'): void {
+  function start(match: OnlineMatchup): void {
+    if (launching) return;
+    launching = true;
+    console.log(`Online match starting against ${match.opponentId} — you are Player ${match.localSide + 1}`);
+    // The opponent is a person, so there is no CPU build to scout and no
+    // difficulty to name: the match screen is handed `online` and builds no
+    // AI at all.
     startMatch({
-      opponent: rivalConfig(rival),
-      difficulty: rivalDifficulty(rival),
+      opponent: {
+        ...store.simConfig(),
+        id: `online-${match.opponentId}`,
+        name: 'Opponent',
+        isBot: false,
+      },
+      difficulty: 'pro',
       parkId: 'downtown',
       playlist: 'casual',
-      eventName: label,
-      opponentOnlyWalkout: true,
+      online: { opponentId: match.opponentId, localSide: match.localSide },
+      localSide: match.localSide,
+      skipIntro: true,
+      onDone: () => {
+        launching = false;
+        leaveOnlineQueue();
+        navigate('home');
+      },
     });
   }
-}
-
-function timeAgo(at: number): string {
-  const s = Math.max(1, Math.round((Date.now() - at) / 1000));
-  if (s < 60) return `${s}s ago`;
-  const m = Math.round(s / 60);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.round(m / 60);
-  return h < 24 ? `${h}h ago` : `${Math.round(h / 24)}d ago`;
 }

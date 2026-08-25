@@ -3728,3 +3728,30 @@ input[type='text']:focus {
   outline: none;
   border-color: var(--accent);
 }
+
+/* ------------------------------------------------------- online matchmaking */
+
+.online-wait {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 15px;
+}
+
+.waiting-text {
+  letter-spacing: 0.01em;
+}
+
+.spinner {
+  width: 18px;
+  height: 18px;
+  flex: none;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.18);
+  border-top-color: var(--accent);
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
