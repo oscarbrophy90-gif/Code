@@ -55,7 +55,14 @@ const SPIN_MS = 5200;
 /** How long the winner is held on screen once it lands. */
 const HOLD_MS = 1400;
 
-export function playCourtRoll(host: HTMLElement, seed: number): Promise<CourtSurface> {
+/**
+ * The court draw.
+ *
+ * `unskippable` is for online: the draw is part of a shared intro, and one
+ * player clicking through it only puts them on a court the other person has not
+ * been shown yet. Seeded, so both clients land on the same floor either way.
+ */
+export function playCourtRoll(host: HTMLElement, seed: number, unskippable = false): Promise<CourtSurface> {
   const winner = pickCourtSurface(seed);
   const { strip, winnerAt } = buildReel(seed, winner);
 
@@ -75,7 +82,7 @@ export function playCourtRoll(host: HTMLElement, seed: number): Promise<CourtSur
     const result = el('div', { class: 'roll-result' }, '');
 
     const window_ = el('div', { class: 'roll-window' }, track, el('div', { class: 'roll-marker' }));
-    const card = el('div', { class: 'roll-card-shell' }, title, sub, window_, result, el('div', { class: 'roll-skip' }, 'Click to skip'));
+    const card = el('div', { class: 'roll-card-shell' }, title, sub, window_, result, el('div', { class: 'roll-skip' }, unskippable ? 'Drawing the court' : 'Click to skip'));
     const stage = el('div', { class: 'roll-stage' }, card);
 
     let done = false;
@@ -91,8 +98,12 @@ export function playCourtRoll(host: HTMLElement, seed: number): Promise<CourtSur
         resolve(winner);
       }, 260);
     };
-    const releaseKeys = captureSceneKeys(() => finish());
-    stage.addEventListener('click', finish);
+    // Unskippable still captures keys — that stops them reaching the game
+    // underneath — it just does not end the scene with them.
+    const releaseKeys = captureSceneKeys(() => {
+      if (!unskippable) finish();
+    });
+    if (!unskippable) stage.addEventListener('click', finish);
     host.appendChild(stage);
 
     // Where the winning card's centre has to end up: under the marker, which

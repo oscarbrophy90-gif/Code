@@ -19,12 +19,43 @@ import type { PlayerInput, SimPlayerConfig } from '@hoops/shared';
 
 export type Role = 'host' | 'guest';
 
+/** Casual moves nothing. Ranked moves RP, the rank, and the win/loss record. */
+export type OnlineMode = 'casual' | 'ranked';
+
+/**
+ * A player's ladder, as the SERVER holds it.
+ *
+ * The client never computes any of these — it is told them, and it draws them.
+ * The rank itself is derived from `rp` locally, which is safe because deriving
+ * a label from a server-supplied number cannot disagree with the server.
+ */
+export interface OnlineProfile {
+  accountId: string;
+  username: string;
+  rp: number;
+  wins: number;
+  losses: number;
+}
+
 export interface MatchFound {
   matchId: string;
+  mode: OnlineMode;
   role: Role;
   side: 0 | 1;
   seed: number;
-  opponentBuild: SimPlayerConfig | null;
+  you: { profile: OnlineProfile; build: SimPlayerConfig | null };
+  opponent: { profile: OnlineProfile; build: SimPlayerConfig | null };
+}
+
+/** What one finished match did to the ladder. Ranked only; casual reports none. */
+export interface MatchResult {
+  mode: OnlineMode;
+  /** 'scoreline', 'forfeit' or 'disconnect' */
+  reason: string;
+  won: boolean;
+  ranked: boolean;
+  you?: OnlineProfile & { delta: number; rpBefore: number };
+  opponent?: OnlineProfile & { delta: number; rpBefore: number };
 }
 
 /**
@@ -171,6 +202,8 @@ type Sock = {
 let socket: Sock | null = null;
 let connected = false;
 let selfId = '';
+/** The server's copy of your ladder. Never written locally. */
+let selfProfile: OnlineProfile | null = null;
 
 /**
  * Console tracing for online play, throttled per topic.
@@ -198,7 +231,7 @@ const debug = netTrace;
 
 type Handler<T> = (payload: T) => void;
 const bus = {
-  searching: new Set<Handler<void>>(),
+  searching: new Set<Handler<{ mode: OnlineMode }>>(),
   found: new Set<Handler<MatchFound>>(),
   ready: new Set<Handler<{ count: number; total: number }>>(),
   go: new Set<Handler<void>>(),
@@ -206,13 +239,18 @@ const bus = {
   state: new Set<Handler<NetSnapshot>>(),
   input: new Set<Handler<PlayerInput>>(),
   score: new Set<Handler<{ score: [number, number] }>>(),
+  self: new Set<Handler<OnlineProfile>>(),
+  result: new Set<Handler<MatchResult>>(),
 };
 
 function fire<T>(set: Set<Handler<T>>, payload: T): void {
   for (const fn of [...set]) fn(payload);
 }
 
-export const onSearching = (fn: Handler<void>) => sub(bus.searching, fn);
+export const onSearching = (fn: Handler<{ mode: OnlineMode }>) => sub(bus.searching, fn);
+/** Your ladder, straight from the server — the only source of it there is. */
+export const onSelfProfile = (fn: Handler<OnlineProfile>) => sub(bus.self, fn);
+export const onMatchResult = (fn: Handler<MatchResult>) => sub(bus.result, fn);
 export const onMatchFound = (fn: Handler<MatchFound>) => sub(bus.found, fn);
 export const onReadyCount = (fn: Handler<{ count: number; total: number }>) => sub(bus.ready, fn);
 export const onCheckGo = (fn: Handler<void>) => sub(bus.go, fn);
@@ -250,21 +288,41 @@ export function connectMultiplayer(): void {
   });
   socket.on('connect_error', (...a: unknown[]) => console.warn('[Hoops Elite] connection error:', a[0]));
 
-  socket.on('mm:searching', () => {
-    console.log('Searching for opponent...');
-    fire(bus.searching, undefined);
+  socket.on('mm:searching', (...a: unknown[]) => {
+    const mode = ((a[0] as { mode?: OnlineMode })?.mode ?? 'casual') as OnlineMode;
+    console.log(`Searching for a ${mode} opponent...`);
+    fire(bus.searching, { mode });
+  });
+
+  socket.on('mm:error', (...a: unknown[]) => console.warn('[Hoops Elite] matchmaking refused:', a[0]));
+
+  socket.on('profile:self', (...a: unknown[]) => {
+    const profile = a[0] as OnlineProfile;
+    selfProfile = profile;
+    netTrace('profile', () => `your ladder: ${profile.rp} RP, ${profile.wins}W / ${profile.losses}L`, true);
+    fire(bus.self, profile);
   });
 
   socket.on('match:found', (...a: unknown[]) => {
-    const p = a[0] as { matchId: string; role: Role; side: 0 | 1; seed: number; opponent?: { build?: SimPlayerConfig | null } };
-    console.log(`Opponent found — match ${p.matchId}, you are the ${p.role} (Player ${p.side + 1})`);
-    fire(bus.found, {
-      matchId: p.matchId,
-      role: p.role,
-      side: p.side,
-      seed: p.seed,
-      opponentBuild: p.opponent?.build ?? null,
-    });
+    const p = a[0] as MatchFound;
+    console.log(
+      `Opponent found — ${p.mode} match ${p.matchId}, you are the ${p.role} (Player ${p.side + 1}) ` +
+        `vs ${p.opponent?.profile?.username ?? 'unknown'} [${p.opponent?.profile?.rp ?? 0} RP]`,
+    );
+    fire(bus.found, p);
+  });
+
+  socket.on('match:result', (...a: unknown[]) => {
+    const r = a[0] as MatchResult;
+    netTrace(
+      'result',
+      () =>
+        r.ranked
+          ? `ranked result (${r.reason}): you ${r.won ? 'won' : 'lost'}, ${r.you?.delta ?? 0} RP -> ${r.you?.rp ?? 0}`
+          : `casual result (${r.reason}): you ${r.won ? 'won' : 'lost'} — nothing moved`,
+      true,
+    );
+    fire(bus.result, r);
   });
 
   socket.on('match:ready', (...a: unknown[]) => {
@@ -309,8 +367,33 @@ export function isConnected(): boolean {
 
 // ------------------------------------------------------------------ sending
 
-export function joinMatchmaking(build: SimPlayerConfig): void {
-  socket?.emit('mm:join', { build });
+/**
+ * Say who you are and what you are playing, and get your ladder back.
+ *
+ * The build travels here so the SERVER holds it: the opponent is shown the copy
+ * the server has, never one handed straight over from another browser.
+ */
+export function announceSelf(identity: { accountId: string; username: string }, build: SimPlayerConfig): void {
+  socket?.emit('profile:hello', { ...identity, build });
+}
+
+export function joinMatchmaking(
+  mode: OnlineMode,
+  identity: { accountId: string; username: string },
+  build: SimPlayerConfig,
+  rules: { targetScore: number; winBy: number; maxScore: number },
+): void {
+  socket?.emit('mm:join', { mode, ...identity, build, rules });
+}
+
+/** Quitting a live match. Ranked: the server records it as a loss. */
+export function sendForfeit(): void {
+  socket?.emit('match:forfeit');
+}
+
+/** The last ladder the server sent, for screens that open before a refresh. */
+export function selfLadder(): OnlineProfile | null {
+  return selfProfile;
 }
 
 export function leaveMatchmaking(): void {

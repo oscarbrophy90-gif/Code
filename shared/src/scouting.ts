@@ -66,3 +66,48 @@ export function ratingColor(rating: number): string {
   if (rating >= 60) return '#ff7a3d';
   return '#ff5c6a';
 }
+
+
+/**
+ * A one-word name for what a build actually is.
+ *
+ * Bots are handed an archetype when they are generated — "Paint Beast", "Lockdown"
+ * — but a player's own build has never had one, because nobody picks an
+ * archetype in the creator: you move sliders and a player comes out. So this
+ * reads the sliders back and says what you made.
+ *
+ * Derived, never stored. A build that gets rebalanced in the Locker is a
+ * different player the moment the numbers change, and a label saved at creation
+ * would keep insisting it was a Sharpshooter long after the three-point rating
+ * went to the rebounding.
+ */
+export function buildLabel(attrs: Attributes): string {
+  const shooting = (attrs.threePoint * 2 + attrs.midRange) / 3;
+  const finishing = (attrs.dunk + attrs.layup + attrs.closeShot) / 3;
+  const playmaking = (attrs.ballHandle * 2 + attrs.passAccuracy + attrs.speedWithBall) / 4;
+  const defence = (attrs.perimeterDefense + attrs.interiorDefense + attrs.steal + attrs.block) / 4;
+  const boards = (attrs.offensiveRebound + attrs.defensiveRebound + attrs.strength) / 3;
+
+  const ranked: [string, number][] = [
+    ['Sharpshooter', shooting],
+    ['Slasher', finishing],
+    ['Playmaker', playmaking],
+    ['Lockdown', defence],
+    ['Glass Cleaner', boards],
+  ];
+  ranked.sort((a, b) => b[1] - a[1]);
+  const [topName, top] = ranked[0];
+  const [secondName, second] = ranked[1];
+
+  // Nothing stands out: a build with no peak is a two-way player, not a bad
+  // Sharpshooter. Naming the highest of five near-identical numbers would be
+  // reading noise.
+  if (top - ranked[ranked.length - 1][1] < 6) return 'Two-Way';
+  // Two peaks together earn the pairing rather than an arbitrary winner.
+  if (top - second < 3) {
+    if (topName === 'Sharpshooter' && secondName === 'Slasher') return 'Shot Creator';
+    if (topName === 'Slasher' && secondName === 'Sharpshooter') return 'Shot Creator';
+    if (topName === 'Lockdown' || secondName === 'Lockdown') return `Two-Way ${topName === 'Lockdown' ? secondName : topName}`;
+  }
+  return topName;
+}

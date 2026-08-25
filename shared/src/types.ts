@@ -264,6 +264,17 @@ export interface Profile {
    * tally would drift the first time a result did not arrive.
    */
   online: OnlineRecord;
+  /**
+   * The player-versus-player ladder, as the server last reported it.
+   *
+   * A CACHE, not the ladder. The real one lives on the server; this exists so
+   * the Online screen can show your rank in the moment before the connection
+   * comes up, and so a Locker opened offline is not blank. Nothing in the client
+   * ever adds to it — every field here is overwritten wholesale by the server's
+   * own numbers, and editing this file gets you a wrong screen for as long as it
+   * takes the server to answer, and nothing else.
+   */
+  pvp: PvpRecord;
   /** friends, requests and their notifications — the Online hub's state */
   social: SocialState;
 }
@@ -322,6 +333,25 @@ export interface SocialNotice {
  * else moves this — practice, drills and the difficulty ladder all have their
  * own rewards.
  */
+/**
+ * A local mirror of the server's player-versus-player ladder.
+ *
+ * Separate from `OnlineRecord` because they count different things: that one is
+ * the Ranked playlist against the CPU, this one is ranked games against other
+ * people. Beating a bot and beating a person are not the same achievement, so
+ * they are not the same number.
+ */
+export interface PvpRecord {
+  /** ranked points on the player-versus-player ladder */
+  rp: number;
+  /** ranked online matches won against another person */
+  wins: number;
+  /** ranked online matches lost against another person */
+  losses: number;
+  /** when the server last told us these numbers; 0 means never */
+  syncedAt: number;
+}
+
 export interface OnlineRecord {
   /**
    * Ranked points: the ladder itself.

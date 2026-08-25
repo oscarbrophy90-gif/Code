@@ -36,7 +36,7 @@ import { playRankChange } from './rankchange.ts';
 import { playCourtRoll } from './courtroll.ts';
 import { settleRanked } from './rankedmatch.ts';
 import { bar, el, fmt, overlay, ratio, toast } from './dom.ts';
-import { playWalkout } from './walkout.ts';
+import { playWalkout, type WalkoutIdentity } from './walkout.ts';
 import { AvatarRenderer, livePreview } from './avatar.ts';
 
 export interface StartMatchOptions {
@@ -48,11 +48,17 @@ export interface StartMatchOptions {
    * the other player is driven by their own client. Every other mode leaves
    * this unset and behaves exactly as it always has.
    */
-  online?: { role: 'host' | 'guest' } | null;
+  online?: { role: 'host' | 'guest'; mode: 'casual' | 'ranked' } | null;
   /**
-   * Skip the walkout and the court draw. Online uses it so both people drop
-   * onto the floor at the same moment instead of watching separate cutscenes.
+   * Both accounts in an online match: yours and theirs.
+   *
+   * The opposition in every offline mode is a build with nobody behind it, so
+   * their card carries no rank. Online there is a person there, and both of you
+   * are shown both cards — their rank, their RP, their record and their build,
+   * off the server's copy rather than out of their browser.
    */
+  onlineIdentities?: { you: WalkoutIdentity; opponent: WalkoutIdentity } | null;
+  /** Skip the walkout and the court draw. Practice and drills, not online. */
   skipIntro?: boolean;
   /** called when the match screen closes, however it ended */
   onDone?: () => void;
@@ -112,6 +118,11 @@ export function startMatch(opts: StartMatchOptions): void {
   // so skipping a scene can never leave you looking at another one.
   if (walkoutUp) return;
   walkoutUp = true;
+  // Online: neither the walkout nor the court draw can be skipped. They are the
+  // only thing holding two people on the same clock before the check, and one
+  // player clicking through does not start the game early — it starts THEM
+  // early, on a court the other person has not been shown yet.
+  const online = opts.online ?? null;
   void playWalkout({
     player: store.simConfig(),
     opponent: opts.opponent,
@@ -119,12 +130,18 @@ export function startMatch(opts: StartMatchOptions): void {
     opponentTeam: opts.squads ? [opts.opponent, ...opts.squads.opponents] : undefined,
     difficulty: opts.difficulty,
     venue: PARK_BY_ID[opts.parkId]?.name ?? 'Hoops Elite',
-    subtitle: opts.eventName ?? (opts.squads ? '3v3 Squads' : labelFor(opts.playlist)),
+    subtitle:
+      opts.eventName ??
+      (online ? (online.mode === 'ranked' ? 'Ranked · Online 1v1' : 'Casual · Online 1v1') : opts.squads ? '3v3 Squads' : labelFor(opts.playlist)),
     // Online games hide the difficulty for the same reason ranked does: you
     // are playing a person, and naming a CPU setting would say otherwise.
-    hideDifficulty: Boolean(opts.ranked || opts.opponentOnlyWalkout),
-    opponentOnly: Boolean(opts.ranked || opts.opponentOnlyWalkout),
-    identity: {
+    hideDifficulty: Boolean(online || opts.ranked || opts.opponentOnlyWalkout),
+    // Online shows BOTH cards: you are playing a person, and scouting works
+    // both ways. Only the CPU ladder announces the opposition alone.
+    opponentOnly: !online && Boolean(opts.ranked || opts.opponentOnlyWalkout),
+    unskippable: !!online,
+    opponentIdentity: opts.onlineIdentities?.opponent ?? undefined,
+    identity: opts.onlineIdentities?.you ?? {
       username: store.profile.username,
       // The ladder is ranked points, the same number the Rank screen shows.
       points: store.profile.online.rp,
@@ -138,7 +155,7 @@ export function startMatch(opts: StartMatchOptions): void {
     walkoutUp = false;
     // The court draw. Seeded from the match, so an online pair sees the same
     // reel land on the same floor.
-    const surface = await playCourtRoll(document.body, opts.seed ?? hashString(`court-${Date.now()}`));
+    const surface = await playCourtRoll(document.body, opts.seed ?? hashString(`court-${Date.now()}`), !!online);
     launchMatch({ ...opts, surface });
   });
 }

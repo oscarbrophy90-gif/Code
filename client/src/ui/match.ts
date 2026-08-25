@@ -54,6 +54,7 @@ import {
   sendReady,
   sendScore,
   sendSnapshot,
+  sendForfeit,
   netTrace,
   type NetSnapshot,
 } from '../net/multiplayer.ts';
@@ -97,7 +98,7 @@ export interface MatchOptions {
    * else, so single-player, the difficulty ladder, ranked, 3v3 and the practice
    * gym all run precisely the code they always ran.
    */
-  online?: { role: 'host' | 'guest' } | null;
+  online?: { role: 'host' | 'guest'; mode: 'casual' | 'ranked' } | null;
   /** the court drawn for this game; falls back to the park's own palette */
   surface?: CourtSurface | null;
   onFinish: (result: MatchResult) => void;
@@ -408,6 +409,15 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
   const closeAndFinish = (quit: boolean) => {
     if (finished) return;
     finished = true;
+    // Walking out of an online game is a forfeit, and the server treats it as
+    // one: in Ranked that is a loss for you and a win for them, and in Casual
+    // it is nothing at all. Told once, on the way out, and only when YOU are
+    // the one leaving — a match that ended on the scoreline has already been
+    // settled by the server off the score it was keeping.
+    if (quit && netRole) {
+      netTrace('result', () => 'forfeiting the match', true);
+      sendForfeit();
+    }
     loop.stop();
     input.detach();
     for (const release of netReleases) release();

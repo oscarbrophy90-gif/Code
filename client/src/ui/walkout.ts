@@ -1,6 +1,7 @@
 import {
   grandChampLabel,
   onlineRank,
+  pvpRank,
   DIFFICULTY_LABEL,
   SKIN_TONES,
   TITLE_BY_ID,
@@ -8,6 +9,7 @@ import {
   formatHeight,
   ratingColor,
   scoutReport,
+  buildLabel,
   type Difficulty,
   type SimPlayerConfig,
 } from '@hoops/shared';
@@ -32,6 +34,14 @@ export interface WalkoutIdentity {
   wins: number;
   losses: number;
   placement: number | null;
+  /**
+   * Read the rank off the player-versus-player ladder instead of the CPU one.
+   *
+   * The two ladders count different things and only one of them is the right
+   * answer at an online walkout: you are about to play a person, so the rank
+   * beside your name should be the one people gave you.
+   */
+  pvp?: boolean;
 }
 
 export interface WalkoutOptions {
@@ -70,6 +80,23 @@ export interface WalkoutOptions {
    * on Preview Build in the lobby.
    */
   opponentOnly?: boolean;
+  /**
+   * The opponent's account, when there is one behind the build.
+   *
+   * Offline the opposition is a build with nobody behind it, so this is absent
+   * and their card shows no rank. Online there is a person there, and their
+   * rank, RP and record belong on the card as much as yours do.
+   */
+  opponentIdentity?: WalkoutIdentity;
+  /**
+   * No skip button, no skip key, no click to dismiss.
+   *
+   * Online, the intro is the only thing keeping two people on the same clock
+   * before the check. One player skipping it does not start the game early — it
+   * starts THEM early, staring at a court the other person has not reached yet.
+   * So online it runs to the end for both of them.
+   */
+  unskippable?: boolean;
 }
 
 /** How long each beat of the cutscene runs, in milliseconds. */
@@ -97,8 +124,13 @@ export function playWalkout(opts: WalkoutOptions): Promise<void> {
         resolve();
       }, 260);
     };
+    // Keys are captured either way: unskippable means the scene swallows them
+    // rather than that they leak through to the game underneath. What changes is
+    // whether swallowing one also ends the scene.
     const releaseKeys = captureSceneKeys(
-      () => finish(),
+      () => {
+        if (!opts.unskippable) finish();
+      },
       (e) => e.key === 'Escape' || e.key === ' ' || e.key === 'Enter',
     );
     const at = (ms: number, fn: () => void) => timers.push(window.setTimeout(fn, ms));
@@ -120,11 +152,15 @@ export function playWalkout(opts: WalkoutOptions): Promise<void> {
         ),
       ),
       body,
-      el('button', { class: 'walkout-skip', onclick: finish }, 'Skip'),
+      opts.unskippable
+        ? el('div', { class: 'walkout-hold' }, 'Both players are being introduced')
+        : el('button', { class: 'walkout-skip', onclick: finish }, 'Skip'),
     );
-    stage.addEventListener('click', (e) => {
-      if (e.target === stage || e.target === body) finish();
-    });
+    if (!opts.unskippable) {
+      stage.addEventListener('click', (e) => {
+        if (e.target === stage || e.target === body) finish();
+      });
+    }
     document.body.appendChild(stage);
 
     // -------------------------------------------------------------- the beats
@@ -133,7 +169,7 @@ export function playWalkout(opts: WalkoutOptions): Promise<void> {
       body.appendChild(
         teams
           ? teamCard(opts.opponentTeam!, 'right', 'Now entering')
-          : entrantCard(opts.opponent, 'right', 'Now entering'),
+          : entrantCard(opts.opponent, 'right', 'Now entering', opts.opponentIdentity),
       );
       audio.play('ui', 0.8);
     });
@@ -251,7 +287,10 @@ function entrantCard(
         el('span', {}, cfg.position ?? '—'),
         el('span', {}, formatHeight(cfg.heightIn)),
         el('span', {}, `${cfg.weightLb} lb`),
-        cfg.archetype ? el('span', {}, cfg.archetype) : null,
+        // Bots are generated with an archetype; a player's own build never had
+        // one, because nobody picks an archetype in the creator. Read it back
+        // off the build so both cards say what kind of player is standing there.
+        el('span', { class: 'walkout-build' }, cfg.archetype ?? buildLabel(cfg.attrs)),
       ),
       el(
         'div',
@@ -338,8 +377,12 @@ function rankPillar(identity: WalkoutIdentity): HTMLElement {
   // The ladder is points. Reading the win count here is what made every
   // walkout say Bronze 3 — three ranked wins is three "points" on a scale
   // where a division is a hundred of them.
-  const rank = onlineRank(identity.points);
-  const label = rank.grandChamp ? grandChampLabel(placement) : rank.label;
+  //
+  // Which ladder depends on who is across from you: against a person it is the
+  // player-versus-player one, against the CPU it is the Ranked-playlist one.
+  const pvp = identity.pvp === true;
+  const rank = pvp ? pvpRank(identity.points) : onlineRank(identity.points);
+  const label = !pvp && rank.grandChamp ? grandChampLabel(placement) : rank.label;
 
   const badge = el('canvas', {
     class: 'walkout-badge',
@@ -351,7 +394,19 @@ function rankPillar(identity: WalkoutIdentity): HTMLElement {
     'div',
     { class: 'walkout-rank' },
     badge,
-    el('div', { class: 'walkout-rank-label', style: `color:${rank.tier.color}` }, played ? label : 'Unranked'),
+    el(
+      'div',
+      { class: 'walkout-rank-label', style: `color:${rank.tier.color}` },
+      // The player-versus-player ladder always names your rank: at 0 RP you are
+      // Bronze 3, not nobody, and the Online screen has been saying so since
+      // before the match. The CPU ladder keeps "Unranked" until you have played.
+      pvp || played ? label : 'Unranked',
+    ),
+    // The rank alone says where somebody sits; the points and the record say
+    // how they got there and how it has been going, which is what you actually
+    // want to know about the person you are about to play.
+    el('div', { class: 'walkout-rank-rp' }, `${identity.points} RP`),
+    el('div', { class: 'walkout-rank-record' }, `${identity.wins} W / ${identity.losses} L`),
   );
 }
 

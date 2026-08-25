@@ -30,7 +30,7 @@ npm run build:standalone   # regenerate dist-standalone/HoopsElite.html
 `npm test` runs the simulation and balance tests. `npm run typecheck` covers all three
 packages. `npm run build` produces the production client bundle.
 
-### Online 1v1
+### Online 1v1 — Casual and Ranked
 
 ```
 npm run build:standalone
@@ -38,9 +38,40 @@ npm run serve              # then open http://localhost:3000/HoopsElite.html
 ```
 
 Open it in two browsers (or on two machines pointed at the same host), pick
-**Online** in both, and the two of you are paired into the same game. Everything
-else in Hoops Elite is unchanged by this: the CPU never appears in Online, and
-Online never touches any other mode.
+**Online** in both, and choose a mode. Everything else in Hoops Elite is
+unchanged by this: the CPU never appears in Online, and Online never touches any
+other mode.
+
+**Casual** is a full game that costs nothing — no RP, no rank, no win or loss.
+**Ranked** is the ladder: a win takes RP off your opponent and gives it to you,
+a loss does the reverse, and quitting counts as a loss. The two queues never mix.
+
+The ranked ladder runs Bronze 3 → Grand Champion, five tiers of three divisions
+at 100 RP each, and it is **separate from the Ranked-playlist rank you earn
+against the CPU** — beating a bot is not evidence about how you go against
+somebody trying to beat you back, so the two count different things.
+
+What a result is worth depends on the gap, Elo-style and clamped at both ends:
+
+| | winner | loser |
+|---|---|---|
+| even match | +16 | −16 |
+| Grand Champion beats Bronze | +5 | −5 |
+| Bronze beats Grand Champion | +32 | −32 |
+
+Ranked matchmaking pairs on RP, starting inside a division and widening the
+longer somebody waits, so a Diamond does not sit in an empty queue forever.
+
+**RP, ranks, wins and losses live on the server.** The client is told them and
+draws them; it never computes a point of RP, and it never decides who won — the
+server keeps the running score and applies the win rule itself. See
+`server/store.js` for what the storage is and, more importantly, what it is not:
+a JSON file with no authentication behind it, with the seam already cut so a
+real database is a class with the same four methods.
+
+Both players get the same unskippable intro, showing both profiles and both
+builds — rank, RP, record, height, build, strengths and weaknesses — from the
+server's copy rather than out of the other person's browser.
 
 What the server owns: pairing, the check count (0/2 → 2/2), the score, and
 disconnects. What the host client owns: the basketball, run through the very

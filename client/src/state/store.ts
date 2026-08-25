@@ -31,6 +31,7 @@ import {
   SEASON_EPOCH,
   SEASON_LENGTH_MS,
   type OnlineRecord,
+  type PvpRecord,
   CRATE_BY_ID,
   openCrate as rollCrate,
   type CratePull,
@@ -173,6 +174,7 @@ function createProfile(): Profile {
     username: '',
     usernameChangedAt: 0,
     online: freshOnlineRecord(),
+    pvp: freshPvpRecord(),
     social: freshSocial(),
   };
 }
@@ -195,6 +197,11 @@ function seasonNameFor(id: string): string {
 }
 
 /** A standing with nothing on it — a new account, or a new season. */
+/** No games against real people yet. Overwritten by the server on connect. */
+function freshPvpRecord(): PvpRecord {
+  return { rp: 0, wins: 0, losses: 0, syncedAt: 0 };
+}
+
 function freshOnlineRecord(): OnlineRecord {
   return { rp: 0, wins: 0, losses: 0, lifetimeWins: 0, streak: 0, bestStreak: 0, updatedAt: 0, peakRp: 0 };
 }
@@ -334,6 +341,25 @@ class Store {
     this.profile.battlePass = { seasonId: season.id, tier: 1, tierXp: 0, premium: false, claimed: [] };
   }
 
+  /**
+   * Record what the server says your player-versus-player ladder is.
+   *
+   * The only way this cache is ever written. It takes the server's numbers
+   * whole — it never adds, never increments, never reconciles — because the
+   * moment a client starts computing its own RP there are two ladders and one
+   * of them is wrong.
+   */
+  syncPvp(record: { rp: number; wins: number; losses: number }): void {
+    this.update((p) => {
+      p.pvp = {
+        rp: Math.max(0, Math.round(record.rp)),
+        wins: Math.max(0, Math.round(record.wins)),
+        losses: Math.max(0, Math.round(record.losses)),
+        syncedAt: Date.now(),
+      };
+    });
+  }
+
   /** Clears the season report once the player has been shown it. */
   clearSeasonReport(): void {
     if (!this.profile.seasonReport) return;
@@ -351,6 +377,12 @@ class Store {
     // away and nobody should lose their player to gain a rank of Bronze 3.
     if (!this.profile.online) {
       this.profile.online = freshOnlineRecord();
+    }
+    // Saves made before ranked play against real people have no mirror of that
+    // ladder. Defaulted, never version-bumped: a bump throws the whole profile
+    // away, and nobody should lose their player to gain a cache.
+    if (!this.profile.pvp) {
+      this.profile.pvp = freshPvpRecord();
     }
     // Older shapes carried a server placement, which no longer exists — position
     // is worked out against the world at read time now.
