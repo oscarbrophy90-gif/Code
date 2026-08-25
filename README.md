@@ -73,6 +73,24 @@ Both players get the same unskippable intro, showing both profiles and both
 builds — rank, RP, record, height, build, strengths and weaknesses — from the
 server's copy rather than out of the other person's browser.
 
+### Deploying it
+
+The server reads `PORT` from the environment and listens on `0.0.0.0`, which is
+what every host expects, and serves the game at both `/` and `/HoopsElite.html`.
+It looks for `HoopsElite.html` in `public/` first and then in
+`dist-standalone/`, so a deploy that flattens the tree — server files at the
+root, the game in `public/` — runs the same file as a clone does.
+
+Two things to set on the host:
+
+- The **start command** must run this server (`node index.js`). A stray older
+  server file left in the repository will happily serve the page and none of the
+  match events.
+- **`DATA_DIR`** should point at a persistent disk. Without it the ranked ladder
+  is written next to the code, and on a host that replaces the container every
+  deploy that is not persistence — it is a file that disappears. The startup log
+  says so when the variable is unset.
+
 What the server owns: pairing, the check count (0/2 → 2/2), the score, and
 disconnects. What the host client owns: the basketball, run through the very
 same `stepMatch` every offline mode runs. That split is deliberate — it means

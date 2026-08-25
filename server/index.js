@@ -36,6 +36,7 @@
 import express from 'express';
 import { createServer } from 'node:http';
 import { Server } from 'socket.io';
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
@@ -44,17 +45,73 @@ import { FilePlayerStore, publicProfile } from './store.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const app = express();
-// Serve the game itself. Put HoopsElite.html in ./public (or point this at
-// wherever you keep it).
-app.use(express.static(join(here, 'public')));
-app.use(express.static(join(here, '..', 'dist-standalone')));
+
+// ------------------------------------------------------------ serving the game
+
+/**
+ * Where HoopsElite.html might be, in the order we should believe.
+ *
+ * `public/` is where it goes on a deploy; `dist-standalone/` is where the build
+ * writes it in this repository, one level up when the server lives in its own
+ * folder and beside it when everything is flat. Checking all of them means the
+ * same file runs unchanged whether it was cloned or deployed, which matters
+ * because the layout that broke was the one nobody develops in.
+ */
+const CONTENT_DIRS = [
+  join(here, 'public'),
+  join(here, 'dist-standalone'),
+  join(here, '..', 'dist-standalone'),
+].filter((dir) => existsSync(dir));
+
+for (const dir of CONTENT_DIRS) app.use(express.static(dir));
+
+/** The game itself, wherever it turned out to be. */
+const GAME_HTML = CONTENT_DIRS.map((dir) => join(dir, 'HoopsElite.html')).find((file) => existsSync(file)) ?? null;
+
+/**
+ * The root.
+ *
+ * `express.static` serves the files inside a folder; it does not answer for the
+ * folder. With only HoopsElite.html in there and no index.html beside it, "/"
+ * matched nothing and Express said `Cannot GET /` — a live service with nothing
+ * at its front door. So the front door is wired explicitly, and
+ * /HoopsElite.html keeps working through the static handler above.
+ */
+app.get('/', (_req, res) => {
+  if (!GAME_HTML) {
+    res
+      .status(500)
+      .type('text/plain')
+      .send(
+        'Hoops Elite: HoopsElite.html was not found.\n\n' +
+          'Looked in:\n' +
+          [join(here, 'public'), join(here, 'dist-standalone'), join(here, '..', 'dist-standalone')]
+            .map((d) => `  ${d}`)
+            .join('\n') +
+          '\n\nBuild it with `npm run build:standalone` and put it in ./public.',
+      );
+    return;
+  }
+  res.sendFile(GAME_HTML);
+});
+
+/** So a platform health check has something cheap to hit. */
+app.get('/healthz', (_req, res) => res.type('text/plain').send('ok'));
 
 const http = createServer(app);
 const io = new Server(http);
 
-const PORT = process.env.PORT ?? 3000;
+// Render (and every other host) hands the port in on the environment and
+// expects the process to listen on all interfaces. Binding to localhost is how
+// a service comes up "live" and then answers nothing from outside.
+const PORT = Number(process.env.PORT) || 3000;
+const HOST = process.env.HOST ?? '0.0.0.0';
 
-const players = new FilePlayerStore();
+// Where the ranked ladder is written. Overridable so a host with a persistent
+// disk can point it at the mount — see the note at the listen() call below.
+const players = new FilePlayerStore(
+  process.env.DATA_DIR ? join(process.env.DATA_DIR, 'players.json') : join(here, 'data', 'players.json'),
+);
 await players.load();
 
 /** The two queues. A player is in at most one, and they never mix. */
@@ -433,6 +490,14 @@ setInterval(() => {
   if (queues.casual.length >= 2) pairCasual();
 }, 1000);
 
-http.listen(PORT, () => {
-  log(`listening on http://localhost:${PORT}/HoopsElite.html`);
+http.listen(PORT, HOST, () => {
+  log(`listening on ${HOST}:${PORT}`);
+  log(GAME_HTML ? `serving ${GAME_HTML} at / and /HoopsElite.html` : 'WARNING: HoopsElite.html not found — / will explain where it looked');
+  if (!process.env.DATA_DIR) {
+    // Worth saying out loud on a host with an ephemeral filesystem: the ladder
+    // is a file, and a file on a container that gets replaced on every deploy
+    // is not persistence. Set DATA_DIR to a mounted disk, or move the store
+    // behind a database — server/store.js has the seam for it.
+    log('ranked store is on the local filesystem; set DATA_DIR to a persistent disk to keep it across deploys');
+  }
 });
