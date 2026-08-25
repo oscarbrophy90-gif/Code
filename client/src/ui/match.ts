@@ -37,7 +37,7 @@ import { InputManager } from '../engine/input.ts';
 import { audio } from '../engine/audio.ts';
 import { CourtRenderer } from '../render/court.ts';
 import { PlayerRenderer } from '../render/players.ts';
-import { Hud } from '../render/hud.ts';
+import { Hud, roundRect } from '../render/hud.ts';
 import { store } from '../state/store.ts';
 import { el, clear, toast } from './dom.ts';
 import { buildTouchControls } from './touch.ts';
@@ -248,6 +248,24 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
   /** Guest: seconds since the last snapshot, so a stalled host is visible. */
   let sinceSnapshot = 0;
   let stallReported = false;
+  /** Guest: the input being held right now, for the lead below. */
+  let guestHeld: PlayerInput = emptyInput();
+  /**
+   * Guest: how far ahead of the host's picture this player is drawn, in feet.
+   *
+   * The host's answer about where you are is always one round trip old, so
+   * without this your own body sets off a beat after you press the key. This
+   * is a bounded, decaying lead along the direction you are ASKING for — a
+   * foot, less than half a stride. It is a rendering lead and nothing more:
+   * the ball, possession, contests, shots and the score are all decided by the
+   * host from the authoritative position, never from this.
+   */
+  let leadX = 0;
+  let leadZ = 0;
+  /** Where the host last said the local player was, to pay the lead off. */
+  let leadAuthX = 0;
+  let leadAuthZ = 0;
+  const LEAD_CAP = 1;
   /** Host: the input that went into the frame being published. */
   let lastHostInput: PlayerInput = emptyInput();
 
@@ -535,6 +553,7 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
       queueInput(localInput);
       if (pendingInput) sendInput(pendingInput);
       pendingInput = null;
+      guestHeld = localInput;
       netTrace(
         'local-input',
         () =>
@@ -819,7 +838,7 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
    */
   const guestStep = (dt: number) => {
     sinceSnapshot += dt;
-    if (sinceSnapshot > 3 && !stallReported) {
+    if (sinceSnapshot > 1.5 && !stallReported) {
       stallReported = true;
       netTrace('state', () => `no snapshot for ${sinceSnapshot.toFixed(1)}s — the host has stopped sending`, true);
       toast('Waiting on the other player…', 'info');
@@ -1028,8 +1047,39 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
     for (let i = 0; i < state.players.length && i < snap.players.length; i++) {
       const p = state.players[i];
       const n = snap.players[i];
-      const tx = n.x + n.vx * lead;
-      const tz = n.z + n.vz * lead;
+      let tx = n.x + n.vx * lead;
+      let tz = n.z + n.vz * lead;
+      if (i === localPid) {
+        // Your own body only. Outside live play nothing is led at all, so a
+        // check-ball freeze is exactly as frozen here as it is on the host.
+        const live = state.phase === 'live';
+        const push = live ? Math.hypot(guestHeld.mx, guestHeld.mz) : 0;
+        if (push > 0.1) {
+          const g = Math.min(1, dt * 8);
+          leadX += ((guestHeld.mx / push) * LEAD_CAP - leadX) * g;
+          leadZ += ((guestHeld.mz / push) * LEAD_CAP - leadZ) * g;
+        } else {
+          // Let go. The lead is NOT eased back to zero: doing that drags your
+          // body backwards across the floor, which is worse than the lag it was
+          // hiding. It is paid off out of the host's own forward progress
+          // instead — some of each step settles the debt, the rest still moves
+          // you — so the drawn body only ever slows to a stop.
+          const mag = Math.hypot(leadX, leadZ);
+          if (mag > 1e-4) {
+            const paid = Math.hypot(n.x - leadAuthX, n.z - leadAuthZ) * 0.6;
+            const keep = Math.max(0, mag - paid) / mag;
+            leadX *= keep;
+            leadZ *= keep;
+          } else {
+            leadX = 0;
+            leadZ = 0;
+          }
+        }
+        leadAuthX = n.x;
+        leadAuthZ = n.z;
+        tx += leadX;
+        tz += leadZ;
+      }
       const jumped = Math.hypot(tx - p.x, tz - p.z) > 6;
       p.x = jumped ? tx : p.x + (tx - p.x) * k;
       p.z = jumped ? tz : p.z + (tz - p.z) * k;
@@ -1454,12 +1504,33 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
       height,
       netRole ? { count: readyCount, total: readyTotal } : null,
     );
+    // Nothing has arrived from the host for a while. Say so: a court that is
+    // still drawing while the controls do nothing looks like broken controls,
+    // and it is not — it is the other end that has gone quiet.
+    if (netRole === 'guest' && sinceSnapshot > 1) {
+      ctx.save();
+      ctx.textAlign = 'center';
+      ctx.fillStyle = 'rgba(8,10,16,0.78)';
+      roundRect(ctx, width / 2 - 170, 78, 340, 44, 6);
+      ctx.fill();
+      ctx.font = '900 15px Inter, system-ui, sans-serif';
+      ctx.fillStyle = '#ffc53d';
+      ctx.fillText('WAITING FOR THE OTHER PLAYER', width / 2, 100);
+      ctx.font = '700 11px Inter, system-ui, sans-serif';
+      ctx.fillStyle = '#97a2b8';
+      ctx.fillText(`no update for ${sinceSnapshot.toFixed(1)}s`, width / 2, 114);
+      ctx.restore();
+    }
     drawFooter(ctx, width, height, loop.fps, null, settings.touchControls, !!squads);
 
   };
 
   const loop = new GameLoop(step, render, SIM_DT);
   loop.fpsCap = settings.fpsCap;
+  // Online only: somebody else is waiting on this simulation, so it must not
+  // stop because this tab went to the background. Every offline mode keeps the
+  // old behaviour of pausing with the tab.
+  loop.backgroundSafe = !!netRole;
   loop.start();
 
   return root;
