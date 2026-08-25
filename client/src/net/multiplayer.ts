@@ -38,6 +38,15 @@ export interface NetSnapshot {
   winner: number | null;
   /** the check ceremony, so the guest sees the ball passed out and back */
   check: { stage: string; timer: number; from: number; to: number } | null;
+  /**
+   * The host's own input on the frame this went out.
+   *
+   * The guest simulates forward between snapshots, and a player standing still
+   * for 33 ms and then teleporting is worse than no prediction at all. With the
+   * host's input the guest can carry them on the same course the host is
+   * actually running, and the next snapshot corrects it.
+   */
+  hostInput: PlayerInput | null;
   players: NetPlayer[];
   ball: NetBall;
 }
@@ -99,6 +108,28 @@ type Sock = {
 let socket: Sock | null = null;
 let connected = false;
 let selfId = '';
+
+/**
+ * Console tracing for online play, throttled per topic.
+ *
+ * Online is the one mode where something can go wrong on the other end of a
+ * wire, so it says what it is doing. Once a second per topic keeps it readable
+ * — a 120 Hz simulation logging every frame is not debugging, it is noise.
+ * `__mpDebug.verbose(true)` turns the throttle off.
+ */
+let verbose = false;
+let stateSeen = 0;
+let inputSeen = 0;
+const lastLog: Record<string, number> = {};
+
+export function netTrace(topic: string, message: () => string, force = false): void {
+  const now = Date.now();
+  if (!force && !verbose && now - (lastLog[topic] ?? -1e9) < 1000) return;
+  lastLog[topic] = now;
+  console.log(`[online:${topic}]`, message());
+}
+
+const debug = netTrace;
 
 // ------------------------------------------------------------------- events
 
@@ -190,8 +221,22 @@ export function connectMultiplayer(): void {
     fire(bus.ended, { reason: p.reason ?? 'ended' });
   });
 
-  socket.on('match:state', (...a: unknown[]) => fire(bus.state, a[0] as NetSnapshot));
-  socket.on('match:input', (...a: unknown[]) => fire(bus.input, a[0] as PlayerInput));
+  socket.on('match:state', (...a: unknown[]) => {
+    const snap = a[0] as NetSnapshot;
+    stateSeen++;
+    debug('state', () =>
+      `match state received — ${stateSeen} so far, phase ${snap.phase}, ball ${snap.ball?.state} ` +
+      `owner ${snap.ball?.owner}, score ${snap.score?.join('-')}`);
+    fire(bus.state, snap);
+  });
+  socket.on('match:input', (...a: unknown[]) => {
+    const input = a[0] as PlayerInput;
+    inputSeen++;
+    debug('input', () =>
+      `guest input received — ${inputSeen} so far, move (${input.mx?.toFixed?.(2)}, ${input.mz?.toFixed?.(2)}) ` +
+      `shoot ${input.shoot} drive ${input.drive} sprint ${input.sprint}`);
+    fire(bus.input, input);
+  });
   socket.on('match:score', (...a: unknown[]) => fire(bus.score, a[0] as { score: [number, number] }));
 }
 
@@ -238,4 +283,10 @@ export function sendSnapshot(snap: NetSnapshot): void {
 (globalThis as { __mpDebug?: unknown }).__mpDebug = {
   connected: () => connected,
   selfId: () => selfId,
+  /** every frame instead of once a second, when something needs a close look */
+  verbose: (on = true) => {
+    verbose = on;
+    console.log(`[online] verbose logging ${on ? 'on' : 'off'}`);
+  },
+  counts: () => ({ snapshots: stateSeen, guestInputs: inputSeen }),
 };

@@ -54,6 +54,7 @@ import {
   sendReady,
   sendScore,
   sendSnapshot,
+  netTrace,
   type NetSnapshot,
 } from '../net/multiplayer.ts';
 
@@ -210,10 +211,15 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
   //
   // The split: the server owns the match — pairing, the check count, the score
   // and disconnects — and the host client owns the basketball, running the very
-  // same `stepMatch` every offline mode runs. The guest simulates nothing; it
-  // sends its input and draws the host's snapshots. That is what keeps the
-  // physics, shooting, dunks and animation identical on both screens instead of
-  // two simulations quietly drifting apart.
+  // same `stepMatch` every offline mode runs.
+  //
+  // The guest runs that same simulation too, but only as a prediction: its own
+  // input drives its own player on the frame the key goes down, and every
+  // snapshot from the host corrects it. Waiting a round trip to see your own
+  // player move is not lag, it is a frozen character, which is what this used
+  // to be. What the guest never does is decide anything — the ball, the score,
+  // the phase, what everybody is doing and how far through a shot meter they
+  // are all come from the host, so both screens are watching one game.
   const netRole = online?.role ?? null;
 
   /** Server-authoritative check count, drawn as 0/2 → 2/2. */
@@ -236,9 +242,35 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
   let netTarget: NetSnapshot | null = null;
   let netSendAccum = 0;
   let pendingInput: PlayerInput | null = null;
+  /** Guest: the host's own input, so their player keeps moving between frames. */
+  let hostInput: PlayerInput = emptyInput();
+  /** Guest: seconds since the last snapshot, so a stalled host is visible. */
+  let sinceSnapshot = 0;
+  let stallReported = false;
+  /** Host: the input that went into the frame being published. */
+  let lastHostInput: PlayerInput = emptyInput();
+  /** Guest: when the predicted simulation last scored, so the net sounds once. */
+  let lastLocalScoreAt = -1e9;
+
+  // How hard the host's correction pulls, per snapshot. Your own body is eased
+  // (a hard snap on every packet is the stutter people call lag); the other
+  // player is pulled harder because nothing local is predicting them; and a
+  // gap too big to be latency is taken whole rather than skated across.
+  const LOCAL_CORRECT = 0.22;
+  const REMOTE_CORRECT = 0.5;
+  const SNAP_AT = 3.5;
+  const BALL_CORRECT = 0.5;
+  const BALL_SNAP = 4;
 
   const netReleases: (() => void)[] = [];
   if (netRole) {
+    netTrace(
+      'role',
+      () =>
+        `you are the ${netRole} — Player ${localPid + 1} (${localCfg.name}); ` +
+        `${netRole === 'host' ? 'this client simulates the match' : 'the host simulates, this client predicts and corrects'}`,
+      true,
+    );
     netReleases.push(
       onReadyCount((r) => {
         readyCount = r.count;
@@ -461,10 +493,17 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
 
   // -------------------------------------------------------------------- step
   const step = (dt: number) => {
-    if (paused || finished || cutscene) return;
+    if (finished) return;
+    // Offline, pausing or a dunk replay stops the world, which is exactly what
+    // you want when the world is yours alone. Online it is not: one player
+    // opening the pause menu, or watching their own replay, used to stop the
+    // simulation AND the snapshots — so the other person sat there watching a
+    // frozen court with a controller that did nothing. An online match keeps
+    // running; the pause menu simply stops feeding YOUR input into it.
+    if (!netRole && (paused || cutscene)) return;
     elapsedRealSeconds += dt;
 
-    const localInput = input.sample();
+    const localInput = paused && netRole ? emptyInput() : input.sample();
     // The simulation owns the cooldown and the ball, but it has no idea which
     // emote sits on which key — so equipment is checked here, and an emote that
     // cannot fire says why instead of silently doing nothing.
@@ -498,9 +537,6 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
       if (checking || shootLock) localInput.shoot = false;
     }
 
-    // The guest runs no simulation at all. Running one would be a second
-    // basketball game drifting away from the first; instead it sends what it is
-    // doing and draws the world the host publishes.
     if (netRole === 'guest') {
       queueInput(localInput);
       netSendAccum += dt;
@@ -509,8 +545,15 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
         if (pendingInput) sendInput(pendingInput);
         pendingInput = null;
       }
-      advanceGuest(dt);
+      netTrace(
+        'local-input',
+        () =>
+          `local input — move (${localInput.mx.toFixed(2)}, ${localInput.mz.toFixed(2)}) ` +
+          `sprint ${localInput.sprint} shoot ${localInput.shoot} drive ${localInput.drive}`,
+      );
+      guestStep(localInput, dt);
       playDribbleBounce();
+      playNetSwish();
       return;
     }
 
@@ -526,6 +569,16 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
     if (netRole === 'host') {
       inputs[remoteSide] = guestInput;
       guestInput = { ...guestInput, move: null, steal: false, fake: false, pass: false, emote: null };
+      // Published with the snapshot: the guest carries the host's player on
+      // this course until the next one arrives, instead of standing still and
+      // then jumping.
+      lastHostInput = inputs[localPid];
+      netTrace(
+        'local-input',
+        () =>
+          `local input — move (${localInput.mx.toFixed(2)}, ${localInput.mz.toFixed(2)}) ` +
+          `sprint ${localInput.sprint} shoot ${localInput.shoot} drive ${localInput.drive}`,
+      );
       // 2/2. Pressing the check for the offence here runs the game's own
       // check-ball ceremony — ball out, ball back, then play — rather than a
       // second copy of it written for online.
@@ -553,7 +606,21 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
    * — go to the server the moment they happen. The world itself goes out at
    * 30 Hz, which the guest smooths back up to its own frame rate.
    */
+  let tracedPhase: string = state.phase;
+  let tracedBall: string = state.ball.state;
   const hostPublish = (dt: number) => {
+    if (state.phase !== tracedPhase) {
+      netTrace('phase', () => `match phase ${tracedPhase} -> ${state.phase}`, true);
+      tracedPhase = state.phase;
+    }
+    if (state.ball.state !== tracedBall) {
+      netTrace(
+        'ball',
+        () => `ball ${tracedBall} -> ${state.ball.state} (owner ${state.ball.owner}, settled ${state.ball.settled})`,
+        true,
+      );
+      tracedBall = state.ball.state;
+    }
     if (state.phase === 'checkball') {
       if (!checkAnnounced) {
         checkAnnounced = true;
@@ -586,6 +653,7 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
     check: state.check
       ? { stage: state.check.stage, timer: state.check.timer, from: state.check.from, to: state.check.to }
       : null,
+    hostInput: lastHostInput,
     players: state.players.map((p) => ({
       x: p.x,
       z: p.z,
@@ -679,17 +747,61 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
   };
 
   /**
-   * A snapshot from the host.
+   * One frame on the guest.
+   *
+   * While the ball is live the guest runs the real simulation — the same
+   * `stepMatch` the host and every offline mode run — driven by its own live
+   * input and the host's last relayed input. That is what makes the guest's
+   * player answer the keyboard on the frame it is pressed instead of a round
+   * trip later, which is what "the other player is frozen" actually was. The
+   * host stays the authority throughout: every snapshot corrects this.
+   *
+   * Outside live play there is nothing worth predicting and plenty to get
+   * wrong — the check ceremony, the reset after a bucket, the buzzer — so those
+   * are played straight from the host's snapshots.
+   */
+  const guestStep = (localInput: PlayerInput, dt: number) => {
+    sinceSnapshot += dt;
+    if (sinceSnapshot > 3 && !stallReported) {
+      stallReported = true;
+      netTrace('state', () => `no snapshot for ${sinceSnapshot.toFixed(1)}s — the host has stopped sending`, true);
+      toast('Waiting on the other player…', 'info');
+    }
+    if (state.phase !== 'live' || !netTarget) {
+      advanceGuest(dt);
+      return;
+    }
+    const inputs: PlayerInput[] = state.players.map(() => emptyInput());
+    inputs[localPid] = localInput;
+    inputs[remoteSide] = hostInput;
+    stepMatch(state, inputs, dt);
+    // Sounds and popups come off the predicted frame so they land when you did
+    // the thing. The guest never ends the match off its own simulation — only
+    // the host's snapshot does that.
+    handleEvents(drainEvents(state));
+  };
+
+  /**
+   * A snapshot from the host: the authority, applied over the prediction.
    *
    * The discrete facts — phase, the check, who has the ball, what everybody is
-   * doing — are copied straight across, because being a frame late on those is
-   * far better than disagreeing about them. Positions are left to
-   * `advanceGuest`, which eases toward them so 30 Hz of network does not look
-   * like 30 frames a second of basketball.
+   * doing, how far through a shot meter they are — are copied straight across
+   * every time. Being a frame behind the host on those is far better than
+   * disagreeing with them, and it is what keeps the guest's shot graded by the
+   * same meter the host is actually reading.
+   *
+   * Only where the bodies ARE is predicted, and the correction is eased in
+   * rather than snapped, because a hard set on every packet is the stutter
+   * people call lag.
    */
   const applySnapshot = (snap: NetSnapshot) => {
     const before = state.phase;
+    const beforeBall = state.ball.state;
     netTarget = snap;
+    sinceSnapshot = 0;
+    stallReported = false;
+    hostInput = snap.hostInput ?? emptyInput();
+    const live = snap.phase === 'live';
     state.phase = snap.phase as MatchState['phase'];
     state.shotClock = snap.shotClock;
     state.needsClear = snap.needsClear;
@@ -706,9 +818,9 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
     const scored = snap.score[0] !== state.score[0] || snap.score[1] !== state.score[1];
     state.score[0] = snap.score[0];
     state.score[1] = snap.score[1];
-    // The guest gets no sim events, so the net is sounded off the thing it can
-    // see: the score going up.
-    if (scored) {
+    // The net sounds off the score going up — unless the predicted simulation
+    // already watched the same ball go through, in which case it has sounded.
+    if (scored && state.time - lastLocalScoreAt > 0.6) {
       netSwing = 1;
       audio.swish();
     }
@@ -749,6 +861,37 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
             jumpshot: JUMPSHOT_BY_ID[p.cfg.jumpshotId] ?? JUMPSHOT_BY_ID['jumpshot-classic'],
           } as ShotProfile)
         : null;
+
+      // Where the bodies are. Off live play this is left to `advanceGuest`,
+      // which eases toward the snapshot; during live play the prediction is
+      // already standing somewhere, so the host's answer is blended over it.
+      if (!live) continue;
+      const drift = Math.hypot(n.x - p.x, n.z - p.z);
+      if (drift > SNAP_AT) {
+        // Too far to be latency — a steal, a reset, a collision the prediction
+        // never saw. Take it whole rather than skate the player across.
+        p.x = n.x;
+        p.z = n.z;
+        p.y = n.y;
+        p.vx = n.vx;
+        p.vz = n.vz;
+        p.vy = n.vy;
+        p.facing = n.facing;
+        continue;
+      }
+      const pull = i === localPid ? LOCAL_CORRECT : REMOTE_CORRECT;
+      p.x += (n.x - p.x) * pull;
+      p.z += (n.z - p.z) * pull;
+      p.y = n.y;
+      if (i !== localPid) {
+        // Nothing local is predicting the other person's intent, so their
+        // velocity and heading are the host's; `hostInput` carries them on
+        // from here until the next snapshot.
+        p.vx = n.vx;
+        p.vz = n.vz;
+        p.vy = n.vy;
+        p.facing = n.facing;
+      }
     }
 
     const b = state.ball;
@@ -769,9 +912,43 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
     b.toZ = nb.toZ;
     b.apex = nb.apex;
     b.settled = nb.settled;
-    b.vx = nb.vx;
-    b.vy = nb.vy;
-    b.vz = nb.vz;
+
+    // A held ball rides in its holder's hands, and that holder may be the
+    // predicted local player — pinning it to the host's coordinates would leave
+    // the ball trailing a foot behind your own body. Every other ball state is
+    // a shot, a rebound or a pass, and all of those are the host's to place.
+    if (live && nb.state === 'held') {
+      b.vx = nb.vx;
+      b.vy = nb.vy;
+      b.vz = nb.vz;
+    } else if (live) {
+      const drift = Math.hypot(nb.x - b.x, nb.z - b.z);
+      if (drift > BALL_SNAP || Math.abs(nb.y - b.y) > BALL_SNAP) {
+        b.x = nb.x;
+        b.y = nb.y;
+        b.z = nb.z;
+      } else {
+        b.x += (nb.x - b.x) * BALL_CORRECT;
+        b.y += (nb.y - b.y) * BALL_CORRECT;
+        b.z += (nb.z - b.z) * BALL_CORRECT;
+      }
+      b.vx = nb.vx;
+      b.vy = nb.vy;
+      b.vz = nb.vz;
+    } else {
+      // Off live play the ball is entirely the host's; `advanceGuest` eases to
+      // it, which is what the check ceremony and the reset already ride on.
+      b.vx = nb.vx;
+      b.vy = nb.vy;
+      b.vz = nb.vz;
+    }
+
+    if (state.phase !== before) {
+      netTrace('phase', () => `match phase ${before} -> ${state.phase}`, true);
+    }
+    if (b.state !== beforeBall) {
+      netTrace('ball', () => `ball ${beforeBall} -> ${b.state} (owner ${b.owner}, settled ${b.settled})`, true);
+    }
 
     if (before !== 'over' && state.phase === 'over') {
       audio.play('buzzer');
@@ -1001,6 +1178,9 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
         }
         case 'score': {
           const p = state.players[e.side];
+          // Online: the snapshot will report the same bucket a moment later,
+          // and the net should ring once, not twice.
+          lastLocalScoreAt = state.time;
           // Normally the net has already sounded, on the frame the ball crossed
           // the ring. This catches the shots that never had a flight to watch.
           if (swishPending) {
@@ -1050,7 +1230,8 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
           // The replay: the recorded frames of the dunk that just happened,
           // played back through the game's own renderer from a low camera.
           // The world is frozen while it plays and it is always skippable.
-          if (e.side === localPid && !settings.reducedMotion) {
+          // Never online: a cutaway on one screen is a freeze on the other.
+          if (e.side === localPid && !settings.reducedMotion && !netRole) {
             audio.play('dunk');
             cutscene = true;
             void playLiveReplay(root, {
