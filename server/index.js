@@ -179,12 +179,19 @@ function makeMatch(a, b, mode) {
  * a win and a loss for the same game.
  */
 function settle(match, winnerSocketId, reason) {
-  if (match.settled) return;
+  if (match.settled) {
+    console.log(`[ranked] ignoring a second result for match ${match.id} (${reason}) — already settled`);
+    return;
+  }
   match.settled = true;
 
   const loserSocketId = match.players.find((p) => p !== winnerSocketId);
   const winnerAccount = match.accounts[winnerSocketId];
   const loserAccount = match.accounts[loserSocketId];
+
+  console.log(`[ranked] match finished (${match.id}, ${match.mode}, ${reason})`);
+  console.log(`[ranked] winner: ${winnerSocketId} (${winnerAccount})`);
+  console.log(`[ranked] loser:  ${loserSocketId} (${loserAccount})`);
 
   if (match.mode !== 'ranked') {
     // Casual moves nothing: not RP, not the win count, not the loss count.
@@ -196,13 +203,23 @@ function settle(match, winnerSocketId, reason) {
         ranked: false,
       });
     }
-    log(`match ${match.id} (casual) finished (${reason}) — no ladder change`);
+    console.log(`[ranked] match ${match.id} was CASUAL (${reason}) — no RP, no win, no loss`);
     return;
   }
 
   const winnerRow = players.get(winnerAccount);
   const loserRow = players.get(loserAccount);
-  if (!winnerRow || !loserRow) return;
+  if (!winnerRow || !loserRow) {
+    // Nothing to move. Say which side is missing rather than failing silently:
+    // a ranked result that cannot be applied is worse than one that is wrong,
+    // because nobody finds out about it.
+    console.log(
+      `[ranked] CANNOT PROCESS match ${match.id}: no stored record for ` +
+        `${!winnerRow ? `winner ${winnerAccount}` : ''}${!winnerRow && !loserRow ? ' and ' : ''}` +
+        `${!loserRow ? `loser ${loserAccount}` : ''}`,
+    );
+    return;
+  }
 
   const result = rankedResult(winnerRow.rp, loserRow.rp);
   const afterWinner = players.apply(winnerAccount, { rp: result.winner.after, won: true });
@@ -221,11 +238,20 @@ function settle(match, winnerSocketId, reason) {
   tell(winnerSocketId, afterWinner, afterLoser, result.winner.delta, result.loser.delta, true);
   tell(loserSocketId, afterLoser, afterWinner, result.loser.delta, result.winner.delta, false);
 
-  log(
-    `match ${match.id} (ranked) finished (${reason}): ` +
-      `${afterWinner.username} ${result.winner.before}->${afterWinner.rp} (+${result.winner.delta}), ` +
-      `${afterLoser.username} ${result.loser.before}->${afterLoser.rp} (${result.loser.delta})`,
+  // And the ladder itself, to both, so the Online profile is right no matter
+  // which screen happens to be listening for a result at that moment.
+  io.sockets.sockets.get(winnerSocketId)?.emit('profile:self', publicProfile(afterWinner));
+  io.sockets.sockets.get(loserSocketId)?.emit('profile:self', publicProfile(afterLoser));
+
+  console.log(
+    `[ranked] winner RP: ${result.winner.before} -> ${afterWinner.rp} (+${result.winner.delta}), ` +
+      `${afterWinner.username} now ${afterWinner.wins}W / ${afterWinner.losses}L`,
   );
+  console.log(
+    `[ranked] loser  RP: ${result.loser.before} -> ${afterLoser.rp} (${result.loser.delta}), ` +
+      `${afterLoser.username} now ${afterLoser.wins}W / ${afterLoser.losses}L`,
+  );
+  console.log('[ranked] result saved');
 }
 
 // --------------------------------------------------------------- connection
@@ -302,6 +328,7 @@ io.on('connection', (socket) => {
     const match = matchOf(socket.id);
     if (!match || match.host !== socket.id) return;
     match.score = [Number(payload?.score?.[0]) || 0, Number(payload?.score?.[1]) || 0];
+    log(`match ${match.id} score ${match.score.join('-')}`);
     io.to(match.room).emit('match:score', { score: match.score });
     const winner = winnerFromScore(match.score, match.rules);
     if (winner !== null) {

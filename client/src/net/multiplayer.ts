@@ -204,6 +204,15 @@ let connected = false;
 let selfId = '';
 /** The server's copy of your ladder. Never written locally. */
 let selfProfile: OnlineProfile | null = null;
+/**
+ * The last ranked result, held until a screen has shown it.
+ *
+ * A result arrives while the match screen is up and the Online screen is not,
+ * so subscribing to it from the Online screen alone means nobody is listening
+ * at the one moment it is sent. Parked here instead, by a listener that is
+ * always on, and collected when the Online screen comes back.
+ */
+let lastResult: MatchResult | null = null;
 
 /**
  * Console tracing for online play, throttled per topic.
@@ -322,6 +331,7 @@ export function connectMultiplayer(): void {
           : `casual result (${r.reason}): you ${r.won ? 'won' : 'lost'} — nothing moved`,
       true,
     );
+    lastResult = r;
     fire(bus.result, r);
   });
 
@@ -394,6 +404,13 @@ export function sendForfeit(): void {
 /** The last ladder the server sent, for screens that open before a refresh. */
 export function selfLadder(): OnlineProfile | null {
   return selfProfile;
+}
+
+/** Collect the last ranked result, once. Returns null when there is none. */
+export function takeMatchResult(): MatchResult | null {
+  const r = lastResult;
+  lastResult = null;
+  return r;
 }
 
 export function leaveMatchmaking(): void {

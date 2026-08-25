@@ -12,13 +12,14 @@ import {
   onSearching,
   onSelfProfile,
   selfLadder,
+  takeMatchResult,
   type MatchFound,
   type MatchResult,
   type OnlineMode,
   type OnlineProfile,
 } from '../../net/multiplayer.ts';
 import { navigate, type RouteParams } from '../../main.ts';
-import { el, panel, toast } from '../dom.ts';
+import { el, panel } from '../dom.ts';
 import { startMatch } from '../session.ts';
 import { drawFigure } from '../walkout.ts';
 
@@ -57,6 +58,9 @@ export function renderOnline(_params: RouteParams): HTMLElement {
 
   const body = el('div', { style: 'display:grid;gap:14px;max-width:720px' });
   root.append(body);
+  // A result that landed while the match screen was up is waiting here — the
+  // Online screen was not mounted to hear it, so it was parked instead.
+  pendingResult = pendingResult ?? takeMatchResult();
   paint();
 
   const releases = [
@@ -115,11 +119,6 @@ export function renderOnline(_params: RouteParams): HTMLElement {
   // ------------------------------------------------------------------ paint
 
   function paint(): void {
-    if (pendingResult) {
-      const done = pendingResult;
-      pendingResult = null;
-      showResult(done);
-    }
 
     if (!isConnected()) {
       body.replaceChildren(
@@ -138,7 +137,8 @@ export function renderOnline(_params: RouteParams): HTMLElement {
     }
 
     if (!chosen) {
-      body.replaceChildren(modeChooser(), ladderPanel());
+      const result = pendingResult ? resultPanel(pendingResult) : null;
+      body.replaceChildren(...(result ? [result] : []), modeChooser(), ladderPanel());
       return;
     }
 
@@ -254,18 +254,84 @@ export function renderOnline(_params: RouteParams): HTMLElement {
     );
   }
 
-  function showResult(result: MatchResult): void {
+  /**
+   * What the last match did to your ladder.
+   *
+   * Shown as a panel rather than a toast: the RP change, the rank it moved you
+   * to and your record are the whole point of having played a ranked game, and
+   * a message that fades after four seconds is not where you put that.
+   */
+  function resultPanel(result: MatchResult): HTMLElement {
+    const dismiss = el(
+      'button',
+      {
+        class: 'btn',
+        style: 'margin-top:12px',
+        onclick: () => {
+          pendingResult = null;
+          paint();
+        },
+      },
+      'Dismiss',
+    );
+
+    const why =
+      result.reason === 'forfeit'
+        ? ' · forfeit'
+        : result.reason === 'disconnect'
+          ? ' · opponent disconnected'
+          : '';
+
     if (!result.ranked) {
-      toast(result.won ? 'Casual win — nothing on the line' : 'Casual loss — nothing on the line', 'info');
-      return;
+      return panel(
+        'Casual result',
+        el('div', { class: `result-verdict ${result.won ? 'won' : 'lost'}` }, result.won ? 'WINNER' : 'DEFEATED'),
+        el('p', { class: 'hint', style: 'margin:8px 0 0' }, `Casual${why} — no RP, no rank change, no win or loss recorded.`),
+        dismiss,
+      );
     }
+
     const you = result.you;
-    if (!you) return;
-    const sign = you.delta >= 0 ? '+' : '';
-    const why = result.reason === 'forfeit' ? ' (forfeit)' : result.reason === 'disconnect' ? ' (disconnect)' : '';
-    toast(
-      `${result.won ? 'Ranked win' : 'Ranked loss'}${why} · ${sign}${you.delta} RP · ${pvpRank(you.rp).label}`,
-      result.won ? 'good' : 'info',
+    if (!you) return panel('Ranked result', el('div', {}, 'The server did not report a ladder change.'), dismiss);
+
+    const rank = pvpRank(you.rp);
+    const before = pvpRank(you.rpBefore);
+    const moved = rank.label !== before.label;
+    // A loss at 0 RP costs nothing, because the ladder has a floor. "+0 RP" on
+    // a defeat reads like a reward; it is simply nothing happening.
+    const sign = you.delta > 0 ? '+' : '';
+
+    return panel(
+      `Ranked result${why}`,
+      el('div', { class: `result-verdict ${result.won ? 'won' : 'lost'}` }, result.won ? 'WINNER' : 'DEFEATED'),
+      el(
+        'div',
+        { class: `result-delta ${you.delta > 0 ? 'up' : you.delta < 0 ? 'down' : ''}` },
+        `${sign}${you.delta} RP`,
+      ),
+      el(
+        'div',
+        { class: 'result-row' },
+        el('span', {}, 'New RP'),
+        el('b', {}, `${you.rpBefore} RP → ${you.rp} RP`),
+      ),
+      el(
+        'div',
+        { class: 'result-row' },
+        el('span', {}, moved ? 'New rank' : 'Rank'),
+        el('b', { style: `color:${rank.tier.color}` }, moved ? `${before.label} → ${rank.label}` : rank.label),
+      ),
+      el('div', { class: 'result-row' }, el('span', {}, 'Wins'), el('b', {}, String(you.wins))),
+      el('div', { class: 'result-row' }, el('span', {}, 'Losses'), el('b', {}, String(you.losses))),
+      result.opponent
+        ? el(
+            'p',
+            { class: 'hint', style: 'margin:10px 0 0' },
+            `${result.opponent.username}: ${result.opponent.delta > 0 ? '+' : ''}${result.opponent.delta} RP → ${result.opponent.rp} RP · ` +
+              `${pvpRank(result.opponent.rp).label}`,
+          )
+        : null,
+      dismiss,
     );
   }
 

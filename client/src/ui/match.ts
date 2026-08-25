@@ -55,6 +55,7 @@ import {
   sendScore,
   sendSnapshot,
   sendForfeit,
+  onMatchResult,
   netTrace,
   type NetSnapshot,
 } from '../net/multiplayer.ts';
@@ -249,6 +250,8 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
   /** Guest: seconds since the last snapshot, so a stalled host is visible. */
   let sinceSnapshot = 0;
   let stallReported = false;
+  /** The server has settled this match; there is nothing left to wait for. */
+  let matchSettled = false;
   /** Guest: the input being held right now, for the lead below. */
   let guestHeld: PlayerInput = emptyInput();
   /**
@@ -291,6 +294,26 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
         if (finished) return;
         toast('Your opponent left — back to matchmaking', 'info');
         closeAndFinish(true);
+      }),
+      // The server has decided the match. That is the end of it, for both
+      // people, whatever either simulation currently thinks.
+      //
+      // This used to be left to the host's snapshot carrying `phase: 'over'`.
+      // It never arrived: the winning score settles the match on the server,
+      // which tears the room down, and the snapshot behind it — rate limited to
+      // 30 Hz — was then relayed to nobody. The guest sat on an empty court
+      // forever, never saw the result, and never got its ladder back. Ending on
+      // the result instead makes the finish independent of packet timing.
+      onMatchResult(() => {
+        if (finished) return;
+        // Settled: the host has nothing left to send, so a "waiting for the
+        // other player" notice from here on is telling the truth about a fact
+        // that no longer matters, and reads like something went wrong.
+        matchSettled = true;
+        netTrace('result', () => 'the server settled the match — closing out', true);
+        // A beat, so the basket that won it and the final score are seen. The
+        // simulation may also have scheduled this; `closeAndFinish` runs once.
+        window.setTimeout(() => closeAndFinish(false), 1800);
       }),
     );
   }
@@ -848,7 +871,7 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
    */
   const guestStep = (dt: number) => {
     sinceSnapshot += dt;
-    if (sinceSnapshot > 1.5 && !stallReported) {
+    if (sinceSnapshot > 1.5 && !stallReported && !matchSettled) {
       stallReported = true;
       netTrace('state', () => `no snapshot for ${sinceSnapshot.toFixed(1)}s — the host has stopped sending`, true);
       toast('Waiting on the other player…', 'info');
@@ -1517,7 +1540,7 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
     // Nothing has arrived from the host for a while. Say so: a court that is
     // still drawing while the controls do nothing looks like broken controls,
     // and it is not — it is the other end that has gone quiet.
-    if (netRole === 'guest' && sinceSnapshot > 1) {
+    if (netRole === 'guest' && sinceSnapshot > 1 && !matchSettled) {
       ctx.save();
       ctx.textAlign = 'center';
       ctx.fillStyle = 'rgba(8,10,16,0.78)';

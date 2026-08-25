@@ -3889,3 +3889,47 @@ input[type='text']:focus {
   color: var(--accent);
   font-weight: 900;
 }
+
+/* ------------------------------------------------------- ranked result panel */
+
+.result-verdict {
+  font-size: 26px;
+  font-weight: 900;
+  letter-spacing: 0.14em;
+}
+
+.result-verdict.won { color: var(--green); }
+.result-verdict.lost { color: var(--text-dim); }
+
+.result-delta {
+  font-size: 42px;
+  font-weight: 900;
+  line-height: 1;
+  margin: 6px 0 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.result-delta.up { color: var(--green); }
+.result-delta.down { color: var(--red); }
+
+.result-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(42, 51, 70, 0.6);
+  font-variant-numeric: tabular-nums;
+}
+
+.result-row:last-of-type { border-bottom: none; }
+
+.result-row span {
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.result-row b { font-size: 15px; font-weight: 900; }
