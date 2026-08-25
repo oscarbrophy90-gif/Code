@@ -95,8 +95,27 @@ export function computeMatchReward(ctx: RewardContext): MatchReward {
     currency += bonus;
   }
 
+  // Ranked against the CPU pays half what it used to.
+  //
+  // Applied last, on the final number, so "half" means half of what the game
+  // actually paid rather than half of a subtotal that later bonuses would have
+  // grown back. It lands as its own line so the results screen adds up.
+  //
+  // CPU Ranked only. Online never reaches this function at all — an online
+  // result bypasses every reward path (see `launchMatch` in ui/session.ts), so
+  // there are no online coins to halve — and Casual keeps a playlist multiplier
+  // of 1 and is untouched.
+  if (ctx.playlist === 'ranked' && currency > 0) {
+    const cut = currency - Math.round(currency * RANKED_COIN_SHARE);
+    breakdown.push({ label: 'Ranked coin rate (50%)', currency: -cut, xp: 0 });
+    currency -= cut;
+  }
+
   return { currency, xp, breakdown };
 }
+
+/** What a CPU Ranked game pays, as a share of what it used to. */
+export const RANKED_COIN_SHARE = 0.5;
 
 // ------------------------------------------------------------------- leveling
 

@@ -8,24 +8,63 @@ import { rankedResult, rpWindow, winnerFromScore, RP_RULES } from '../rp.js';
  * is RP a browser can award itself.
  */
 
-test('an even match trades the standard amount, both ways', () => {
-  const r = rankedResult(900, 900);
-  assert.equal(r.winner.delta, 16);
-  assert.equal(r.loser.delta, -16);
-  assert.equal(r.winner.delta, -r.loser.delta, 'what one gains the other loses');
+test('an even match pays exactly the CPU ladder baseline for that tier', () => {
+  // Online reuses the CPU ladder's own numbers so the two feel like one game.
+  // At an even match the surprise factor is 1, so the payout IS the baseline.
+  const cases = [
+    [50, RP_RULES.BASE_WIN[0], RP_RULES.BASE_LOSS[0]],     // Bronze
+    [350, RP_RULES.BASE_WIN[1], RP_RULES.BASE_LOSS[1]],    // Silver
+    [650, RP_RULES.BASE_WIN[2], RP_RULES.BASE_LOSS[2]],    // Gold
+    [950, RP_RULES.BASE_WIN[3], RP_RULES.BASE_LOSS[3]],    // Platinum
+    [1250, RP_RULES.BASE_WIN[4], RP_RULES.BASE_LOSS[4]],   // Diamond
+    [1700, RP_RULES.BASE_WIN[5], RP_RULES.BASE_LOSS[5]],   // Grand Champion
+  ];
+  for (const [rp, win, loss] of cases) {
+    const r = rankedResult(rp, rp);
+    assert.equal(r.winner.delta, win, `${rp} RP win`);
+    assert.equal(r.loser.delta, -loss, `${rp} RP loss`);
+  }
+});
+
+test('wins shrink and losses grow as you climb — the CPU ladder shape, kept', () => {
+  let lastWin = Infinity;
+  let lastLoss = 0;
+  for (const rp of [50, 350, 650, 950, 1250, 1700]) {
+    const r = rankedResult(rp, rp);
+    assert.ok(r.winner.delta <= lastWin, `a win at ${rp} should not pay more than below it`);
+    assert.ok(-r.loser.delta >= lastLoss, `a loss at ${rp} should not cost less than below it`);
+    lastWin = r.winner.delta;
+    lastLoss = -r.loser.delta;
+  }
 });
 
 test('beating somebody far below you is barely worth the trip', () => {
-  const r = rankedResult(1842, 620);
+  const r = rankedResult(1700, 80);
   assert.equal(r.winner.delta, RP_RULES.MIN_CHANGE);
   assert.equal(r.loser.delta, -RP_RULES.MIN_CHANGE);
 });
 
 test('beating somebody far above you is a real scalp, and not a jackpot', () => {
-  const r = rankedResult(620, 1842);
-  assert.ok(r.winner.delta > 25, `an upset should pay well, got ${r.winner.delta}`);
+  const r = rankedResult(80, 1700);
+  assert.ok(r.winner.delta > 30, `an upset should pay well, got ${r.winner.delta}`);
   assert.ok(r.winner.delta <= RP_RULES.MAX_CHANGE, 'and never more than the cap');
-  assert.equal(r.loser.delta, -r.winner.delta);
+  // Never enough to buy a rank off one game: a division is 100 RP.
+  assert.ok(r.winner.delta < 100, 'one upset must not be a promotion');
+});
+
+test('the upset adjustment grows with the gap, in both directions', () => {
+  let lastGain = -Infinity;
+  for (const gap of [0, 200, 400, 800, 1600]) {
+    const gain = rankedResult(900, 900 + gap).winner.delta;
+    assert.ok(gain >= lastGain, `beating somebody ${gap} RP above should not pay less`);
+    lastGain = gain;
+  }
+  let lastCost = Infinity;
+  for (const gap of [0, 200, 400, 800, 1600]) {
+    const cost = -rankedResult(900 + gap, 900).loser.delta;
+    assert.ok(cost <= lastCost, `losing to somebody further above should not cost more`);
+    lastCost = cost;
+  }
 });
 
 test('the reward shrinks monotonically as the gap opens in your favour', () => {
@@ -48,7 +87,8 @@ test('no result is worth nothing, and none is worth a whole rank', () => {
 
 test('the ladder never goes negative, and the winner is paid regardless', () => {
   const r = rankedResult(900, 3);
-  assert.equal(r.loser.after, 0, 'a player at 3 RP loses 3, not 32');
+  assert.ok(r.loser.after >= 0);
+  assert.equal(r.loser.after, 0, 'a player at 3 RP loses 3, not the full amount');
   assert.equal(r.loser.delta, -3);
   assert.ok(r.winner.delta >= RP_RULES.MIN_CHANGE, "what the loser can afford is not the winner's problem");
 });
@@ -62,8 +102,8 @@ test('farming a mismatch cannot outpace playing your own level', () => {
 });
 
 test('sitting on a rank by only playing far below you is punished, not rewarded', () => {
-  const win = rankedResult(1800, 700).winner.delta;
-  const loss = rankedResult(700, 1800).loser.delta;
+  const win = rankedResult(1700, 200).winner.delta;
+  const loss = rankedResult(200, 1700).loser.delta;
   assert.ok(Math.abs(loss) > win * 4, `a loss (${loss}) must dwarf the win (${win})`);
 });
 

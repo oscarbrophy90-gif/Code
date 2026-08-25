@@ -1,37 +1,62 @@
 /**
- * The ranked maths. Server-side only, and deliberately so.
+ * The ranked maths for online play. Server-side only, and deliberately so.
  *
  * The browser never computes a single point of RP. It is handed a number and it
  * draws it; if somebody edits their client all they can change is what their own
  * screen says, because the value that persists is the one this file produced on
  * the server from the result the server decided.
  *
- * The shape is Elo. Expectation comes from the RP gap, and the winner takes what
- * the result was worth as a surprise: beating somebody far above you is worth a
- * lot, beating somebody far below you is worth almost nothing, and two players
- * of the same standing trade the standard amount. Because the loser's loss is
- * the same magnitude as the winner's gain, that one rule gives every case the
- * game needs without a table of special cases:
+ * THE BASELINE IS THE CPU LADDER. What a win is worth against the computer is
+ * already tuned — wins shrink and losses grow as you climb, so holding a high
+ * rank needs a winning record — and online reuses those exact numbers rather
+ * than inventing a second economy that would feel like a different game. The
+ * table below is the one from shared/src/ranked.ts, sampled across the six
+ * online tiers instead of the nine on the CPU ladder.
  *
- *   Grand Champion beats Bronze : +5  / -5   (barely worth the trip)
- *   even match                  : +16 / -16  (the standard)
- *   Bronze beats Grand Champion : +32 / -32  (a real scalp, not a jackpot)
+ * On top of that sits the only thing online has that the CPU ladder cannot:
+ * an opponent with a rank of their own. The gap between the two decides how
+ * surprising the result was, and the payout scales with the surprise:
  *
- * The clamps are what stop the exploits. Nobody can farm a huge swing by
- * arranging a mismatch, because the top of the range is bounded; and nobody can
- * sit on a rank by only playing people far below them, because a win against
- * them is worth almost nothing while a loss to them costs the full amount.
+ *   Grand Champion beats Bronze : the floor, both ways. Nothing was proved.
+ *   two players of a rank       : the CPU baseline, unchanged.
+ *   Bronze beats Grand Champion : roughly double the baseline, and no more.
+ *
+ * The clamps are what stop the exploits. A lower-ranked player cannot farm a
+ * fortune off one upset because the ceiling is a fraction of a division; a
+ * higher-ranked player cannot be drained by one bad night for the same reason;
+ * and nobody can sit on a rank by only playing far below them, because a win
+ * there is worth the floor while a loss costs the full amount.
  */
 
-/** How much a single result can move the ladder, before clamping. */
-const K_FACTOR = 32;
+/**
+ * What a win is worth and what a loss costs, per tier — the CPU ladder's own
+ * numbers (WIN_POINTS / LOSS_POINTS in shared/src/ranked.ts), sampled from its
+ * nine tiers onto the six online ones.
+ *
+ * Bronze wins big and loses little so a beginner who wins half their games
+ * still climbs; Grand Champion is the reverse.
+ */
+const BASE_WIN = [34, 26, 24, 20, 18, 14];
+const BASE_LOSS = [16, 19, 20, 22, 24, 26];
 
-/** No result is worth nothing, and none is worth a rank. */
+/** Online ladder shape, mirroring shared/src/pvprank.ts. */
+const POINTS_PER_DIVISION = 100;
+const DIVISIONS_PER_TIER = 3;
+const TIER_COUNT = 6;
+
+/** No result is worth nothing, and none is worth half a division. */
 const MIN_CHANGE = 5;
-const MAX_CHANGE = 40;
+const MAX_CHANGE = 45;
 
 /** The ladder does not go negative. */
 const RP_FLOOR = 0;
+
+/** Which of the six online tiers this RP total sits in. */
+export function tierIndexFor(rp) {
+  const points = Math.max(0, Math.floor(rp));
+  const step = Math.floor(points / POINTS_PER_DIVISION);
+  return Math.min(TIER_COUNT - 1, Math.floor(step / DIVISIONS_PER_TIER));
+}
 
 /** Chance the first player was expected to win, from the RP gap alone. */
 function expectedScore(rp, oppRp) {
@@ -41,25 +66,35 @@ function expectedScore(rp, oppRp) {
 /**
  * What one ranked result is worth to both players.
  *
- * Returns the signed change for the winner and for the loser. The loser's floor
- * is applied last, so a player at 3 RP loses 3 rather than going negative — and
- * the winner still gets their full gain, because what the loser can afford is
- * not the winner's problem.
+ * Each side's baseline comes from their OWN tier, the way the CPU ladder does
+ * it, and both are then scaled by how surprising the result was. `surprise` is
+ * 1 for an even match, tends to 0 when the winner was a lock, and tends to 2 on
+ * a full upset — so an even game pays exactly the CPU baseline and the extremes
+ * are bounded before the clamps even apply.
  */
 export function rankedResult(winnerRp, loserRp) {
-  const expected = expectedScore(winnerRp, loserRp);
-  const raw = K_FACTOR * (1 - expected);
-  const change = Math.max(MIN_CHANGE, Math.min(MAX_CHANGE, Math.round(raw)));
-  const winnerAfter = winnerRp + change;
-  const loserAfter = Math.max(RP_FLOOR, loserRp - change);
+  const winnerBefore = Math.max(0, Math.floor(winnerRp));
+  const loserBefore = Math.max(0, Math.floor(loserRp));
+
+  const surprise = (1 - expectedScore(winnerBefore, loserBefore)) * 2;
+  const gain = clampChange(BASE_WIN[tierIndexFor(winnerBefore)] * surprise);
+  const cost = clampChange(BASE_LOSS[tierIndexFor(loserBefore)] * surprise);
+
+  const winnerAfter = winnerBefore + gain;
+  const loserAfter = Math.max(RP_FLOOR, loserBefore - cost);
   return {
-    change,
-    winner: { before: winnerRp, after: winnerAfter, delta: winnerAfter - winnerRp },
-    loser: { before: loserRp, after: loserAfter, delta: loserAfter - loserRp },
+    change: gain,
+    surprise,
+    winner: { before: winnerBefore, after: winnerAfter, delta: winnerAfter - winnerBefore },
+    loser: { before: loserBefore, after: loserAfter, delta: loserAfter - loserBefore },
   };
 }
 
-export const RP_RULES = { K_FACTOR, MIN_CHANGE, MAX_CHANGE, RP_FLOOR };
+function clampChange(raw) {
+  return Math.max(MIN_CHANGE, Math.min(MAX_CHANGE, Math.round(raw)));
+}
+
+export const RP_RULES = { BASE_WIN, BASE_LOSS, MIN_CHANGE, MAX_CHANGE, RP_FLOOR };
 
 
 /**

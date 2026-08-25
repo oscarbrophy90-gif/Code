@@ -354,14 +354,23 @@ export function renderOnline(_params: RouteParams): HTMLElement {
       ),
     );
 
-    // Their build comes off the SERVER's copy, not out of their browser. If the
-    // server has none — a client that never announced one — we play them as an
-    // unnamed build rather than inventing statistics for a real person.
+    // BOTH builds come off the SERVER's copy, and that includes your own.
+    //
+    // Reading your own build from local storage is what made the console
+    // exploit work: the host simulates the match, so a host who edited their
+    // attributes was simulating with the edited ones and the other player had
+    // no way to know. The server validated both builds against what the creator
+    // can actually make, and these are those — so whatever a browser has been
+    // told about itself, the game is played with legal players.
     const opponent = found.opponent.build
       ? { ...found.opponent.build, isBot: false }
       : { ...store.simConfig(), id: `online-${found.matchId}`, name: theirs.username, isBot: false };
+    const mineValidated = found.you.build
+      ? { ...found.you.build, isBot: false }
+      : { ...store.simConfig(), isBot: false };
 
     startMatch({
+      you: mineValidated,
       opponent,
       difficulty: 'pro',
       parkId: 'downtown',

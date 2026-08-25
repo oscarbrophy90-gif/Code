@@ -42,6 +42,7 @@ import { dirname, join } from 'node:path';
 
 import { rankedResult, rpWindow, winnerFromScore } from './rp.js';
 import { FilePlayerStore, publicProfile } from './store.js';
+import { validateBuild, validateScore } from './validate.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -321,7 +322,10 @@ io.on('connection', (socket) => {
     const accountId = String(payload?.accountId ?? '').slice(0, 64);
     if (!accountId) return;
     socket.data.accountId = accountId;
-    const row = players.upsert(accountId, { username: payload?.username, build: payload?.build });
+    // The build is checked before it is stored, so what the opponent is later
+    // shown — and what the match is built from — was never the browser's word.
+    const { build } = validateBuild(payload?.build, `${payload?.username ?? accountId} (hello)`);
+    const row = players.upsert(accountId, { username: payload?.username, build });
     socket.emit('profile:self', publicProfile(row));
   });
 
@@ -334,7 +338,8 @@ io.on('connection', (socket) => {
       return;
     }
     socket.data.accountId = accountId;
-    const row = players.upsert(accountId, { username: payload?.username, build: payload?.build });
+    const { build } = validateBuild(payload?.build, `${payload?.username ?? accountId} (queue ${mode})`);
+    const row = players.upsert(accountId, { username: payload?.username, build });
     socket.emit('profile:self', publicProfile(row));
 
     leaveQueues(socket.id);
@@ -384,7 +389,15 @@ io.on('connection', (socket) => {
   socket.on('match:score', (payload) => {
     const match = matchOf(socket.id);
     if (!match || match.host !== socket.id) return;
-    match.score = [Number(payload?.score?.[0]) || 0, Number(payload?.score?.[1]) || 0];
+    // A score is only believed if it could have come from the game: one side,
+    // one basket, never backwards. The host simulates, but it does not get to
+    // invent the scoreline it wins on.
+    const checked = validateScore(match.score, payload?.score);
+    if (!checked.ok) {
+      console.log(`[anticheat] match ${match.id}: rejected score ${JSON.stringify(payload?.score)} — ${checked.reason} (holding ${match.score.join('-')})`);
+      return;
+    }
+    match.score = checked.score;
     log(`match ${match.id} score ${match.score.join('-')}`);
     io.to(match.room).emit('match:score', { score: match.score });
     const winner = winnerFromScore(match.score, match.rules);

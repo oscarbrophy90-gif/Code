@@ -41,6 +41,15 @@ import { AvatarRenderer, livePreview } from './avatar.ts';
 
 export interface StartMatchOptions {
   opponent: SimPlayerConfig;
+  /**
+   * Play as this build instead of the one on this machine.
+   *
+   * Online only, and the reason is anti-cheat: the server validates both builds
+   * against what the creator can make and hands them back, so the match is
+   * built from those rather than from whatever local storage claims. Every
+   * offline mode leaves it unset and plays your saved build as it always has.
+   */
+  you?: SimPlayerConfig | null;
   /** 3v3: the other two opponents and your two AI teammates */
   squads?: { opponents: SimPlayerConfig[]; teammates: SimPlayerConfig[] } | null;
   /**
@@ -124,7 +133,7 @@ export function startMatch(opts: StartMatchOptions): void {
   // early, on a court the other person has not been shown yet.
   const online = opts.online ?? null;
   void playWalkout({
-    player: store.simConfig(),
+    player: opts.you ?? store.simConfig(),
     opponent: opts.opponent,
     playerTeam: opts.squads ? [store.simConfig(), ...opts.squads.teammates] : undefined,
     opponentTeam: opts.squads ? [opts.opponent, ...opts.squads.opponents] : undefined,
@@ -162,6 +171,7 @@ export function startMatch(opts: StartMatchOptions): void {
 
 function launchMatch(opts: StartMatchOptions): void {
   const node = createMatchScreen({
+    you: opts.you ?? null,
     opponent: opts.opponent,
     squads: opts.squads ?? null,
     online: opts.online ?? null,

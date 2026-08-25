@@ -100,6 +100,8 @@ export interface MatchOptions {
    * gym all run precisely the code they always ran.
    */
   online?: { role: 'host' | 'guest'; mode: 'casual' | 'ranked' } | null;
+  /** Online: your own build as the server validated it. Null everywhere else. */
+  you?: SimPlayerConfig | null;
   /** the court drawn for this game; falls back to the park's own palette */
   surface?: CourtSurface | null;
   onFinish: (result: MatchResult) => void;
@@ -115,7 +117,11 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
   const localSide: Side = opts.localSide ?? 0;
   const remoteSide: Side = localSide === 0 ? 1 : 0;
 
-  const localCfg = store.simConfig();
+  // Online hands us a server-validated copy of our own build; every other mode
+  // plays the one saved on this machine. That indirection is the anti-cheat:
+  // the host simulates the match, so the build the host simulates with must be
+  // one the server agreed was possible.
+  const localCfg = opts.you ?? store.simConfig();
   const squads = opts.squads ?? null;
 
   const matchConfig = defaultMatchConfig({ parkId: opts.parkId, ...opts.config });
@@ -236,6 +242,8 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
   let checkAnnounced = false;
   /** Host: the guest's latest input. Edge presses are consumed exactly once. */
   let guestInput: PlayerInput = emptyInput();
+  /** Host: the highest guest input sequence that has gone into the simulation. */
+  let guestAck = 0;
   /** Host: seconds since a guest input arrived, so a stale one is not held. */
   let sinceGuestInput = 0;
   /** Host: seconds since the last snapshot went out. */
@@ -252,24 +260,68 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
   let stallReported = false;
   /** The server has settled this match; there is nothing left to wait for. */
   let matchSettled = false;
-  /** Guest: the input being held right now, for the lead below. */
-  let guestHeld: PlayerInput = emptyInput();
   /**
-   * Guest: how far ahead of the host's picture this player is drawn, in feet.
+   * Guest: client-side prediction for its own player.
    *
-   * The host's answer about where you are is always one round trip old, so
-   * without this your own body sets off a beat after you press the key. This
-   * is a bounded, decaying lead along the direction you are ASKING for — a
-   * foot, less than half a stride. It is a rendering lead and nothing more:
-   * the ball, possession, contests, shots and the score are all decided by the
-   * host from the authoritative position, never from this.
+   * The guest's own body used to wait a full round trip for the host to say it
+   * had moved, which over the internet is the difference between controls that
+   * answer and controls that drag. So the guest now plays its own input the
+   * instant it is pressed, keeps every input it has sent, and rebuilds its
+   * position from the host's last word plus everything the host has not
+   * acknowledged yet. Standard prediction and reconciliation, and it removes
+   * the round trip from your own movement entirely.
+   *
+   * What it does NOT do is predict the game. The prediction runs on a scratch
+   * simulation that exists only to answer "where would my body be", and only
+   * that player's position is ever read out of it. The ball, possession, shots,
+   * the score and the phase are the host's, exactly as before — which is what
+   * keeps this from re-opening the desync that removing the guest's simulation
+   * closed.
    */
-  let leadX = 0;
-  let leadZ = 0;
-  /** Where the host last said the local player was, to pay the lead off. */
-  let leadAuthX = 0;
-  let leadAuthZ = 0;
-  const LEAD_CAP = 1;
+  let inputSeq = 0;
+  const pendingInputs: { seq: number; input: PlayerInput; dt: number }[] = [];
+  /**
+   * The scratch world the replay runs in. Never drawn, never authoritative.
+   *
+   * A second, identical match built from the same two configs. It exists so the
+   * prediction can use the real movement code without the real game being able
+   * to hear about it: whatever this world decides about the ball, the score or
+   * the rules is thrown away, and only the local player's coordinates are read.
+   */
+  const scratch: MatchState | null =
+    netRole === 'guest'
+      ? createMatch(
+          localSide === 0 ? localCfg : opts.opponent,
+          localSide === 0 ? opts.opponent : localCfg,
+          matchConfig,
+          seed,
+        )
+      : null;
+  /** Where the prediction says the local player is, this frame. */
+  let predictX = 0;
+  let predictZ = 0;
+  let predicting = false;
+  /**
+   * The correction the host's last answer asked for, still being paid off.
+   *
+   * A misprediction is usually inches, and applying it the moment it arrives
+   * puts a step in the motion thirty times a second — small, but exactly the
+   * micro-shake that reads as a bad connection. So the prediction itself takes
+   * the correction immediately (it has to: it is the thing that must stay true)
+   * and the DRAWN body carries the difference as an offset that decays away
+   * over about a sixth of a second. The two meet, smoothly, and nothing ever
+   * accumulates because the offset is recomputed from the answer each time.
+   */
+  let errX = 0;
+  let errZ = 0;
+  // Measured across three runs, on the distribution rather than an RMS that a
+  // couple of outliers dominate. The median frame is perfectly smooth either
+  // way; what differs is the correction spikes, and stretching 0.16s to 0.25s
+  // halves them — p95 112 -> 56, worst 196 -> 66 milli-ft — for no cost to how
+  // fast the controls answer.
+  const SETTLE_SECONDS = 0.25;
+  /** Inputs older than a second are a stall, not a round trip: stop hoarding. */
+  const MAX_PENDING = 240;
   /** Host: the input that went into the frame being published. */
   let lastHostInput: PlayerInput = emptyInput();
 
@@ -321,6 +373,7 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
     netReleases.push(
       onGuestInput((i) => {
         sinceGuestInput = 0;
+        if (typeof i.seq === 'number' && i.seq > guestAck) guestAck = i.seq;
         // Held buttons take the newest value; edge presses stick until the
         // simulation has consumed them, so a tap between two sim frames is
         // never swallowed and never fires twice.
@@ -582,11 +635,18 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
       // Every simulated frame, not every other one. Input is a handful of small
       // numbers and the guest has nothing else to say; batching it only put a
       // few more milliseconds between pressing a key and the host hearing about
-      // it, which on a client that predicts nothing is felt directly.
+      // it, which is felt directly.
       queueInput(localInput);
-      if (pendingInput) sendInput(pendingInput);
+      if (pendingInput) {
+        inputSeq++;
+        sendInput(pendingInput, inputSeq);
+        // Kept until the host says it has been applied, so it can be replayed
+        // on top of whatever the host last said about where we are.
+        pendingInputs.push({ seq: inputSeq, input: { ...pendingInput }, dt });
+        if (pendingInputs.length > MAX_PENDING) pendingInputs.shift();
+      }
       pendingInput = null;
-      guestHeld = localInput;
+      predictLocal(localInput, dt);
       netTrace(
         'local-input',
         () =>
@@ -686,7 +746,71 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
     netAccum += dt;
     if (netAccum < 1 / 30) return;
     netAccum = 0;
-    sendSnapshot(takeSnapshot());
+    sendSnapshot(deltaSnapshot());
+  };
+
+  /**
+   * The snapshot, with the parts that have not changed left out.
+   *
+   * A full frame is 2 kB and most of it is identical to the frame before: a
+   * player's height, their shot type, the ball's landing spot, the box score.
+   * Sending all of it thirty times a second was 63 kB/s off the host's uplink
+   * for no information, and on a home connection that queueing IS the lag.
+   *
+   * Every thirtieth frame goes out whole as a keyframe, so a client that joins
+   * late or misses something is never more than a second from a complete
+   * picture, and `full` tells the guest which kind it is holding.
+   */
+  let lastSnapshot: NetSnapshot | null = null;
+  let sinceKeyframe = 0;
+
+  const deltaSnapshot = (): NetSnapshot => {
+    const next = takeSnapshot();
+    const previous = lastSnapshot;
+    lastSnapshot = next;
+    if (!previous || sinceKeyframe++ >= 30) {
+      sinceKeyframe = 0;
+      return { ...next, full: true } as NetSnapshot;
+    }
+    return diffSnapshot(previous, next) as NetSnapshot;
+  };
+
+  /** What changed between two frames, and nothing else. */
+  const diffSnapshot = (a: NetSnapshot, b: NetSnapshot): Partial<NetSnapshot> => {
+    const out: Record<string, unknown> = { full: false, frame: b.frame, t: b.t, ack: b.ack, hostInput: b.hostInput };
+    for (const key of [
+      'rng', 'phase', 'phaseTimer', 'shotClock', 'clock', 'possession', 'needsClear', 'winner',
+    ] as const) {
+      if (a[key] !== b[key]) out[key] = b[key];
+    }
+    if (a.score[0] !== b.score[0] || a.score[1] !== b.score[1]) out.score = b.score;
+    if (JSON.stringify(a.check) !== JSON.stringify(b.check)) out.check = b.check;
+    if (JSON.stringify(a.freeThrow) !== JSON.stringify(b.freeThrow)) out.freeThrow = b.freeThrow;
+    if (JSON.stringify(a.checkGuard) !== JSON.stringify(b.checkGuard)) out.checkGuard = b.checkGuard;
+    if (JSON.stringify(a.passRequest) !== JSON.stringify(b.passRequest)) out.passRequest = b.passRequest;
+    if (b.stats) out.stats = b.stats;
+
+    const players = b.players.map((np, i) => changedFields(a.players[i] as unknown as Record<string, unknown>, np as unknown as Record<string, unknown>));
+    if (players.some((p) => Object.keys(p).length > 0)) out.players = players;
+    const ball = changedFields(a.ball as unknown as Record<string, unknown>, b.ball as unknown as Record<string, unknown>);
+    if (Object.keys(ball).length > 0) out.ball = ball;
+    return out as Partial<NetSnapshot>;
+  };
+
+  /** Shallow diff of one flat object, comparing nested values structurally. */
+  const changedFields = (a: Record<string, unknown> | undefined, b: Record<string, unknown>): Record<string, unknown> => {
+    const out: Record<string, unknown> = {};
+    if (!a) return { ...b };
+    for (const key of Object.keys(b)) {
+      const av = a[key];
+      const bv = b[key];
+      if (av === bv) continue;
+      if (av && bv && typeof av === 'object' && typeof bv === 'object') {
+        if (JSON.stringify(av) === JSON.stringify(bv)) continue;
+      }
+      out[key] = bv;
+    }
+    return out;
   };
 
   /**
@@ -723,6 +847,7 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
     checkGuard: state.checkGuard.slice(),
     passRequest: state.passRequest ? { pid: state.passRequest.pid, timer: r3(state.passRequest.timer) } : null,
     hostInput: lastHostInput,
+    ack: guestAck,
     players: state.players.map((p) => ({
       x: r3(p.x),
       z: r3(p.z),
@@ -869,6 +994,108 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
    * What it does do is fill in the 33 ms between snapshots, so thirty packets a
    * second look like a hundred and twenty frames of basketball.
    */
+  /**
+   * The guest's own body, one frame ahead of the wire.
+   *
+   * Runs the real movement code — the same `stepMatch` the host runs — but in a
+   * scratch world seeded from the host's last word, so nothing it decides can
+   * escape. Only the local player's position is read back out; the ball,
+   * possession and every rule stay the host's.
+   *
+   * The frozen phases are not predicted at all. During a check nobody may move,
+   * and a prediction that let you drift while the other player was pinned would
+   * be a bug wearing a feature's clothes.
+   */
+  const predictLocal = (localInput: PlayerInput, dt: number) => {
+    const snap = netTarget;
+    if (!snap || snap.phase !== 'live' || !scratch) {
+      predicting = false;
+      return;
+    }
+    // Advance the scratch world by this one frame, from where the last
+    // reconciliation left it. Reconciliation rebuilds it from scratch whenever
+    // a snapshot lands, so error cannot accumulate across packets.
+    const inputs: PlayerInput[] = scratch.players.map(() => emptyInput());
+    inputs[localPid] = localInput;
+    inputs[remoteSide] = hostInput;
+    stepMatch(scratch, inputs, dt);
+    drainEvents(scratch);
+    const me = scratch.players[localPid];
+    predictX = me.x;
+    predictZ = me.z;
+    predicting = true;
+  };
+
+  /**
+   * Rebuild the prediction from the host's word plus everything it has not seen.
+   *
+   * Called on every snapshot. Anything the host has acknowledged is dropped;
+   * the rest is replayed at the rate it was recorded, so the answer is where
+   * this player would be if the host had already processed every key pressed
+   * since. That replay is what makes the local player feel local.
+   */
+  const reconcile = (snap: NetSnapshot) => {
+    if (!scratch || snap.phase !== 'live') {
+      pendingInputs.length = 0;
+      predicting = false;
+      return;
+    }
+    const ack = snap.ack ?? 0;
+    while (pendingInputs.length > 0 && pendingInputs[0].seq <= ack) pendingInputs.shift();
+
+    // Seed the scratch world from the authority. Both bodies, because they push
+    // each other; the ball's owner, because carrying it changes how you move.
+    scratch.phase = 'live';
+    scratch.needsClear = snap.needsClear;
+    scratch.shotClock = snap.shotClock;
+    for (let i = 0; i < scratch.players.length && i < snap.players.length; i++) {
+      const p = scratch.players[i];
+      const n = snap.players[i];
+      p.x = n.x; p.z = n.z; p.y = n.y;
+      p.vx = n.vx; p.vz = n.vz; p.vy = n.vy;
+      p.facing = n.facing;
+      p.state = n.state as typeof p.state;
+      p.stateTimer = n.stateTimer;
+      p.stamina = n.stamina;
+      p.stagger = n.stagger;
+      p.staggerTimer = n.staggerTimer;
+      p.moveId = n.moveId as typeof p.moveId;
+      p.moveTimer = n.moveTimer;
+      p.moveDuration = n.moveDuration;
+      p.moveCooldown = n.moveCooldown;
+      p.dribbleHand = n.dribbleHand as typeof p.dribbleHand;
+      p.outOfBoundsTimer = n.outOfBoundsTimer;
+    }
+    const sb = scratch.ball;
+    sb.state = snap.ball.state === 'held' ? 'held' : 'dead';
+    sb.owner = snap.ball.state === 'held' ? snap.ball.owner : null;
+    sb.x = snap.ball.x; sb.y = snap.ball.y; sb.z = snap.ball.z;
+    sb.vx = 0; sb.vy = 0; sb.vz = 0;
+
+    for (const { input, dt } of pendingInputs) {
+      const inputs: PlayerInput[] = scratch.players.map(() => emptyInput());
+      inputs[localPid] = input;
+      inputs[remoteSide] = hostInput;
+      stepMatch(scratch, inputs, dt);
+      drainEvents(scratch);
+    }
+    const me = scratch.players[localPid];
+    if (predicting) {
+      // Hand the difference to the display as an offset instead of moving the
+      // body. A correction too big to be latency — a steal, a collision, a
+      // reset — is taken whole, because easing across one of those draws a
+      // player skating.
+      const dx = predictX - me.x;
+      const dz = predictZ - me.z;
+      const takeWhole = Math.hypot(dx, dz) > 4;
+      errX = takeWhole ? 0 : dx;
+      errZ = takeWhole ? 0 : dz;
+    }
+    predictX = me.x;
+    predictZ = me.z;
+    predicting = true;
+  };
+
   const guestStep = (dt: number) => {
     sinceSnapshot += dt;
     if (sinceSnapshot > 1.5 && !stallReported && !matchSettled) {
@@ -890,7 +1117,35 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
    * `advanceGuest` eases toward the host's coordinates so a packet boundary is
    * not a visible jump.
    */
-  const applySnapshot = (snap: NetSnapshot) => {
+  /**
+   * Merge a delta onto the last complete picture.
+   *
+   * Only keyframes are whole; everything else says what moved. Merging here
+   * rather than in the apply step means the rest of the guest never has to know
+   * a snapshot was ever partial — it always sees a full frame.
+   */
+  let merged: NetSnapshot | null = null;
+  const mergeSnapshot = (incoming: NetSnapshot): NetSnapshot | null => {
+    if (incoming.full !== false || !merged) {
+      merged = incoming;
+      return merged;
+    }
+    const base = merged;
+    const next: NetSnapshot = { ...base, ...incoming };
+    if (incoming.players) {
+      next.players = base.players.map((p, i) => ({ ...p, ...(incoming.players?.[i] ?? {}) }));
+    }
+    if (incoming.ball) next.ball = { ...base.ball, ...incoming.ball };
+    if (!incoming.stats) next.stats = base.stats;
+    merged = next;
+    return next;
+  };
+
+  const applySnapshot = (raw: NetSnapshot) => {
+    const snap = mergeSnapshot(raw);
+    // A delta with no keyframe behind it is a packet we cannot place: the next
+    // keyframe is a second away at most, so it is dropped rather than guessed.
+    if (!snap) return;
     const before = state.phase;
     const beforeBall = state.ball.state;
     const beforeOwner = state.ball.owner;
@@ -1038,6 +1293,9 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
       );
     }
 
+    // Rebuild the local prediction on top of the answer that just arrived.
+    reconcile(snap);
+
     if (before !== 'over' && state.phase === 'over') {
       audio.play('buzzer');
       setTimeout(() => closeAndFinish(false), 1800);
@@ -1082,36 +1340,29 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
       const n = snap.players[i];
       let tx = n.x + n.vx * lead;
       let tz = n.z + n.vz * lead;
-      if (i === localPid) {
-        // Your own body only. Outside live play nothing is led at all, so a
-        // check-ball freeze is exactly as frozen here as it is on the host.
-        const live = state.phase === 'live';
-        const push = live ? Math.hypot(guestHeld.mx, guestHeld.mz) : 0;
-        if (push > 0.1) {
-          const g = Math.min(1, dt * 8);
-          leadX += ((guestHeld.mx / push) * LEAD_CAP - leadX) * g;
-          leadZ += ((guestHeld.mz / push) * LEAD_CAP - leadZ) * g;
-        } else {
-          // Let go. The lead is NOT eased back to zero: doing that drags your
-          // body backwards across the floor, which is worse than the lag it was
-          // hiding. It is paid off out of the host's own forward progress
-          // instead — some of each step settles the debt, the rest still moves
-          // you — so the drawn body only ever slows to a stop.
-          const mag = Math.hypot(leadX, leadZ);
-          if (mag > 1e-4) {
-            const paid = Math.hypot(n.x - leadAuthX, n.z - leadAuthZ) * 0.6;
-            const keep = Math.max(0, mag - paid) / mag;
-            leadX *= keep;
-            leadZ *= keep;
-          } else {
-            leadX = 0;
-            leadZ = 0;
-          }
-        }
-        leadAuthX = n.x;
-        leadAuthZ = n.z;
-        tx += leadX;
-        tz += leadZ;
+      if (i === localPid && predicting) {
+        // Your own body is drawn exactly where your own keys have put it, with
+        // no easing at all — easing toward your OWN prediction is just latency
+        // you added back on purpose. The prediction is already smooth, because
+        // it came out of the same movement code the host runs.
+        //
+        // Corrections are the one thing worth softening, and `reconcile` does
+        // that where it belongs: at the moment the host's answer lands.
+        const settle = Math.exp(-dt / SETTLE_SECONDS);
+        errX *= settle;
+        errZ *= settle;
+        p.x = predictX + errX;
+        p.z = predictZ + errZ;
+        p.y = n.y;
+        p.facing += angleDelta(p.facing, n.facing) * Math.min(1, dt * 16);
+        p.stateTimer += dt;
+        p.moveTimer += dt;
+        if (p.state === 'shooting') p.shotElapsed += dt;
+        if (p.emoteTimer > 0) p.emoteTimer = Math.max(0, p.emoteTimer - dt);
+        if (p.emoteCooldown > 0) p.emoteCooldown = Math.max(0, p.emoteCooldown - dt);
+        if (p.celebrationTimer > 0) p.celebrationTimer = Math.max(0, p.celebrationTimer - dt);
+        if (p.reboundLock > 0) p.reboundLock = Math.max(0, p.reboundLock - dt);
+        continue;
       }
       const jumped = Math.hypot(tx - p.x, tz - p.z) > 6;
       p.x = jumped ? tx : p.x + (tx - p.x) * k;

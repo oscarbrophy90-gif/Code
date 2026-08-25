@@ -111,6 +111,22 @@ export interface NetSnapshot {
    * 33 ms until the next snapshot, instead of standing still and then jumping.
    */
   hostInput: PlayerInput | null;
+  /**
+   * The highest guest input sequence this frame includes.
+   *
+   * The guest drops everything up to it and replays the rest, so its own player
+   * is drawn where its own keys have already put it rather than a round trip
+   * behind.
+   */
+  ack: number;
+  /**
+   * True on a keyframe: this object is the whole match.
+   *
+   * Everything in between carries only what changed since the frame before, so
+   * the guest merges it onto the picture it is already holding. One whole frame
+   * a second bounds how far a merge can ever be from the truth.
+   */
+  full?: boolean;
 }
 
 /** Everything about a player that the simulation changes as the game is played. */
@@ -246,7 +262,7 @@ const bus = {
   go: new Set<Handler<void>>(),
   ended: new Set<Handler<{ reason: string }>>(),
   state: new Set<Handler<NetSnapshot>>(),
-  input: new Set<Handler<PlayerInput>>(),
+  input: new Set<Handler<PlayerInput & { seq?: number }>>(),
   score: new Set<Handler<{ score: [number, number] }>>(),
   self: new Set<Handler<OnlineProfile>>(),
   result: new Set<Handler<MatchResult>>(),
@@ -265,7 +281,7 @@ export const onReadyCount = (fn: Handler<{ count: number; total: number }>) => s
 export const onCheckGo = (fn: Handler<void>) => sub(bus.go, fn);
 export const onMatchEnded = (fn: Handler<{ reason: string }>) => sub(bus.ended, fn);
 export const onSnapshot = (fn: Handler<NetSnapshot>) => sub(bus.state, fn);
-export const onGuestInput = (fn: Handler<PlayerInput>) => sub(bus.input, fn);
+export const onGuestInput = (fn: Handler<PlayerInput & { seq?: number }>) => sub(bus.input, fn);
 export const onScore = (fn: Handler<{ score: [number, number] }>) => sub(bus.score, fn);
 
 function sub<T>(set: Set<Handler<T>>, fn: Handler<T>): () => void {
@@ -289,6 +305,11 @@ export function connectMultiplayer(): void {
     connected = true;
     selfId = socket?.id ?? '';
     console.log('Connected to Hoops Elite multiplayer server', selfId ? `(you are ${selfId})` : '');
+    // A reconnect is a new socket, and the server has never heard of it. Saying
+    // who we are again is what makes the ladder reappear after a dropout, a
+    // sleeping laptop, or a host that spun down — without it the profile on
+    // screen stays whatever it was before the connection died.
+    if (lastAnnounce) socket?.emit('profile:hello', lastAnnounce);
   });
   socket.on('disconnect', () => {
     connected = false;
@@ -361,7 +382,7 @@ export function connectMultiplayer(): void {
     fire(bus.state, snap);
   });
   socket.on('match:input', (...a: unknown[]) => {
-    const input = a[0] as PlayerInput;
+    const input = a[0] as PlayerInput & { seq?: number };
     inputSeen++;
     debug('input', () =>
       `guest input received — ${inputSeen} so far, move (${input.mx?.toFixed?.(2)}, ${input.mz?.toFixed?.(2)}) ` +
@@ -383,8 +404,11 @@ export function isConnected(): boolean {
  * The build travels here so the SERVER holds it: the opponent is shown the copy
  * the server has, never one handed straight over from another browser.
  */
+let lastAnnounce: { accountId: string; username: string; build: SimPlayerConfig } | null = null;
+
 export function announceSelf(identity: { accountId: string; username: string }, build: SimPlayerConfig): void {
-  socket?.emit('profile:hello', { ...identity, build });
+  lastAnnounce = { ...identity, build };
+  socket?.emit('profile:hello', lastAnnounce);
 }
 
 export function joinMatchmaking(
@@ -432,9 +456,17 @@ export function sendScore(score: [number, number]): void {
   socket?.emit('match:score', { score });
 }
 
-/** Guest only: one frame of input for the host to simulate. */
-export function sendInput(input: PlayerInput): void {
-  socket?.emit('match:input', input);
+/**
+ * Guest only: one frame of input for the host to simulate.
+ *
+ * `seq` is what makes prediction possible. The guest plays its own input
+ * immediately and keeps a copy; the host echoes back the highest seq it has
+ * applied; everything newer than that is replayed on top of the authoritative
+ * position. Without the number there is no way to know which of your inputs the
+ * answer already contains.
+ */
+export function sendInput(input: PlayerInput, seq: number): void {
+  socket?.emit('match:input', { ...input, seq });
 }
 
 /** Host only: one snapshot of the world. */

@@ -371,7 +371,9 @@ test('match rewards pay for winning and never go negative', () => {
     won: false, playlist: 'casual', stats: { ...emptyStats(), turnovers: 5 }, scoreFor: 0, scoreAgainst: 11,
     durationSeconds: 20, greenRate: 0, xpMultiplier: 1, premiumPass: false, winStreak: 0,
   });
-  assert.ok(win.currency > 1000 && win.xp > 1000);
+  // Coins for a CPU Ranked win are deliberately half what they were; XP is not.
+  assert.ok(win.currency > 500, `a ranked win should still be worth playing for (${win.currency})`);
+  assert.ok(win.xp > 1000);
   assert.ok(quit.currency >= 0 && quit.xp >= 0);
   assert.ok(win.currency > quit.currency * 5);
 });

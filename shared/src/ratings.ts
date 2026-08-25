@@ -177,53 +177,14 @@ function clamp(v: number, lo: number, hi: number): number {
  * Attribute caps are derived from the physical build. Taller/heavier builds
  * trade perimeter skill for interior presence, so every build has a real
  * identity instead of one dominant meta build.
+ *
+ * The implementation lives in `buildrules.js` rather than here, because the
+ * server has to apply exactly these caps to decide whether a submitted build is
+ * real — and a second copy of this maths on the server would drift and start
+ * rejecting legitimate players. One function, two importers.
  */
-export function computeCaps(build: BuildSpec): Attributes {
-  const caps = emptyAttributes(99);
-  // Normalised build descriptors, all roughly -1..1.
-  const h = (build.heightIn - 78) / 12; // 6'6" is neutral
-  const w = (build.weightLb - 215) / 75;
-  const span = (build.wingspanIn - build.heightIn) / 9; // 0 .. 1 for +0" .. +9"
-
-  const set = (key: AttributeKey, value: number) => {
-    caps[key] = clamp(Math.round(value), 55, 99);
-  };
-
-  set('closeShot', 92 + h * 8 + Math.max(0, w) * 4 - Math.max(0, -h) * 10);
-  set('freeThrow', 99 - h * 14 - Math.max(0, w) * 6);
-  set('threePoint', 99 - h * 26 - Math.max(0, w) * 10);
-  set('midRange', 99 - h * 16 - Math.max(0, w) * 7);
-  set('layup', 99 - Math.max(0, h) * 12 - Math.max(0, w) * 8);
-  set('dunk', 72 + h * 22 + w * 12 + span * 6);
-  set('ballHandle', 99 - h * 34 - Math.max(0, w) * 16);
-  set('speedWithBall', 99 - h * 30 - Math.max(0, w) * 20);
-  set('passAccuracy', 99 - h * 16 - Math.max(0, w) * 6);
-  set('speed', 99 - h * 26 - Math.max(0, w) * 18);
-  set('acceleration', 99 - h * 25 - Math.max(0, w) * 20);
-  set('strength', 66 + h * 16 + w * 26);
-  set('vertical', 92 - Math.max(0, w) * 22 + Math.max(0, -h) * 6);
-  set('stamina', 96 - Math.max(0, h) * 18 - Math.max(0, w) * 14);
-  set('perimeterDefense', 99 - h * 24 - Math.max(0, w) * 12 + span * 5);
-  set('interiorDefense', 66 + h * 24 + w * 14 + span * 6);
-  set('offensiveRebound', 60 + h * 28 + w * 15 + span * 8);
-  set('defensiveRebound', 64 + h * 27 + w * 13 + span * 8);
-  set('steal', 96 - h * 16 - Math.max(0, w) * 10 + span * 4);
-  set('block', 60 + h * 28 + span * 12 + Math.max(0, -w) * 4);
-
-  // Position bias: a build's declared position nudges a few caps so position
-  // choice matters without letting one position dominate.
-  const bias: Record<Position, Partial<Record<AttributeKey, number>>> = {
-    PG: { ballHandle: 5, speedWithBall: 5, passAccuracy: 5, speed: 3, freeThrow: 3, offensiveRebound: -7, defensiveRebound: -5, interiorDefense: -5 },
-    SG: { threePoint: 4, midRange: 3, freeThrow: 3, steal: 2, offensiveRebound: -5, defensiveRebound: -3, strength: -3 },
-    SF: { layup: 3, perimeterDefense: 3, dunk: 2, closeShot: 2 },
-    PF: { offensiveRebound: 4, defensiveRebound: 4, closeShot: 3, interiorDefense: 4, strength: 3, ballHandle: -4, speedWithBall: -4, threePoint: -3 },
-    C: { block: 6, offensiveRebound: 5, defensiveRebound: 5, closeShot: 4, interiorDefense: 5, ballHandle: -8, speedWithBall: -8, speed: -4, threePoint: -6, freeThrow: -4 },
-  };
-  for (const [key, delta] of Object.entries(bias[build.position]) as [AttributeKey, number][]) {
-    caps[key] = clamp(caps[key] + delta, 55, 99);
-  }
-  return caps;
-}
+import { computeCaps } from './buildrules.js';
+export { computeCaps };
 
 function spreadAt(caps: Attributes, fraction: number): Attributes {
   const attrs = emptyAttributes();
