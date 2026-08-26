@@ -21,6 +21,7 @@ import {
   type PlayerInput,
   type PlayerMatchStats,
   type SimEvent,
+  type SimPlayer,
   type SimPlayerConfig,
   type Side,
   STORE_BY_ID,
@@ -297,10 +298,68 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
           seed,
         )
       : null;
-  /** Where the prediction says the local player is, this frame. */
+  /**
+   * What the prediction says the local player is doing, this frame.
+   *
+   * Position was never the whole story. The host's simulation IS the game, so
+   * every action the host takes resolves in its own frame while every action
+   * the guest takes has to go and come back — which is why the guest's movement
+   * could measure as fast as the host's and the game still feel slower on that
+   * side. Pressing shoot and watching the meter appear a round trip later is
+   * lag whatever the feet are doing.
+   *
+   * So the guest predicts its own player's whole presentation: the act state
+   * and its clock, the jump, the shot meter, the dribble move, the raised hand.
+   * All of it comes out of the same movement code the host runs, and all of it
+   * is rebuilt from the host's answer on every snapshot.
+   *
+   * What is NOT predicted is anything another player did to you — being
+   * staggered, losing the ball, a shot's outcome — or anything about the ball,
+   * possession, the score or the phase. Those stay the host's alone.
+   */
+  interface PredictedSelf {
+    x: number; z: number; y: number; vy: number; facing: number;
+    state: SimPlayer['state'];
+    stateTimer: number;
+    shotElapsed: number;
+    shotProfile: SimPlayer['shotProfile'];
+    shotType: SimPlayer['shotType'];
+    shotOnMoveKey: boolean;
+    shotFromX: number; shotFromZ: number; shotIsThree: boolean;
+    moveId: SimPlayer['moveId'];
+    moveTimer: number; moveDuration: number;
+    moveDirX: number; moveDirZ: number;
+    dribbleHand: SimPlayer['dribbleHand'];
+    handUp: boolean;
+    contestTimer: number;
+    fakeTimer: number;
+  }
+  let predicted: PredictedSelf | null = null;
   let predictX = 0;
   let predictZ = 0;
   let predicting = false;
+
+  /** Read the local player out of the scratch world. */
+  const snapshotPredicted = (): PredictedSelf => {
+    const me = scratch!.players[localPid];
+    return {
+      x: me.x, z: me.z, y: me.y, vy: me.vy, facing: me.facing,
+      state: me.state,
+      stateTimer: me.stateTimer,
+      shotElapsed: me.shotElapsed,
+      shotProfile: me.shotProfile,
+      shotType: me.shotType,
+      shotOnMoveKey: me.shotOnMoveKey,
+      shotFromX: me.shotFromX, shotFromZ: me.shotFromZ, shotIsThree: me.shotIsThree,
+      moveId: me.moveId,
+      moveTimer: me.moveTimer, moveDuration: me.moveDuration,
+      moveDirX: me.moveDirX, moveDirZ: me.moveDirZ,
+      dribbleHand: me.dribbleHand,
+      handUp: me.handUp,
+      contestTimer: me.contestTimer,
+      fakeTimer: me.fakeTimer,
+    };
+  };
   /**
    * The correction the host's last answer asked for, still being paid off.
    *
@@ -743,8 +802,12 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
       sendScore(lastNetScore);
     }
 
+    // 60 a second, not 30. What the guest sees of its OPPONENT can only be as
+    // fresh as the last packet, so the update rate is that half of the picture
+    // — and now that a frame is 300 bytes instead of 2 kB, doubling it costs
+    // less than the old rate did.
     netAccum += dt;
-    if (netAccum < 1 / 30) return;
+    if (netAccum < 1 / SNAPSHOT_HZ) return;
     netAccum = 0;
     sendSnapshot(deltaSnapshot());
   };
@@ -763,12 +826,13 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
    */
   let lastSnapshot: NetSnapshot | null = null;
   let sinceKeyframe = 0;
+  const SNAPSHOT_HZ = 60;
 
   const deltaSnapshot = (): NetSnapshot => {
     const next = takeSnapshot();
     const previous = lastSnapshot;
     lastSnapshot = next;
-    if (!previous || sinceKeyframe++ >= 30) {
+    if (!previous || sinceKeyframe++ >= SNAPSHOT_HZ) {
       sinceKeyframe = 0;
       return { ...next, full: true } as NetSnapshot;
     }
@@ -1020,9 +1084,9 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
     inputs[remoteSide] = hostInput;
     stepMatch(scratch, inputs, dt);
     drainEvents(scratch);
-    const me = scratch.players[localPid];
-    predictX = me.x;
-    predictZ = me.z;
+    predicted = snapshotPredicted();
+    predictX = predicted.x;
+    predictZ = predicted.z;
     predicting = true;
   };
 
@@ -1065,6 +1129,16 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
       p.moveCooldown = n.moveCooldown;
       p.dribbleHand = n.dribbleHand as typeof p.dribbleHand;
       p.outOfBoundsTimer = n.outOfBoundsTimer;
+      // Being broken down, tired or fouled is something the other player did to
+      // you, so it is seeded from the host rather than predicted — the replay
+      // then reproduces its consequences instead of inventing them.
+      p.shotElapsed = n.shotElapsed;
+      p.shotProfile = null;
+      p.handUp = n.handUp;
+      p.contestTimer = n.contestTimer;
+      p.fakeTimer = n.fakeTimer;
+      p.stealCooldown = n.stealCooldown;
+      p.reboundLock = n.reboundLock;
     }
     const sb = scratch.ball;
     sb.state = snap.ball.state === 'held' ? 'held' : 'dead';
@@ -1091,8 +1165,9 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
       errX = takeWhole ? 0 : dx;
       errZ = takeWhole ? 0 : dz;
     }
-    predictX = me.x;
-    predictZ = me.z;
+    predicted = snapshotPredicted();
+    predictX = predicted.x;
+    predictZ = predicted.z;
     predicting = true;
   };
 
@@ -1141,7 +1216,18 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
     return next;
   };
 
+  /** The newest frame applied, so a late packet cannot undo a newer one. */
+  let appliedFrame = -1;
+
   const applySnapshot = (raw: NetSnapshot) => {
+    // Socket.IO over a WebSocket is ordered, so this should never fire — but a
+    // reconnect, a proxy or a future transport can reorder, and an old frame
+    // overwriting a newer one is a rubber-band nobody would be able to explain.
+    if (typeof raw.frame === 'number' && raw.frame < appliedFrame) {
+      netTrace('state', () => `dropped a stale frame (${raw.frame} behind ${appliedFrame})`, true);
+      return;
+    }
+    if (typeof raw.frame === 'number') appliedFrame = raw.frame;
     const snap = mergeSnapshot(raw);
     // A delta with no keyframe behind it is a packet we cannot place: the next
     // keyframe is a second away at most, so it is dropped rather than guessed.
@@ -1340,28 +1426,48 @@ export function createMatchScreen(opts: MatchOptions): HTMLElement {
       const n = snap.players[i];
       let tx = n.x + n.vx * lead;
       let tz = n.z + n.vz * lead;
-      if (i === localPid && predicting) {
-        // Your own body is drawn exactly where your own keys have put it, with
-        // no easing at all — easing toward your OWN prediction is just latency
-        // you added back on purpose. The prediction is already smooth, because
-        // it came out of the same movement code the host runs.
+      if (i === localPid && predicting && predicted) {
+        // Your own player is drawn doing exactly what your own keys asked for,
+        // with no easing at all — easing toward your OWN prediction is just
+        // latency added back on purpose. It is already smooth, because it came
+        // out of the same movement code the host runs.
         //
-        // Corrections are the one thing worth softening, and `reconcile` does
-        // that where it belongs: at the moment the host's answer lands.
+        // Position corrections are the one thing worth softening, and
+        // `reconcile` does that where it belongs: when the host's answer lands.
         const settle = Math.exp(-dt / SETTLE_SECONDS);
         errX *= settle;
         errZ *= settle;
         p.x = predictX + errX;
         p.z = predictZ + errZ;
-        p.y = n.y;
-        p.facing += angleDelta(p.facing, n.facing) * Math.min(1, dt * 16);
-        p.stateTimer += dt;
-        p.moveTimer += dt;
-        if (p.state === 'shooting') p.shotElapsed += dt;
+        p.y = predicted.y;
+        p.vy = predicted.vy;
+        p.facing = predicted.facing;
+        // The action, the moment you asked for it: the shot meter, the jump,
+        // the crossover. Waiting a round trip to see your own meter start is
+        // the difference people mean by "it feels laggy on my side".
+        p.state = predicted.state;
+        p.stateTimer = predicted.stateTimer;
+        p.shotElapsed = predicted.shotElapsed;
+        p.shotProfile = predicted.shotProfile;
+        p.shotType = predicted.shotType;
+        p.shotOnMoveKey = predicted.shotOnMoveKey;
+        p.shotFromX = predicted.shotFromX;
+        p.shotFromZ = predicted.shotFromZ;
+        p.shotIsThree = predicted.shotIsThree;
+        p.moveId = predicted.moveId;
+        p.moveTimer = predicted.moveTimer;
+        p.moveDuration = predicted.moveDuration;
+        p.moveDirX = predicted.moveDirX;
+        p.moveDirZ = predicted.moveDirZ;
+        p.dribbleHand = predicted.dribbleHand;
+        p.handUp = predicted.handUp;
+        p.contestTimer = predicted.contestTimer;
+        p.fakeTimer = predicted.fakeTimer;
+        // Emotes and celebrations are cosmetic and rare; leave them on the
+        // host's clock rather than adding two more things that can mispredict.
         if (p.emoteTimer > 0) p.emoteTimer = Math.max(0, p.emoteTimer - dt);
         if (p.emoteCooldown > 0) p.emoteCooldown = Math.max(0, p.emoteCooldown - dt);
         if (p.celebrationTimer > 0) p.celebrationTimer = Math.max(0, p.celebrationTimer - dt);
-        if (p.reboundLock > 0) p.reboundLock = Math.max(0, p.reboundLock - dt);
         continue;
       }
       const jumped = Math.hypot(tx - p.x, tz - p.z) > 6;
